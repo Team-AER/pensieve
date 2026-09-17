@@ -1,0 +1,42 @@
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: pensieve
+      POSTGRES_PASSWORD: pensieve
+      POSTGRES_DB: pensieve
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pensieve"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+  web:
+    build: .
+    profiles: ["app"]
+    env_file: .env
+    environment:
+      PENSIEVE_DATABASE_URL: postgresql+asyncpg://pensieve:pensieve@db:5432/pensieve
+      PENSIEVE_REDIS_URL: redis://redis:6379/0
+    command: sh -c "alembic upgrade head && uvicorn pensieve.main:app --host 0.0.0.0 --port 8000"
+    ports: ["8000:8000"]
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_started }
+  worker:
+    build: .
+    profiles: ["app"]
+    env_file: .env
+    environment:
+      PENSIEVE_DATABASE_URL: postgresql+asyncpg://pensieve:pensieve@db:5432/pensieve
+      PENSIEVE_REDIS_URL: redis://redis:6379/0
+    command: arq pensieve.worker.WorkerSettings
+    depends_on:
+      db: { condition: service_healthy }
+      redis: { condition: service_started }
+volumes:
+  pgdata: {}
