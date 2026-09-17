@@ -30,7 +30,7 @@ async def test_chat_json_sends_headers_and_schema(gateway):
     assert body["model"] == settings.llm_fast_model
     assert body["response_format"]["type"] == "json_schema"
     assert body["response_format"]["json_schema"] == {"name": "t", "schema": SCHEMA, "strict": True}
-    assert "reasoning_effort" not in body  # fast model: reasoning off
+    assert body["reasoning_effort"] == "none"  # fast model: Qwen routes think by default, so switch it off explicitly
     assert client.usage.tokens_in == 100 and client.usage.tokens_out == 20
     assert client.take_usage() == (100, 20) and client.usage.tokens_in == 0
     await client.aclose()
