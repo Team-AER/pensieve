@@ -142,7 +142,7 @@ mark { background: var(--highlight); color: inherit; padding: 0 2px; }
   .panes { flex-direction: column; }
   .pane-nav, .pane-list, .pane-article { width: 100%; border-right: 0; }
   .pane-nav, .pane-list, .pane-article { display: none; }
-  .app[data-pane="nav"] .pane-nav, .app[data-pane="list"] .pane-list, .app[data-pane="article"] .pane-article { display: flex; }
+  .app[data-pane="nav"] .pane-nav, .app[data-pane="list"] .pane-list, .app[data-pane="article"] .pane-article { display: flex; flex: 1 1 0; min-height: 0; overflow: hidden; }
   .article { padding: 20px; }
   .article-title { font-size: 26px; }
   .keybar { display: none; }

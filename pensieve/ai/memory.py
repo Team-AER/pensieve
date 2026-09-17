@@ -267,17 +267,93 @@ async def related_history(
 # ---------------------------------------------------------------------------
 
 
+_STOPWORDS = frozenset(
+    [
+        "what",
+        "when",
+        "where",
+        "which",
+        "who",
+        "whom",
+        "whose",
+        "why",
+        "how",
+        "has",
+        "have",
+        "had",
+        "did",
+        "does",
+        "do",
+        "about",
+        "the",
+        "and",
+        "for",
+        "from",
+        "with",
+        "this",
+        "that",
+        "these",
+        "those",
+        "into",
+        "over",
+        "under",
+        "after",
+        "before",
+        "last",
+        "month",
+        "week",
+        "year",
+        "today",
+        "yesterday",
+        "recently",
+        "changed",
+        "change",
+        "read",
+        "reading",
+        "anything",
+        "something",
+        "things",
+        "there",
+        "their",
+        "they",
+        "them",
+        "was",
+        "were",
+        "been",
+        "being",
+        "are",
+        "you",
+        "your",
+        "mine",
+    ]
+)
+
+
 async def _fulltext(
     session: AsyncSession, user_id: uuid.UUID, question: str, limit: int
 ) -> list[models.Item]:
-    query = func.websearch_to_tsquery("english", question)
-    stmt = (
-        select(models.Item)
-        .where(models.Item.feed_id.in_(user_feed_ids(user_id)), models.Item.search_vector.op("@@")(query))
-        .order_by(func.ts_rank(models.Item.search_vector, query).desc())
-        .limit(limit)
+    async def run(query) -> list[models.Item]:
+        stmt = (
+            select(models.Item)
+            .where(models.Item.feed_id.in_(user_feed_ids(user_id)), models.Item.search_vector.op("@@")(query))
+            .order_by(func.ts_rank(models.Item.search_vector, query).desc())
+            .limit(limit)
+        )
+        return list((await session.scalars(stmt)).all())
+
+    # Strict pass: every term must match (websearch semantics). Questions rarely reuse the article's
+    # exact words, so when that yields little, fall back to ANY significant term, ranked by ts_rank.
+    hits = await run(func.websearch_to_tsquery("english", question))
+    if len(hits) >= max(3, limit // 4):
+        return hits
+    terms = [t for t in re.findall(r"[A-Za-z0-9][A-Za-z0-9'-]{2,}", question) if t.lower() not in _STOPWORDS]
+    if not terms:
+        return hits
+    loose = await run(
+        func.websearch_to_tsquery("english", " OR ".join(re.sub(r"[^A-Za-z0-9-]", "", t) for t in terms))
     )
-    return list((await session.scalars(stmt)).all())
+    seen = {i.id for i in hits}
+    return hits + [i for i in loose if i.id not in seen][: max(0, limit - len(hits))]
 
 
 async def ask_reading(
