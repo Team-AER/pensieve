@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}Sign in · Pensieve{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/web.css">{% endblock %}
+{% block body %}
+<main class="split">
+  <section class="split-brand">
+    <a class="brand brand-light" href="/">{{ m.icon('layers', 22) }} Pensieve</a>
+    <h1 class="split-headline">Your feeds, sorted, grouped and remembered.</h1>
+    <p class="split-sub">A self-hosted reader with a local model that files new sources, groups the same story across outlets and remembers what you cared about.</p>
+    <ul class="split-points">
+      <li>{{ m.icon('folder') }} Auto-filed folders you can overrule in one click</li>
+      <li>{{ m.icon('layers') }} One row per story, every source a tap away</li>
+      <li>{{ m.icon('sparkle') }} Daily digest and a memory you can edit</li>
+    </ul>
+  </section>
+  <section class="split-form">
+    <form method="post" action="/login" class="auth-form" hx-boost="false">
+      <h2>Sign in</h2>
+      <p class="muted">Use the account set up on this Pensieve.</p>
+      {% if error %}<div class="flash flash-error" role="alert">{{ error }}</div>{% endif %}
+      <input type="hidden" name="next" value="{{ next }}">
+      <div class="field"><label for="email">Email</label><input class="input" id="email" name="email" type="email" autocomplete="username" required value="{{ email }}" autofocus></div>
+      <div class="field"><label for="password">Password</label><input class="input" id="password" name="password" type="password" autocomplete="current-password" required></div>
+      <button class="btn btn-primary btn-lg" type="submit">Sign in</button>
+    </form>
+  </section>
+</main>
+{% endblock %}

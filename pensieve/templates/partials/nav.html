@@ -1,0 +1,53 @@
+{% import "_macros.html" as m %}
+<div class="nav-section">
+  <a class="nav-item{% if view.kind == 'unread' %} active{% endif %}" href="/reader/unread" data-key="ga"><span class="row">{{ m.icon('inbox') }} All unread</span><span class="count">{{ nav.total_unread }}</span></a>
+  <a class="nav-item{% if view.kind == 'all' %} active{% endif %}" href="/reader/all"><span class="row">{{ m.icon('layers') }} All items</span></a>
+  <a class="nav-item{% if view.kind == 'starred' %} active{% endif %}" href="/reader/starred"><span class="row">{{ m.icon('star') }} Starred</span><span class="count">{{ nav.starred }}</span></a>
+  <a class="nav-item" href="/insights"><span class="row">{{ m.icon('digest') }} Today's digest</span><span class="chip chip-ai">AI</span></a>
+</div>
+<div class="nav-section">
+  <div class="eyebrow nav-eyebrow">Folders</div>
+  {% for fn in nav.folders %}
+  <a class="nav-item{% if view.kind == 'folder' and view.key == fn.folder.id|string %} active{% endif %}" href="/reader/folder/{{ fn.folder.id }}">
+    <span class="row">{{ m.icon('folder') }} {{ fn.folder.name }}</span><span class="count">{{ fn.count }}</span>
+  </a>
+  {% if (view.kind == 'folder' and view.key == fn.folder.id|string) or (view.kind == 'feed' and fn.feeds|selectattr('0.id', 'equalto', view.feed_id)|list) %}
+    {% for feed, n in fn.feeds %}
+    <a class="nav-item nav-feed{% if view.kind == 'feed' and view.key == feed.id|string %} active{% endif %}" href="/reader/feed/{{ feed.id }}">
+      <span class="row">{% if feed.icon_url %}<img class="favicon" src="{{ feed.icon_url }}" alt="" width="14" height="14" loading="lazy">{% else %}<span class="favicon favicon-blank"></span>{% endif %}<span class="grow ellipsis">{{ feed.title or feed.url }}</span></span><span class="count">{{ n }}</span>
+    </a>
+    {% endfor %}
+  {% endif %}
+  {% else %}
+  <div class="nav-empty muted">No folders yet. <a href="/manage/folders">Create one</a>.</div>
+  {% endfor %}
+</div>
+{% if nav.inbox %}
+<div class="nav-section">
+  <div class="eyebrow nav-eyebrow">Inbox <span class="faint">unfiled</span></div>
+  {% for feed, n in nav.inbox %}
+  <a class="nav-item nav-feed{% if view.kind == 'feed' and view.key == feed.id|string %} active{% endif %}" href="/reader/feed/{{ feed.id }}">
+    <span class="row">{% if feed.icon_url %}<img class="favicon" src="{{ feed.icon_url }}" alt="" width="14" height="14" loading="lazy">{% else %}<span class="favicon favicon-blank"></span>{% endif %}<span class="grow ellipsis">{{ feed.title or feed.url }}</span></span><span class="count">{{ n }}</span>
+  </a>
+  {% endfor %}
+  <div class="inbox-notice">
+    {{ nav.inbox|length }} feed{{ 's' if nav.inbox|length != 1 }} waiting to be filed. <a href="/manage/feeds?folder=inbox">Review suggestions</a>
+  </div>
+</div>
+{% endif %}
+{% if nav.user_tags %}
+<div class="nav-section">
+  <div class="eyebrow nav-eyebrow">Tags</div>
+  {% for name, n in nav.user_tags %}
+  <a class="nav-item{% if view.kind == 'tag' and view.key == name %} active{% endif %}" href="/reader/tag/{{ name|urlencode }}"><span class="row">{{ m.icon('tag') }} {{ name }}</span><span class="count">{{ n }}</span></a>
+  {% endfor %}
+</div>
+{% endif %}
+<div class="nav-section">
+  <div class="eyebrow nav-eyebrow nav-eyebrow-ai">AI tags <span class="chip chip-ai">auto</span></div>
+  {% for name, n in nav.ai_tags %}
+  <a class="nav-item{% if view.kind == 'tag' and view.key == name %} active{% endif %}" href="/reader/tag/{{ name|urlencode }}"><span class="row">{{ m.icon('sparkle') }} {{ name }}</span><span class="count">{{ n }}</span></a>
+  {% else %}
+  <div class="nav-empty muted">Tags appear here once the tagger has run.</div>
+  {% endfor %}
+</div>

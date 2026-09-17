@@ -1,0 +1,29 @@
+{# Application shell shared by reader, search, insights and manage: topbar + mobile tab bar. #}
+{% import "_macros.html" as m %}
+{% macro topbar(user, active, q='') %}
+<header class="topbar">
+  <a class="brand" href="/">{{ m.icon('layers', 20) }} Pensieve</a>
+  <form class="search grow topbar-search" action="/search" method="get" role="search">
+    {{ m.icon('search') }}
+    <input type="search" name="q" id="global-search" placeholder="Search your reading  /" value="{{ q }}" autocomplete="off">
+  </form>
+  <nav class="topnav desktop-only" aria-label="Sections">
+    <a href="/" class="{% if active == 'reader' %}active{% endif %}">Reader</a>
+    <a href="/insights" class="{% if active == 'insights' %}active{% endif %}">Insights</a>
+    <a href="/manage/feeds" class="{% if active == 'manage' %}active{% endif %}">Manage</a>
+  </nav>
+  <form method="post" action="/logout" class="desktop-only">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="btn btn-sm" type="submit" title="Sign out {{ user.email }}">Sign out</button>
+  </form>
+</header>
+{% endmacro %}
+
+{% macro tabbar(active) %}
+<nav class="tabbar" aria-label="Sections">
+  <a href="/" class="{% if active == 'reader' %}active{% endif %}" data-pane-switch="list">{{ m.icon('inbox', 20) }}Reader</a>
+  <a href="/search" class="{% if active == 'search' %}active{% endif %}">{{ m.icon('search', 20) }}Search</a>
+  <a href="/insights" class="{% if active == 'insights' %}active{% endif %}">{{ m.icon('digest', 20) }}Insights</a>
+  <a href="/manage/feeds" class="{% if active == 'manage' %}active{% endif %}">{{ m.icon('settings', 20) }}Manage</a>
+</nav>
+{% endmacro %}

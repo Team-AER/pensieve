@@ -1,0 +1,14 @@
+{% import "_macros.html" as m %}
+{% if ai and ai.summary %}
+<section class="ai-card" aria-label="AI summary">
+  <div class="ai-card-head"><span class="eyebrow eyebrow-ai">{{ m.icon('sparkle', 14) }} Summary</span><span class="faint">{{ ai.model }}</span></div>
+  <div class="ai-summary">{% for line in ai.summary.splitlines() %}{% if line.strip() %}<p>{{ line }}</p>{% endif %}{% endfor %}</div>
+</section>
+{% elif error %}
+<div class="ai-card"><span class="muted">{{ error }}</span></div>
+{% elif pending %}
+<div class="ai-card ai-pending" hx-get="/items/{{ item.id }}/summary" hx-trigger="every 2s" hx-swap="outerHTML">
+  <span class="eyebrow eyebrow-ai">{{ m.icon('sparkle', 14) }} Summarizing</span>
+  <span class="muted">Asking the local model… this usually takes a few seconds.</span>
+</div>
+{% endif %}

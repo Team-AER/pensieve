@@ -18,6 +18,7 @@ target_metadata = Base.metadata
 
 def do_run_migrations(connection):
     connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+    connection.commit()  # end the autobegun transaction so Alembic owns (and commits) the migration one
     context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
     with context.begin_transaction():
         context.run_migrations()

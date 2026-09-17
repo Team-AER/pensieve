@@ -1,0 +1,18 @@
+{% import "_macros.html" as m %}
+{% if error is defined and error %}<div class="flash flash-error" role="alert">{{ error }}</div>{% endif %}
+{% if use_reader and item.reader_html %}
+<div class="body-mode">
+  <span class="chip">Reader view</span>
+  <form hx-post="/items/{{ item.id }}/reader-mode" hx-target="#body-{{ item.id }}" hx-swap="innerHTML"><input type="hidden" name="off" value="1"><button class="btn btn-sm" type="submit">Show feed version</button></form>
+</div>
+<div class="prose">{{ item.reader_html|safe }}</div>
+{% else %}
+<div class="prose">{{ item.content_html|safe }}</div>
+{% if item.enclosure_url %}
+<div class="enclosure">
+  {% if item.enclosure_type and item.enclosure_type.startswith('audio/') %}<audio controls preload="none" src="{{ item.enclosure_url }}"></audio>
+  {% elif item.enclosure_type and item.enclosure_type.startswith('video/') %}<video controls preload="none" src="{{ item.enclosure_url }}"></video>
+  {% else %}<a class="btn btn-sm" href="{{ item.enclosure_url }}" target="_blank" rel="noopener noreferrer" hx-boost="false">{{ m.icon('external') }} Enclosure</a>{% endif %}
+</div>
+{% endif %}
+{% endif %}

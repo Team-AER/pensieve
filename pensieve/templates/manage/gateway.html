@@ -1,0 +1,11 @@
+{% import "_macros.html" as m %}
+<div class="card-head"><h2>Gateway</h2><span class="row"><span class="dot {{ 'dot-ok' if gateway.ok else 'dot-bad' }}"></span><span class="muted">{{ 'reachable' if gateway.ok else 'unreachable' }}</span></span></div>
+<div class="muted">{{ gateway.url }}</div>
+{% if gateway.ok %}
+{% if gateway.models %}<div class="row wrap" style="margin-top:8px">{% for mdl in gateway.models %}<span class="chip">{{ mdl }}</span>{% endfor %}</div>{% endif %}
+{% else %}
+<p class="muted">Couldn't load the catalog{% if gateway.error %} ({{ gateway.error }}){% endif %}. The reader keeps working; AI features wait until the gateway is back.</p>
+{% endif %}
+<div class="row" style="margin-top:8px"><span class="faint">fast: {{ settings.llm_fast_model }}</span></div>
+<div class="row"><span class="faint">long: {{ settings.llm_long_model }}</span></div>
+<div class="row"><span class="faint">embeddings: {{ settings.llm_embedding_model }}</span></div>

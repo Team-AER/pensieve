@@ -1,0 +1,14 @@
+{% import "_macros.html" as m %}
+<div class="card-head"><h2>Safe to skip</h2>{% if safe_to_skip.count %}<span class="chip">{{ safe_to_skip.count }} items</span>{% endif %}</div>
+{% if safe_to_skip.done %}
+<p class="muted">{{ m.icon('check', 14) }} Marked {{ safe_to_skip.marked if safe_to_skip.marked is defined else safe_to_skip.count }} items as read.</p>
+{% elif safe_to_skip.count %}
+<p>{{ safe_to_skip.count }} item{{ 's' if safe_to_skip.count != 1 }}{% if safe_to_skip.story_count %} across {{ safe_to_skip.story_count }} stories{% endif %} look like repeats or low-signal for you.</p>
+{% if safe_to_skip.reason %}<p class="muted">{{ safe_to_skip.reason }}</p>{% endif %}
+<form hx-post="/insights/{{ insight.id }}/skip-read" hx-target="#safe-to-skip" hx-swap="innerHTML" method="post" action="/insights/{{ insight.id }}/skip-read">
+  {{ m.csrf_field(csrf_token) }}
+  <button class="btn btn-sm" type="submit">{{ m.icon('check-circle') }} Mark these read</button>
+</form>
+{% else %}
+<p class="muted">Nothing to skip today.</p>
+{% endif %}

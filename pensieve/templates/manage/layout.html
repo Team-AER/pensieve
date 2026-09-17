@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% import "_shell.html" as shell with context %}
+{% block title %}{% block mtitle %}Manage{% endblock %} · Pensieve{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="/static/web.css">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<meta name="csrf-token" content="{{ csrf_token }}">
+{% endblock %}
+{% block body %}
+<div class="app page" id="app" hx-headers='{"X-CSRF-Token": "{{ csrf_token }}"}'>
+  {{ shell.topbar(user, 'manage') }}
+  <div class="manage">
+    <nav class="manage-nav" aria-label="Manage">
+      <div class="eyebrow nav-eyebrow">Library</div>
+      {% for key, label, href in sections %}<a class="nav-item{% if section == key %} active{% endif %}" href="{{ href }}">{{ label }}</a>{% endfor %}
+      <div class="eyebrow nav-eyebrow">Account</div>
+      {% for key, label, href in account_sections %}{% if key != 'users' or user.role.value == 'admin' %}<a class="nav-item{% if section == key %} active{% endif %}" href="{{ href }}">{{ label }}</a>{% endif %}{% endfor %}
+      <form method="post" action="/logout" class="signout">{{ m.csrf_field(csrf_token) }}<button class="nav-item nav-button" type="submit">Sign out</button></form>
+    </nav>
+    <main class="manage-body">
+      {% if flash %}<div class="flash flash-ok" role="status">{{ flash }}</div>{% endif %}
+      {% if error %}<div class="flash flash-error" role="alert">{{ error }}</div>{% endif %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+  {{ shell.tabbar('manage') }}
+</div>
+{% endblock %}
+{% block scripts %}<script src="/static/reader.js" defer></script>{% endblock %}

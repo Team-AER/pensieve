@@ -1,0 +1,34 @@
+{% import "_macros.html" as m %}
+<div class="pane-head list-head">
+  <div class="row grow" style="flex-basis:100%">
+    <button type="button" class="btn btn-icon btn-sm mobile-only" data-pane-switch="nav" aria-label="Folders">{{ m.icon('menu') }}</button>
+    <div class="grow col" style="gap:0">
+      <div class="list-title">Search</div>
+      <div class="list-counts faint">{% if q %}{{ total }} result{{ 's' if total != 1 }} for “{{ q }}”{% else %}Search titles and text{% endif %}</div>
+    </div>
+  </div>
+</div>
+<form class="search-filters" method="get" action="/search" hx-get="/search" hx-target="#list" hx-swap="innerHTML" hx-push-url="true">
+  <div class="search"><span>{{ m.icon('search') }}</span><input type="search" name="q" value="{{ q }}" placeholder="Search" aria-label="Search query" autocomplete="off"></div>
+  <div class="filters-row">
+    <select class="input input-sm" name="feed" aria-label="Feed"><option value="">Any feed</option>{% for f in feeds %}<option value="{{ f.id }}"{% if params.feed == f.id|string %} selected{% endif %}>{{ f.title or f.url }}</option>{% endfor %}</select>
+    <select class="input input-sm" name="folder" aria-label="Folder"><option value="">Any folder</option>{% for f in folders %}<option value="{{ f.id }}"{% if params.folder == f.id|string %} selected{% endif %}>{{ f.name }}</option>{% endfor %}</select>
+    <select class="input input-sm" name="state" aria-label="State"><option value="">Any state</option><option value="unread"{% if params.state == 'unread' %} selected{% endif %}>Unread</option><option value="starred"{% if params.state == 'starred' %} selected{% endif %}>Starred</option></select>
+  </div>
+  <div class="filters-row">
+    <input class="input input-sm" type="date" name="since" value="{{ params.since }}" aria-label="From date">
+    <input class="input input-sm" type="date" name="until" value="{{ params.until }}" aria-label="To date">
+    <button class="btn btn-sm btn-primary" type="submit">Search</button>
+  </div>
+</form>
+<form class="ask-form" hx-post="/ask" hx-target="#ask-result" hx-swap="innerHTML" hx-indicator="#ask-spinner">
+  <label class="ask-toggle"><input type="checkbox" data-toggle="#ask-body" {% if q %}{% endif %}> <span class="chip chip-ai">{{ m.icon('sparkle', 12) }} Ask my reading</span></label>
+  <div id="ask-body" class="hidden col">
+    <textarea class="input textarea" name="question" rows="2" placeholder="What did I read about Postgres upgrades last month?">{{ q }}</textarea>
+    <div class="row"><button class="btn btn-ai btn-sm" type="submit">Ask</button><span id="ask-spinner" class="htmx-indicator faint">Thinking…</span></div>
+  </div>
+</form>
+<div id="ask-result"></div>
+<div class="pane-body list-body" id="list-body">
+  {% include "partials/search_rows.html" %}
+</div>

@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% import "_shell.html" as shell with context %}
+{% block title %}{{ view.title }} · Pensieve{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="/static/web.css">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<meta name="csrf-token" content="{{ csrf_token }}">
+{% endblock %}
+{% block body %}
+<div class="app" id="app" data-pane="{{ pane or 'list' }}" data-view="{{ view.name }}" hx-headers='{"X-CSRF-Token": "{{ csrf_token }}"}'>
+  {{ shell.topbar(user, 'reader') }}
+  <div class="panes">
+    <nav class="pane-nav" id="nav" aria-label="Feeds" hx-get="/reader/nav?view={{ view.name }}" hx-trigger="counts-changed from:body delay:200ms" hx-swap="innerHTML">
+      {% include "partials/nav.html" %}
+    </nav>
+    <section class="pane-list" id="list" aria-label="Items" hx-get="{{ list_url }}?{{ opts.query }}" hx-trigger="list-changed from:body, refresh-list from:body" hx-swap="innerHTML">
+      {% include "partials/list.html" %}
+    </section>
+    <section class="pane-article" id="article-pane" aria-label="Article">
+      <div class="pane-head mobile-only">
+        <button type="button" class="btn btn-sm" data-pane-switch="list">{{ m.icon('back') }} Back</button>
+      </div>
+      <div class="pane-body" id="article">
+        {% if article_html %}{{ article_html|safe }}{% else %}
+        <div class="empty-article">
+          <div class="eyebrow">Nothing open</div>
+          <p class="muted">Pick an item, or press <kbd>j</kbd> to start reading.</p>
+        </div>
+        {% endif %}
+      </div>
+    </section>
+  </div>
+  <footer class="keybar">
+    <span><kbd>j</kbd>/<kbd>k</kbd> next / previous</span>
+    <span><kbd>s</kbd> star</span>
+    <span><kbd>x</kbd> expand sources</span>
+    <span><kbd>u</kbd> unmerge</span>
+    <span><kbd>?</kbd> all shortcuts</span>
+  </footer>
+  {{ shell.tabbar('reader') }}
+</div>
+{% include "partials/shortcuts.html" %}
+{% endblock %}
+{% block scripts %}
+<script src="/static/reader.js" defer></script>
+<script>
+if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function () {}); }
+</script>
+{% endblock %}

@@ -1,0 +1,16 @@
+{% import "_macros.html" as m %}
+<section class="ai-card ask-answer" aria-live="polite">
+  <div class="ai-card-head"><span class="eyebrow eyebrow-ai">{{ m.icon('sparkle', 14) }} Ask my reading</span></div>
+  <div class="ask-q muted">{{ question }}</div>
+  {% if error %}<p class="muted">{{ error }}</p>{% endif %}
+  {% if answer %}
+  <div class="ai-summary">{% for line in answer.splitlines() %}{% if line.strip() %}<p>{{ line }}</p>{% endif %}{% endfor %}</div>
+  {% if citations %}
+  <ol class="citations">
+    {% for c in citations %}
+    <li><a href="/items/{{ c.id }}" hx-get="/items/{{ c.id }}" hx-target="#article" hx-swap="innerHTML show:#article:top">{{ c.title or '(untitled)' }}</a>{% if c.published_at is defined and c.published_at %} <span class="faint">{{ c.published_at|timeago }}</span>{% endif %}</li>
+    {% endfor %}
+  </ol>
+  {% endif %}
+  {% endif %}
+</section>

@@ -1,0 +1,32 @@
+{% extends "manage/layout.html" %}
+{% import "_macros.html" as m %}
+{% block mtitle %}API tokens{% endblock %}
+{% block content %}
+<div class="page-head"><h1>API tokens</h1><span class="muted">For Reeder, NetNewsWire, Unread and other sync clients</span></div>
+{% if new_token %}
+<div class="card section token-reveal">
+  <div class="card-head"><h2>Token created</h2><span class="chip">{{ new_token.kind }}</span></div>
+  <p class="muted">Copy it now; it won't be shown again.</p>
+  <code class="token-plain" id="new-token">{{ new_token.plaintext }}</code>
+  <p class="muted">{% if new_token.kind == 'fever' %}In your client choose Fever, endpoint <code>{{ settings.base_url }}/api/fever/</code>, email <code>{{ user.email }}</code> and this token as the password.{% else %}In your client choose Google Reader API (or FreshRSS), endpoint <code>{{ settings.base_url }}</code>, email <code>{{ user.email }}</code> and this token as the password.{% endif %}</p>
+</div>
+{% endif %}
+<form class="card section" method="post" action="/manage/tokens">{{ m.csrf_field(csrf_token) }}
+  <div class="card-head"><h2>New token</h2></div>
+  <div class="row wrap">
+    <input class="input input-sm grow" name="label" placeholder="Label, e.g. Reeder on iPhone" aria-label="Label" required>
+    <select class="input input-sm" name="kind" aria-label="Protocol"><option value="greader">Google Reader API</option><option value="fever">Fever API</option></select>
+    <button class="btn btn-primary btn-sm" type="submit">{{ m.icon('plus', 14) }} Create</button>
+  </div>
+</form>
+<div class="card table-wrap"><table class="table">
+  <thead><tr><th>Label</th><th>Protocol</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+  <tbody>
+  {% for t in tokens %}
+  <tr class="{% if t.revoked_at %}muted{% endif %}">
+    <td>{{ t.label }}</td><td><span class="chip">{{ t.kind }}</span></td><td>{{ t.created_at|timeago }}</td><td>{{ t.last_used_at|timeago if t.last_used_at else 'never' }}</td>
+    <td class="actions">{% if t.revoked_at %}<span class="faint">revoked {{ t.revoked_at|timeago }}</span>{% else %}<form method="post" action="/manage/tokens/{{ t.id }}/revoke" hx-confirm="Revoke {{ t.label }}? Clients using it stop syncing.">{{ m.csrf_field(csrf_token) }}<button class="btn btn-sm btn-danger" type="submit">Revoke</button></form>{% endif %}</td>
+  </tr>
+  {% else %}<tr><td colspan="5" class="muted">No tokens yet.</td></tr>{% endfor %}
+  </tbody></table></div>
+{% endblock %}

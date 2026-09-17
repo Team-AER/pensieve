@@ -1,0 +1,19 @@
+{% import "_macros.html" as m %}
+{% if is_starred %}
+<button type="button" class="btn btn-sm" aria-pressed="true" data-action="star" hx-post="/items/{{ item.id }}/unstar" hx-target="#toolbar-{{ item.id }}" hx-swap="innerHTML">{{ m.icon('star-filled') }} Starred</button>
+{% else %}
+<button type="button" class="btn btn-sm" data-action="star" hx-post="/items/{{ item.id }}/star" hx-target="#toolbar-{{ item.id }}" hx-swap="innerHTML">{{ m.icon('star') }} Star</button>
+{% endif %}
+{% if is_read %}
+<button type="button" class="btn btn-sm" data-action="read" hx-post="/items/{{ item.id }}/unread" hx-target="#toolbar-{{ item.id }}" hx-swap="innerHTML">{{ m.icon('circle') }} Mark unread</button>
+{% else %}
+<button type="button" class="btn btn-sm" data-action="read" hx-post="/items/{{ item.id }}/read" hx-target="#toolbar-{{ item.id }}" hx-swap="innerHTML">{{ m.icon('check-circle') }} Mark read</button>
+{% endif %}
+<button type="button" class="btn btn-sm" data-action="note" data-toggle="#note-form-{{ item.id }}">{{ m.icon('note') }} Note</button>
+<button type="button" class="btn btn-sm btn-ai" data-action="summarize" hx-post="/items/{{ item.id }}/summarize" hx-target="#summary-{{ item.id }}" hx-swap="innerHTML">{{ m.icon('sparkle') }} Summarize</button>
+<button type="button" class="btn btn-sm" data-action="reader" hx-post="/items/{{ item.id }}/reader-mode" hx-target="#body-{{ item.id }}" hx-swap="innerHTML">{{ m.icon('reader') }} Reader view</button>
+{% if item.url %}<a class="btn btn-sm" data-action="open" href="{{ item.url }}" target="_blank" rel="noopener noreferrer" hx-boost="false">{{ m.icon('external') }} Open original</a>{% endif %}
+{% if cluster and cluster.source_count > 1 %}
+<button type="button" class="btn btn-sm" data-action="unmerge" hx-post="/items/{{ item.id }}/unmerge" hx-target="#toolbar-{{ item.id }}" hx-swap="innerHTML" hx-confirm="Split this item out of its story group? Pensieve won't merge it again.">{{ m.icon('split') }} Unmerge</button>
+{% endif %}
+{% if error is defined and error %}<span class="toolbar-error" role="alert">{{ error }}</span>{% endif %}

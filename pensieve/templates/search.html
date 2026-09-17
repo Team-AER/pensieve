@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% import "_shell.html" as shell with context %}
+{% block title %}Search · Pensieve{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="/static/web.css">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<meta name="csrf-token" content="{{ csrf_token }}">
+{% endblock %}
+{% block body %}
+<div class="app" id="app" data-pane="list" data-view="search" hx-headers='{"X-CSRF-Token": "{{ csrf_token }}"}'>
+  {{ shell.topbar(user, 'reader', q) }}
+  <div class="panes">
+    <nav class="pane-nav" id="nav" aria-label="Feeds" hx-get="/reader/nav?view=search" hx-trigger="counts-changed from:body delay:200ms" hx-swap="innerHTML">
+      {% include "partials/nav.html" %}
+    </nav>
+    <section class="pane-list" id="list" aria-label="Results">
+      {% include "partials/search_list.html" %}
+    </section>
+    <section class="pane-article" id="article-pane" aria-label="Article">
+      <div class="pane-head mobile-only"><button type="button" class="btn btn-sm" data-pane-switch="list">{{ m.icon('back') }} Back</button></div>
+      <div class="pane-body" id="article">
+        {% if article_html %}{{ article_html|safe }}{% else %}
+        <div class="empty-article"><div class="eyebrow">Search</div><p class="muted">Results open here.</p></div>
+        {% endif %}
+      </div>
+    </section>
+  </div>
+  <footer class="keybar"><span><kbd>j</kbd>/<kbd>k</kbd> next / previous</span><span><kbd>s</kbd> star</span><span><kbd>/</kbd> search</span><span><kbd>?</kbd> all shortcuts</span></footer>
+  {{ shell.tabbar('search') }}
+</div>
+{% include "partials/shortcuts.html" %}
+{% endblock %}
+{% block scripts %}<script src="/static/reader.js" defer></script>{% endblock %}

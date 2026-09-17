@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% import "_shell.html" as shell with context %}
+{% block title %}{{ 'Weekly review' if kind == 'weekly' else "Today's digest" }} · Pensieve{% endblock %}
+{% block head %}
+<link rel="stylesheet" href="/static/web.css">
+<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+<meta name="csrf-token" content="{{ csrf_token }}">
+{% endblock %}
+{% block body %}
+<div class="app page" id="app" hx-headers='{"X-CSRF-Token": "{{ csrf_token }}"}'>
+  {{ shell.topbar(user, 'insights') }}
+  <main class="page-body insights" id="insight">
+    {% include "partials/insight_body.html" %}
+  </main>
+  {{ shell.tabbar('insights') }}
+</div>
+{% endblock %}
+{% block scripts %}<script src="/static/reader.js" defer></script>{% endblock %}

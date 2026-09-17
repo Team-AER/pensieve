@@ -1,0 +1,79 @@
+{% import "_macros.html" as m %}
+<div class="insights-head">
+  <div class="seg" role="tablist">
+    <a class="seg-btn{% if kind == 'daily' %} on{% endif %}" href="/insights">Daily digest</a>
+    <a class="seg-btn{% if kind == 'weekly' %} on{% endif %}" href="/insights/weekly">Weekly review</a>
+  </div>
+  {% if history %}
+  <details class="menu">
+    <summary class="btn btn-sm">Earlier</summary>
+    <div class="menu-body">{% for h in history %}<a class="menu-item" href="/insights/{{ h.id }}">{{ h.period }} · {{ h.kind }}</a>{% endfor %}</div>
+  </details>
+  {% endif %}
+</div>
+{% if queued %}<div class="flash flash-ai">{{ m.icon('sparkle', 14) }} Queued. The digest appears here once the model has read today's items.</div>{% endif %}
+{% if not insight %}
+<section class="card insight-empty">
+  <div class="eyebrow eyebrow-ai">{{ m.icon('sparkle', 14) }} {{ 'Weekly review' if kind == 'weekly' else 'Daily digest' }}</div>
+  <h1 class="insight-title">No {{ 'review' if kind == 'weekly' else 'digest' }} yet.</h1>
+  <p class="muted">Pensieve writes one every {{ 'Sunday' if kind == 'weekly' else 'morning' }} from what arrived and what you read. You can ask for one now.</p>
+  <form method="post" action="/insights/generate" hx-boost="false">
+    {{ m.csrf_field(csrf_token) }}
+    <input type="hidden" name="kind" value="{{ kind }}">
+    <button class="btn btn-ai" type="submit">{{ m.icon('sparkle') }} Generate {{ 'this week' if kind == 'weekly' else "today's digest" }}</button>
+  </form>
+</section>
+{% else %}
+<header class="insight-header">
+  <div class="eyebrow eyebrow-ai">{{ m.icon('sparkle', 14) }} {{ 'Weekly review' if insight.kind == 'weekly' else 'Daily digest' }} · {{ insight.period }}</div>
+  <h1 class="insight-title">{% if insight.kind == 'daily' %}{{ insight.period|date_long }}{% else %}{{ insight.title or insight.period }}{% endif %}</h1>
+  {% if insight.title and insight.kind == 'daily' %}<p class="insight-lede">{{ insight.title }}</p>{% endif %}
+  {% if summary %}<p class="insight-summary">{{ summary }}</p>{% endif %}
+</header>
+<div class="insight-grid">
+  <section class="card insight-card top-stories">
+    <div class="card-head"><h2>Top stories</h2><span class="faint">ranked for you</span></div>
+    <ol class="stories">
+      {% for s in top_stories %}
+      <li class="story">
+        <div class="story-rank">{{ loop.index }}</div>
+        <div class="story-body">
+          <a class="story-title" href="/items/{{ s.item_id }}">{{ s.title }}</a>
+          {% if s.why %}<div class="story-why muted">{{ s.why }}</div>{% endif %}
+          <div class="story-meta">
+            {% if s.sources %}<span class="sources">{{ s.sources }} source{{ 's' if s.sources != 1 }}</span>{% endif %}
+            {% if s.tag %}<span class="chip chip-ai">{{ s.tag }}</span>{% endif %}
+            {% if s.affinity is defined and s.affinity is not none %}<span class="affinity" title="How close this is to what you usually read"><span class="affinity-bar" style="width:{{ (s.affinity * 100)|round|int }}%"></span></span><span class="faint">{{ (s.affinity * 100)|round|int }}% match</span>{% endif %}
+          </div>
+        </div>
+      </li>
+      {% else %}
+      <li class="muted">Nothing ranked for this period.</li>
+      {% endfor %}
+    </ol>
+  </section>
+  <aside class="insight-side">
+    <section class="card insight-card">
+      <div class="card-head"><h2>Rising topics</h2><span class="faint">7 days</span></div>
+      <ul class="trends">
+        {% for t in trends %}
+        <li class="trend">
+          <div class="trend-name">{{ t.name }}</div>
+          <svg class="sparkline" viewBox="0 0 120 32" width="120" height="32" preserveAspectRatio="none" aria-hidden="true"><polyline points="{{ sparkline_points(t.series) }}" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span class="trend-delta{% if t.delta is defined and t.delta and t.delta > 0 %} up{% elif t.delta is defined and t.delta and t.delta < 0 %} down{% endif %}">{% if t.delta is defined and t.delta is not none %}{{ '+' if t.delta > 0 }}{{ t.delta }}{% endif %}</span>
+        </li>
+        {% else %}
+        <li class="muted">No trend data yet.</li>
+        {% endfor %}
+      </ul>
+    </section>
+    <section class="card insight-card" id="safe-to-skip">{% include "partials/safe_to_skip.html" %}</section>
+    <section class="card insight-card">
+      <div class="card-head"><h2>Starred, still unread</h2></div>
+      <ul class="plain-list">
+        {% for s in starred_unread %}<li><a href="/items/{{ s.item_id }}">{{ s.title }}</a></li>{% else %}<li class="muted">You're up to date on your stars.</li>{% endfor %}
+      </ul>
+    </section>
+  </aside>
+</div>
+{% endif %}

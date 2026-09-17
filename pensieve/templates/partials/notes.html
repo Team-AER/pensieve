@@ -1,0 +1,19 @@
+{% import "_macros.html" as m %}
+{% for note in notes %}
+<div class="note-card">
+  <div class="note-head"><span class="eyebrow">Note</span><span class="faint">{{ note.updated_at|timeago }}</span></div>
+  {% if note.quote %}<blockquote class="note-quote">{{ note.quote }}</blockquote>{% endif %}
+  <div class="note-body">{{ note.body }}</div>
+  <form hx-post="/items/{{ item.id }}/note" hx-target="#notes-{{ item.id }}" hx-swap="innerHTML" class="row" style="gap:6px">
+    <input type="hidden" name="note_id" value="{{ note.id }}"><input type="hidden" name="delete" value="1">
+    <button class="btn btn-sm btn-danger" type="submit" hx-confirm="Delete this note?">{{ m.icon('trash', 14) }} Delete</button>
+  </form>
+</div>
+{% endfor %}
+<form id="note-form-{{ item.id }}" class="note-form{% if not notes %} hidden{% endif %}" hx-post="/items/{{ item.id }}/note" hx-target="#notes-{{ item.id }}" hx-swap="innerHTML">
+  {% set existing = notes[-1] if notes else None %}
+  {% if existing %}<input type="hidden" name="note_id" value="{{ existing.id }}">{% endif %}
+  <div class="field"><label for="quote-{{ item.id }}">Quote (optional)</label><input class="input input-sm" id="quote-{{ item.id }}" name="quote" value="{{ existing.quote if existing else '' }}" placeholder="Paste a passage to keep"></div>
+  <div class="field"><label for="note-{{ item.id }}">Your note</label><textarea class="input textarea" id="note-{{ item.id }}" name="body" rows="3" placeholder="Why this matters, what to follow up">{{ existing.body if existing else '' }}</textarea></div>
+  <div class="row"><button class="btn btn-primary btn-sm" type="submit">Save note</button></div>
+</form>

@@ -1,0 +1,12 @@
+{% import "_macros.html" as m %}
+<div class="cluster-list">
+  <div class="cluster-head"><span class="eyebrow eyebrow-ai">{{ cluster.source_count }} sources{% if cluster.headline %} · {{ cluster.headline }}{% endif %}</span></div>
+  {% for mbr in members %}
+  <div class="cluster-row{% if mbr.is_read %} read{% endif %}" data-id="{{ mbr.item.id }}" role="button" tabindex="0" hx-get="/items/{{ mbr.item.id }}" hx-target="#article" hx-swap="innerHTML show:#article:top" hx-trigger="click consume">
+    <span class="dot" aria-hidden="true"></span>
+    <span class="row" style="gap:6px">{% if mbr.feed.icon_url %}<img class="favicon" src="{{ mbr.feed.icon_url }}" alt="" width="14" height="14">{% endif %}<span class="muted">{{ mbr.feed.title or mbr.feed.url }}</span></span>
+    <span class="grow ellipsis">{{ mbr.item.title }}</span>
+    <time class="faint">{{ mbr.item.published_at|timeago }}</time>
+  </div>
+  {% endfor %}
+</div>

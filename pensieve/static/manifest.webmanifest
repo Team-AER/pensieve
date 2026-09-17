@@ -1,1 +1,1 @@
-{ "name": "Pensieve", "short_name": "Pensieve", "start_url": "/", "display": "standalone", "background_color": "#F3F1EA", "theme_color": "#F3F1EA", "icons": [] }
+{ "name": "Pensieve", "short_name": "Pensieve", "start_url": "/", "scope": "/", "display": "standalone", "background_color": "#F3F1EA", "theme_color": "#F3F1EA", "icons": [ { "src": "/static/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" } ] }

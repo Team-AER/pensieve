@@ -7,6 +7,8 @@ Do not add columns ad hoc: propose them, then add a migration under alembic/vers
 from __future__ import annotations
 
 import enum
+import os
+import time
 import uuid
 from datetime import datetime
 
@@ -37,6 +39,15 @@ EMBEDDING_DIMS = 768
 
 def _uuid() -> uuid.UUID:
     return uuid.uuid4()
+
+
+def _uuid7() -> uuid.UUID:
+    """Time-ordered UUID (RFC 9562 v7). Items use it so ids derived from the first 8 bytes
+    (the sync APIs' int64 item ids) increase over time and clients' since_id paging is correct."""
+    ms = time.time_ns() // 1_000_000
+    rand = int.from_bytes(os.urandom(10), "big")
+    value = (ms << 80) | (0x7 << 76) | ((rand >> 62) & 0xFFF) << 64 | (0b10 << 62) | (rand & ((1 << 62) - 1))
+    return uuid.UUID(int=value)
 
 
 class TimestampMixin:
@@ -81,7 +92,8 @@ class ApiToken(TimestampMixin, Base):
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     label: Mapped[str] = mapped_column(String(120), nullable=False)
     token_hash: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
-    """SHA-256 hex of the plaintext token. Plaintext is shown once at creation."""
+    """SHA-256 hex of the plaintext token (kind greader/web). For kind 'fever' it is md5("email:plaintext"),
+    which is what the Fever protocol's api_key is; see pensieve/syncapi/fever.py. Plaintext is shown once."""
     kind: Mapped[str] = mapped_column(String(20), nullable=False, default="greader")
     """'greader' | 'fever' | 'web'."""
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -175,7 +187,7 @@ class Item(Base):
         Index("ix_items_search", "search_vector", postgresql_using="gin"),
     )
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid7)
     feed_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("feeds.id", ondelete="CASCADE"), nullable=False)
     guid: Mapped[str] = mapped_column(String(2048), nullable=False)
     url: Mapped[str | None] = mapped_column(String(2048))

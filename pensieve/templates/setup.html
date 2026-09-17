@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}Set up · Pensieve{% endblock %}
+{% block head %}<link rel="stylesheet" href="/static/web.css">{% endblock %}
+{% block body %}
+<main class="split">
+  <section class="split-brand">
+    <a class="brand brand-light" href="/">{{ m.icon('layers', 22) }} Pensieve</a>
+    <h1 class="split-headline">Your feeds, sorted, grouped and remembered.</h1>
+    <p class="split-sub">This is a fresh install. Create the first account; it becomes the administrator.</p>
+  </section>
+  <section class="split-form">
+    <form method="post" action="/setup" class="auth-form" hx-boost="false">
+      <h2>Create your account</h2>
+      {% if error %}<div class="flash flash-error" role="alert">{{ error }}</div>{% endif %}
+      <div class="field"><label for="display_name">Name</label><input class="input" id="display_name" name="display_name" value="{{ display_name }}" autocomplete="name"></div>
+      <div class="field"><label for="email">Email</label><input class="input" id="email" name="email" type="email" required value="{{ email }}" autocomplete="username"></div>
+      <div class="field"><label for="password">Password</label><input class="input" id="password" name="password" type="password" required minlength="8" autocomplete="new-password"></div>
+      <div class="field"><label for="password_confirm">Confirm password</label><input class="input" id="password_confirm" name="password_confirm" type="password" required minlength="8" autocomplete="new-password"></div>
+      <button class="btn btn-primary btn-lg" type="submit">Create account</button>
+    </form>
+  </section>
+</main>
+{% endblock %}

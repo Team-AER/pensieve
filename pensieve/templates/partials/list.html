@@ -1,0 +1,44 @@
+{% import "_macros.html" as m %}
+<div class="pane-head list-head">
+  <div class="row grow" style="flex-basis:100%">
+    <button type="button" class="btn btn-icon btn-sm mobile-only" data-pane-switch="nav" aria-label="Folders">{{ m.icon('menu') }}</button>
+    <div class="grow col" style="gap:0">
+      <div class="list-title">{{ view.title }}</div>
+      <div class="list-counts faint">{{ unread }} unread · {{ total }} total</div>
+    </div>
+    <button type="button" class="btn btn-icon btn-sm desktop-only" title="Refresh (r)" hx-get="{{ list_url }}?{{ opts.query }}" hx-target="#list" hx-swap="innerHTML">{{ m.icon('refresh') }}</button>
+  </div>
+  <div class="seg" role="group" aria-label="Grouping">
+    <a class="seg-btn{% if opts.grouped %} on{% endif %}" href="{{ view.path }}?grouped=1&sort={{ opts.sort }}" hx-get="{{ list_url }}?grouped=1&sort={{ opts.sort }}" hx-target="#list" hx-swap="innerHTML" hx-push-url="{{ view.path }}?grouped=1&sort={{ opts.sort }}">Grouped</a>
+    <a class="seg-btn{% if not opts.grouped %} on{% endif %}" href="{{ view.path }}?grouped=0&sort={{ opts.sort }}" hx-get="{{ list_url }}?grouped=0&sort={{ opts.sort }}" hx-target="#list" hx-swap="innerHTML" hx-push-url="{{ view.path }}?grouped=0&sort={{ opts.sort }}">Flat</a>
+  </div>
+  <div class="seg" role="group" aria-label="Sort">
+    <a class="seg-btn{% if opts.sort == 'newest' %} on{% endif %}" href="{{ view.path }}?grouped={{ 1 if opts.grouped else 0 }}&sort=newest" hx-get="{{ list_url }}?grouped={{ 1 if opts.grouped else 0 }}&sort=newest" hx-target="#list" hx-swap="innerHTML" hx-push-url="{{ view.path }}?grouped={{ 1 if opts.grouped else 0 }}&sort=newest">Newest</a>
+    <a class="seg-btn{% if opts.sort == 'oldest' %} on{% endif %}" href="{{ view.path }}?grouped={{ 1 if opts.grouped else 0 }}&sort=oldest" hx-get="{{ list_url }}?grouped={{ 1 if opts.grouped else 0 }}&sort=oldest" hx-target="#list" hx-swap="innerHTML" hx-push-url="{{ view.path }}?grouped={{ 1 if opts.grouped else 0 }}&sort=oldest">Oldest</a>
+  </div>
+  <details class="menu">
+    <summary class="btn btn-sm" title="Mark all as read">{{ m.icon('check-circle') }}<span class="desktop-only">Mark read</span></summary>
+    <div class="menu-body">
+      <form method="post" action="{{ view.path }}/mark-read" hx-post="{{ view.path }}/mark-read?{{ opts.query }}" hx-target="#list" hx-swap="innerHTML">
+        {{ m.csrf_field(csrf_token) }}
+        <button class="menu-item" type="submit" name="older_than" value="">Everything in {{ view.title }}</button>
+        <button class="menu-item" type="submit" name="older_than" value="1d">Older than a day</button>
+        <button class="menu-item" type="submit" name="older_than" value="1w">Older than a week</button>
+      </form>
+    </div>
+  </details>
+</div>
+{% if undo_ids is defined and undo_ids %}
+<form class="undo-bar" method="post" action="/items/undo-read" hx-post="/items/undo-read?{{ opts.query }}" hx-target="#list" hx-swap="innerHTML">
+  {{ m.csrf_field(csrf_token) }}
+  <input type="hidden" name="ids" value="{{ undo_ids|join(',') }}">
+  <input type="hidden" name="view" value="{{ view.name }}">
+  <span>Marked {{ undo_ids|length }} item{{ 's' if undo_ids|length != 1 }} as read.</span>
+  <button class="btn btn-sm" type="submit">Undo</button>
+</form>
+{% elif undo_ids is defined %}
+<div class="undo-bar"><span class="muted">Nothing left to mark read.</span></div>
+{% endif %}
+<div class="pane-body list-body" id="list-body" data-list-url="{{ list_url }}?{{ opts.query }}">
+  {% include "partials/rows.html" %}
+</div>

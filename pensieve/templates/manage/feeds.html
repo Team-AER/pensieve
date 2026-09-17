@@ -1,0 +1,67 @@
+{% extends "manage/layout.html" %}
+{% import "_macros.html" as m %}
+{% block mtitle %}Feeds{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Feeds</h1><span class="muted">{{ rows|length }} subscription{{ 's' if rows|length != 1 }}</span></div>
+<form class="card add-feed" method="post" action="/manage/feeds">
+  {{ m.csrf_field(csrf_token) }}
+  <div class="field grow"><label for="url">Add a feed or site</label><input class="input input-sm" id="url" name="url" type="url" placeholder="https://example.com/feed.xml or https://example.com" required></div>
+  <div class="field"><label for="folder_id">Folder</label><select class="input input-sm" id="folder_id" name="folder_id"><option value="">Let AI file it</option>{% for f in folders %}<option value="{{ f.id }}">{{ f.name }}</option>{% endfor %}</select></div>
+  <button class="btn btn-primary" type="submit">{{ m.icon('plus') }} Subscribe</button>
+</form>
+<form class="filters-row table-filters" method="get" action="/manage/feeds">
+  <div class="search"><span>{{ m.icon('search') }}</span><input type="search" name="q" value="{{ q }}" placeholder="Filter feeds" aria-label="Filter feeds"></div>
+  <select class="input input-sm" name="folder" aria-label="Folder" onchange="this.form.requestSubmit()">
+    <option value="">All folders</option><option value="inbox"{% if folder == 'inbox' %} selected{% endif %}>Inbox (unfiled)</option>
+    {% for f in folders %}<option value="{{ f.id }}"{% if folder == f.id|string %} selected{% endif %}>{{ f.name }}</option>{% endfor %}
+  </select>
+  <button class="btn btn-sm" type="submit">Filter</button>
+</form>
+<div class="card table-wrap">
+<table class="table">
+  <thead><tr><th>Feed</th><th>Folder</th><th>Health</th><th class="num">Open rate</th><th class="num">Poll</th><th></th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+  <tr id="feed-{{ r.feed.id }}">
+    <td>
+      <div class="row">{% if r.feed.icon_url %}<img class="favicon" src="{{ r.feed.icon_url }}" alt="" width="14" height="14">{% else %}<span class="favicon favicon-blank"></span>{% endif %}<a href="/reader/feed/{{ r.feed.id }}">{{ r.feed.title or r.feed.url }}</a>{% if r.feed.paused %}<span class="chip">paused</span>{% endif %}</div>
+      <div class="faint ellipsis feed-url">{{ r.feed.url }}</div>
+    </td>
+    <td>
+      {% if r.folder_name %}{{ r.folder_name }}
+      {% elif r.suggested_name %}
+        <form class="row" method="post" action="/manage/feeds/{{ r.feed.id }}/accept-suggestion">{{ m.csrf_field(csrf_token) }}
+          <span class="chip chip-ai" title="AI suggestion{% if r.feed.suggested_folder_confidence %}, {{ (r.feed.suggested_folder_confidence * 100)|round|int }}% confident{% endif %}">{{ m.icon('sparkle', 12) }}{{ r.suggested_name }} · suggested</span>
+          <button class="btn btn-sm btn-accent" type="submit">Accept</button>
+        </form>
+      {% else %}<span class="muted">Inbox</span>{% endif %}
+    </td>
+    <td><span class="dot {{ r.dot }}" title="{{ r.health }}"></span> <span class="muted">{{ r.health|truncate(40) }}</span></td>
+    <td class="num">{% if r.open_rate is not none %}{{ (r.open_rate * 100)|round|int }}%{% else %}<span class="faint">–</span>{% endif %}</td>
+    <td class="num">{{ r.feed.fetch_interval_min }}m</td>
+    <td class="actions">
+      <details class="menu menu-right">
+        <summary class="btn btn-sm btn-icon" aria-label="Feed actions">…</summary>
+        <div class="menu-body">
+          <form method="post" action="/manage/feeds/{{ r.feed.id }}/rename" class="menu-form">{{ m.csrf_field(csrf_token) }}<input class="input input-sm" name="title" value="{{ r.feed.title }}" aria-label="Title"><button class="btn btn-sm" type="submit">Rename</button></form>
+          <form method="post" action="/manage/feeds/{{ r.feed.id }}/move" class="menu-form">{{ m.csrf_field(csrf_token) }}
+            <select class="input input-sm" name="folder_id" aria-label="Move to folder"><option value="">Inbox</option>{% for f in folders %}<option value="{{ f.id }}"{% if r.feed.folder_id == f.id %} selected{% endif %}>{{ f.name }}</option>{% endfor %}</select>
+            <button class="btn btn-sm" type="submit">Move</button>
+          </form>
+          {% if r.feed.paused %}
+          <form method="post" action="/manage/feeds/{{ r.feed.id }}/resume">{{ m.csrf_field(csrf_token) }}<button class="menu-item" type="submit">{{ m.icon('play', 14) }} Resume</button></form>
+          {% else %}
+          <form method="post" action="/manage/feeds/{{ r.feed.id }}/pause">{{ m.csrf_field(csrf_token) }}<button class="menu-item" type="submit">{{ m.icon('pause', 14) }} Pause</button></form>
+          {% endif %}
+          <form method="post" action="/manage/feeds/{{ r.feed.id }}/unsubscribe" hx-confirm="Unsubscribe from {{ r.feed.title or r.feed.url }}? Its items and your notes on them will be deleted." onsubmit="return this.hasAttribute('hx-confirm') && window.htmx ? true : confirm('Unsubscribe?')">{{ m.csrf_field(csrf_token) }}<button class="menu-item danger" type="submit">{{ m.icon('trash', 14) }} Unsubscribe</button></form>
+        </div>
+      </details>
+    </td>
+  </tr>
+  {% else %}
+  <tr><td colspan="6" class="muted">No feeds yet. Add one above or <a href="/manage/import">import an OPML file</a>.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

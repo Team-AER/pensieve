@@ -31,8 +31,9 @@ class Settings(BaseSettings):
     llm_base_url: str = "http://llm-proxy.cls/v1"
     llm_api_key: str = "unused"  # gateway overwrites Authorization; SDK still wants a value
     llm_catalog_url: str = "http://llm-proxy.cls/catalog.json"
-    llm_fast_model: str = "google/gemma-4-12B-it-qat-w4a16-ct"  # tagging, content type, cluster headline
+    llm_fast_model: str = "qwen3.8:27b-iq4_xs"  # tagging, content type, cluster headline (reasoning off)
     llm_long_model: str = "Qwen/Qwen3.8-Flash-Next"  # digest, weekly review, profile, ask my reading
+    llm_fast_reasoning_effort: str | None = "none"  # Qwen routes think by default; short structured jobs must not
     llm_embedding_model: str = "nomic-embed-text"
     llm_embedding_dims: int = 768  # fixed by the pgvector column; changing it needs a migration
     llm_timeout_s: float = 120.0

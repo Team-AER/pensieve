@@ -1,0 +1,43 @@
+{% extends "manage/layout.html" %}
+{% import "_macros.html" as m %}
+{% block mtitle %}Folders and tags{% endblock %}
+{% block content %}
+<div class="page-head"><h1>Folders and tags</h1></div>
+<div class="two-col">
+<section class="card section">
+  <div class="card-head"><h2>Folders</h2><span class="faint">drag to reorder</span></div>
+  <form method="post" action="/manage/folders" class="row">{{ m.csrf_field(csrf_token) }}<input class="input input-sm grow" name="name" placeholder="New folder" required aria-label="New folder name"><button class="btn btn-sm btn-primary" type="submit">{{ m.icon('plus', 14) }} Add</button></form>
+  <form id="folder-order" method="post" action="/manage/folders/reorder">{{ m.csrf_field(csrf_token) }}<input type="hidden" name="order" id="folder-order-value">
+    <ul class="sortable" data-sortable="#folder-order-value" data-submit="#folder-order">
+    {% for f in folders %}
+      <li class="sortable-row" draggable="true" data-id="{{ f.id }}">
+        <span class="handle" aria-hidden="true">⋮⋮</span>
+        <form method="post" action="/manage/folders/{{ f.id }}/rename" class="row grow">{{ m.csrf_field(csrf_token) }}<input class="input input-sm grow" name="name" value="{{ f.name }}" aria-label="Folder name"><button class="btn btn-sm" type="submit">Rename</button></form>
+        <span class="faint">{{ feed_counts.get(f.id, 0) }} feeds</span>
+        {% if f.ai_suggested %}<span class="chip chip-ai">AI</span>{% endif %}
+        <form method="post" action="/manage/folders/{{ f.id }}/delete" hx-confirm="Delete folder {{ f.name }}? Its feeds move to Inbox.">{{ m.csrf_field(csrf_token) }}<button class="btn btn-sm btn-icon btn-danger" type="submit" aria-label="Delete folder">{{ m.icon('trash', 14) }}</button></form>
+      </li>
+    {% else %}<li class="muted">No folders yet.</li>{% endfor %}
+    </ul>
+  </form>
+</section>
+<section class="card section">
+  <div class="card-head"><h2>Tags</h2><span class="faint">AI tags are the tagger's label set</span></div>
+  <form method="post" action="/manage/tags" class="col">{{ m.csrf_field(csrf_token) }}
+    <div class="row"><input class="input input-sm grow" name="name" placeholder="New tag" required aria-label="Tag name"><select class="input input-sm" name="kind" aria-label="Kind"><option value="user">user</option><option value="ai">ai</option></select></div>
+    <div class="row"><input class="input input-sm grow" name="description" placeholder="Description the tagger uses (for ai tags)" aria-label="Description"><button class="btn btn-sm btn-primary" type="submit">{{ m.icon('plus', 14) }} Add</button></div>
+  </form>
+  <ul class="plain-list tags-manage">
+  {% for t in tags %}
+    <li class="tag-row">
+      <form method="post" action="/manage/tags/{{ t.id }}/update" class="col grow">{{ m.csrf_field(csrf_token) }}
+        <div class="row"><span class="chip{% if t.kind == 'ai' %} chip-ai{% endif %}">{% if t.kind == 'ai' %}{{ m.icon('sparkle', 12) }}{% else %}{{ m.icon('tag', 12) }}{% endif %}{{ t.name }}</span><input class="input input-sm grow" name="name" value="{{ t.name }}" aria-label="Tag name"><select class="input input-sm" name="kind" aria-label="Kind"><option value="user"{% if t.kind == 'user' %} selected{% endif %}>user</option><option value="ai"{% if t.kind == 'ai' %} selected{% endif %}>ai</option></select></div>
+        <div class="row"><input class="input input-sm grow" name="description" value="{{ t.description }}" placeholder="Description" aria-label="Description"><button class="btn btn-sm" type="submit">Save</button></div>
+      </form>
+      <form method="post" action="/manage/tags/{{ t.id }}/delete" hx-confirm="Delete tag {{ t.name }}?">{{ m.csrf_field(csrf_token) }}<button class="btn btn-sm btn-icon btn-danger" type="submit" aria-label="Delete tag">{{ m.icon('trash', 14) }}</button></form>
+    </li>
+  {% else %}<li class="muted">No tags yet.</li>{% endfor %}
+  </ul>
+</section>
+</div>
+{% endblock %}
