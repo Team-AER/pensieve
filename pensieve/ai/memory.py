@@ -19,7 +19,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pensieve import models
 from pensieve.ai import prompts
 from pensieve.ai.client import LLMClient, get_client
-from pensieve.ai.common import ai_on, is_batch_read, mark_all_batch_times, read_states, user_feed_ids, window
+from pensieve.ai.common import (
+    ai_on,
+    is_batch_read,
+    mark_all_batch_times,
+    read_states,
+    user_feed_ids,
+    utcnow,
+    window,
+)
 from pensieve.ai.embeddings import embed_items, get_vectors, nearest
 from pensieve.config import get_settings
 
@@ -27,6 +35,11 @@ PROFILE_DAYS = 90
 PROFILE_MAX_LINES = 40
 ASK_TOP_K = 20
 ASK_EXCERPT_CHARS = 1200
+ASK_INSIGHT_KIND = "ask"
+NO_HISTORY_PREAMBLE = (
+    "You have not read or starred anything yet, so this answer draws on everything in your subscriptions.\n\n"
+)
+MEMORY_OFF_TEXT = "Reader memory is switched off in your AI settings, so there is nothing to ask."
 
 
 @dataclass
@@ -40,6 +53,8 @@ class RelatedItem:
 class Answer:
     text: str
     citations: list[models.Item] = field(default_factory=list)
+    from_history: bool = True
+    """False when the user has no read/starred history and the whole subscription pool was searched."""
 
 
 # ---------------------------------------------------------------------------
@@ -179,6 +194,7 @@ async def refresh_profile(
         max_tokens=1200,
         workflow="profile",
         name="profile",
+        reasoning=get_settings().llm_digest_reasoning,
     )
     body = _clip_lines(str(result["profile_text"]))
     diff = "".join(
@@ -330,8 +346,14 @@ _STOPWORDS = frozenset(
 
 
 async def _fulltext(
-    session: AsyncSession, user_id: uuid.UUID, question: str, limit: int
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    question: str,
+    limit: int,
+    only_item_ids: list[uuid.UUID] | None = None,
 ) -> list[models.Item]:
+    """Full-text candidates, restricted to ``only_item_ids`` (the read/starred pool) when given."""
+
     async def run(query) -> list[models.Item]:
         stmt = (
             select(models.Item)
@@ -339,6 +361,8 @@ async def _fulltext(
             .order_by(func.ts_rank(models.Item.search_vector, query).desc())
             .limit(limit)
         )
+        if only_item_ids is not None:
+            stmt = stmt.where(models.Item.id.in_(only_item_ids))
         return list((await session.scalars(stmt)).all())
 
     # Strict pass: every term must match (websearch semantics). Questions rarely reuse the article's
@@ -359,15 +383,20 @@ async def _fulltext(
 async def ask_reading(
     session: AsyncSession, user: models.User, question: str, client: LLMClient | None = None
 ) -> Answer:
+    """Answer from the read/starred pool; only a user with no history at all is answered from every
+    subscribed item (and told so). Each Q&A is kept as an ``insights`` row of kind ``ask``."""
+    if not ai_on(user, "memory"):
+        return Answer(text=MEMORY_OFF_TEXT, citations=[])
     client = client or get_client()
     settings = get_settings()
     pool = await _history_pool(session, user.id)
+    from_history = bool(pool)
     candidates: list[models.Item] = []
     qvec = await client.embed([question], workflow="ask")
     if qvec:
         rows = await nearest(session, user, qvec[0], limit=ASK_TOP_K, only_item_ids=pool or None)
         candidates.extend(i for i, _ in rows)
-    candidates.extend(await _fulltext(session, user.id, question, ASK_TOP_K))
+    candidates.extend(await _fulltext(session, user.id, question, ASK_TOP_K, only_item_ids=pool or None))
     seen: set[uuid.UUID] = set()
     unique: list[models.Item] = []
     for it in candidates:
@@ -375,7 +404,13 @@ async def ask_reading(
             seen.add(it.id)
             unique.append(it)
     if not unique:
-        return Answer(text="I could not find anything in your reading that answers that.", citations=[])
+        answer = Answer(
+            text="I could not find anything in your reading that answers that.",
+            citations=[],
+            from_history=from_history,
+        )
+        await _store_ask(session, user.id, question, answer)
+        return answer
 
     feeds = {
         f.id: f.title
@@ -405,7 +440,31 @@ async def ask_reading(
     cited |= {int(m) for m in re.findall(r"\[(\d+)\]", text)}
     by_n = {n: unique[n - 1] for n, *_ in excerpts}
     citations = [by_n[n] for n in sorted(cited) if n in by_n]
-    return Answer(text=text, citations=citations)
+    if not from_history:
+        text = NO_HISTORY_PREAMBLE + text
+    answer = Answer(text=text, citations=citations, from_history=from_history)
+    await _store_ask(session, user.id, question, answer)
+    return answer
+
+
+async def _store_ask(session: AsyncSession, user_id: uuid.UUID, question: str, answer: Answer) -> None:
+    """Persist one Q&A as an ``insights`` row (kind ``ask``; period = UTC timestamp, unique per user)."""
+    session.add(
+        models.Insight(
+            user_id=user_id,
+            kind=ASK_INSIGHT_KIND,
+            period=utcnow().strftime("%Y%m%d%H%M%S%f"),
+            title=question[:300],
+            body={
+                "question": question,
+                "answer": answer.text,
+                "citations": [str(i.id) for i in answer.citations],
+                "from_history": answer.from_history,
+            },
+            item_refs=[i.id for i in answer.citations],
+        )
+    )
+    await session.flush()
 
 
 # ---------------------------------------------------------------------------

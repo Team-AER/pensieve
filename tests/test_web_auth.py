@@ -1,7 +1,9 @@
+# ruff: noqa: F811  (fixtures imported from test_web_support are used as test parameters)
 from sqlalchemy import select
 
 from pensieve import models
-from tests.test_web_support import HTML, login
+from pensieve.web.templating import make_csrf
+from tests.test_web_support import HTML, login, login_form, memory_limiter  # noqa: F401
 
 
 async def test_setup_creates_first_admin(client, session):
@@ -30,7 +32,7 @@ async def test_setup_validates(client, session):
 
 
 async def test_login_sets_cookie_and_wrong_password_fails(client, user):
-    r = await client.post("/login", data={"email": user.email, "password": "wrong"})
+    r = await client.post("/login", data=login_form(user.email, "wrong"))
     assert r.status_code == 401 and "email and password don" in r.text
     assert "pensieve_session" not in r.cookies
     headers = await login(client, user)
@@ -46,11 +48,11 @@ async def test_login_page_renders_split_layout(client, user):
 
 
 async def test_next_only_relative(client, user):
-    r = await client.post("/login", data={"email": user.email, "password": "password123", "next": "https://evil.example"})
+    r = await client.post("/login", data=login_form(user.email, "password123", next="https://evil.example"))
     assert r.headers["location"] == "/"
-    r = await client.post("/login", data={"email": user.email, "password": "password123", "next": "//evil.example"})
+    r = await client.post("/login", data=login_form(user.email, "password123", next="//evil.example"))
     assert r.headers["location"] == "/"
-    r = await client.post("/login", data={"email": user.email, "password": "password123", "next": "/reader/starred"})
+    r = await client.post("/login", data=login_form(user.email, "password123", next="/reader/starred"))
     assert r.headers["location"] == "/reader/starred"
 
 
@@ -62,11 +64,55 @@ async def test_unauthenticated_redirects_to_login(client, user):
 
 
 async def test_logout_clears_session(client, user):
-    await login(client, user)
+    headers = await login(client, user)
+    # Logout needs the CSRF token too (a third-party page must not be able to sign the user out).
     r = await client.post("/logout")
+    assert r.status_code == 403
+    r = await client.post("/logout", headers=headers)
     assert r.status_code == 303 and r.headers["location"] == "/login"
     r = await client.get("/", headers=HTML)
     assert r.status_code == 303
+
+
+async def test_login_requires_anonymous_csrf_token(client, user):
+    r = await client.post("/login", data={"email": user.email, "password": "password123"})
+    assert r.status_code == 403 and "pensieve_session" not in r.cookies
+    r = await client.get("/login")
+    assert 'name="csrf_token"' in r.text
+
+
+async def test_login_rate_limit_blocks_after_failures(client, user, memory_limiter):
+    memory_limiter.attempts = 3
+    for _ in range(3):
+        r = await client.post("/login", data=login_form(user.email, "wrong"))
+        assert r.status_code == 401
+    r = await client.post("/login", data=login_form(user.email, "wrong"))
+    assert r.status_code == 429 and int(r.headers["Retry-After"]) >= 1
+    # Even the right password is refused while blocked; another email is unaffected.
+    r = await client.post("/login", data=login_form(user.email, "password123"))
+    assert r.status_code == 429
+    r = await client.post("/login", data=login_form("someone-else@example.com", "wrong"))
+    assert r.status_code == 401
+    await memory_limiter.reset(("127.0.0.1", user.email))
+    memory_limiter._hits.clear()
+    r = await client.post("/login", data=login_form(user.email, "password123"))
+    assert r.status_code == 303
+    # Success resets the counter: three more wrong tries are needed before blocking again.
+    await client.post("/logout", headers={"X-CSRF-Token": make_csrf(user.id)})
+    for _ in range(3):
+        assert (await client.post("/login", data=login_form(user.email, "wrong"))).status_code == 401
+    assert (await client.post("/login", data=login_form(user.email, "wrong"))).status_code == 429
+
+
+async def test_security_headers_present(client, user):
+    r = await client.get("/login")
+    csp = r.headers["content-security-policy"]
+    assert "default-src 'self'" in csp and "frame-ancestors 'none'" in csp and "frame-src https://www.youtube.com" in csp
+    assert r.headers["x-content-type-options"] == "nosniff"
+    assert r.headers["referrer-policy"] == "strict-origin-when-cross-origin"
+    assert r.headers["x-frame-options"] == "DENY"
+    assert "strict-transport-security" not in r.headers  # session_cookie_secure is False on the LAN
+    assert r.headers["content-security-policy"] == csp
 
 
 async def test_post_without_csrf_is_rejected(client, session, user):

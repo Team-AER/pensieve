@@ -11,15 +11,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from pensieve import models
 from pensieve.ai import prompts
-from pensieve.ai.client import LLMClient, LLMError, get_client
+from pensieve.ai.client import LLMClient, LLMError, get_client, validate_schema
 from pensieve.ai.common import ai_on, utcnow
 from pensieve.config import get_settings
 
 log = logging.getLogger(__name__)
 
 AUTO_FILE_CONFIDENCE = 0.9
-TAG_BATCH = 10
-TAG_TEXT_CHARS = 1500
+TAG_BATCH = 5
+TAG_TEXT_CHARS = 700  # title + lead paragraph is enough to tag; the fast model is slow on long batches
+TAG_TOKENS_PER_ITEM = 160
+TAG_TOKENS_HEADROOM = 200
 FEW_SHOT_CORRECTIONS = 8
 
 DEFAULT_TAGS: list[tuple[str, str]] = [
@@ -113,10 +115,45 @@ async def ensure_vocabulary(session: AsyncSession, user: models.User) -> list[mo
 # ---------------------------------------------------------------------------
 
 
+async def filing_examples(
+    session: AsyncSession,
+    user: models.User,
+    folder_names: dict[uuid.UUID, str],
+    limit: int = FEW_SHOT_CORRECTIONS,
+) -> list[tuple[str, str | None, str | None]]:
+    """Few-shot rows from the user's latest feed_folder corrections: (feed title, AI folder, reader's folder).
+
+    Corrections store folder ids (``folder_id`` field) or free names; ids are resolved through ``folder_names``
+    and a folder deleted since is rendered as its id-less "none".
+    """
+    stmt = (
+        select(models.Correction, models.Feed.title)
+        .join(models.Feed, models.Feed.id == models.Correction.target_id)
+        .where(models.Correction.user_id == user.id, models.Correction.target_type == "feed_folder")
+        .order_by(models.Correction.created_at.desc())
+        .limit(limit)
+    )
+
+    def name(value: str | None) -> str | None:
+        if not value:
+            return None
+        try:
+            return folder_names.get(uuid.UUID(value))
+        except ValueError:
+            return value
+
+    return [(title, name(c.old_value), name(c.new_value)) for c, title in (await session.execute(stmt)).all()]
+
+
 async def file_feed(
     session: AsyncSession, user: models.User, feed: models.Feed, client: LLMClient | None = None
 ) -> models.Folder | None:
-    """Suggest (and at high confidence apply) a folder for ``feed``. Returns the suggested folder or None."""
+    """Suggest (and at high confidence apply) a folder for ``feed``. Returns the suggested folder or None.
+
+    A *new* folder is only created when confidence is at least ``AUTO_FILE_CONFIDENCE``; a low-confidence
+    proposal for a name that does not exist yet is logged and reported in the job note but not materialised
+    (``feeds`` has no free-text column to park the name in; see the package report).
+    """
     if not ai_on(user):
         return None
     client = client or get_client()
@@ -140,10 +177,11 @@ async def file_feed(
         ).all()
     )
     by_name = {f.name.lower(): f for f in folders}
+    examples = await filing_examples(session, user, {f.id: f.name for f in folders})
     result = await client.chat_json(
         settings.llm_fast_model,
         prompts.FEED_FILING_SYSTEM,
-        prompts.feed_filing_user(feed.title, feed.description, titles, [f.name for f in folders]),
+        prompts.feed_filing_user(feed.title, feed.description, titles, [f.name for f in folders], examples),
         prompts.FEED_FILING_SCHEMA,
         max_tokens=200,
         workflow="file_feed",
@@ -159,10 +197,12 @@ async def file_feed(
         name = (new_name or folder_name)[:120]
         if name.lower() in by_name:
             target = by_name[name.lower()]
-        else:
+        elif confidence >= AUTO_FILE_CONFIDENCE:
             target = models.Folder(user_id=user.id, name=name, position=len(folders), ai_suggested=True)
             session.add(target)
             await session.flush()
+        else:
+            log.info("file_feed: proposed new folder %r for feed %s at %.2f; not created", name, feed.id, confidence)
     if target is None:
         feed.suggested_folder_id = None
         feed.suggested_folder_confidence = confidence
@@ -175,6 +215,26 @@ async def file_feed(
         feed.folder_id = target.id
     await session.flush()
     return target
+
+
+async def dismiss_folder_suggestion(session: AsyncSession, user: models.User, feed: models.Feed) -> None:
+    """Clear the feed's folder suggestion and record it as a feed_folder correction (old=folder id, new=None)."""
+    if feed.user_id != user.id:
+        return
+    if feed.suggested_folder_id is not None:
+        session.add(
+            models.Correction(
+                user_id=user.id,
+                target_type="feed_folder",
+                target_id=feed.id,
+                field="folder_id",
+                old_value=str(feed.suggested_folder_id),
+                new_value=None,
+            )
+        )
+    feed.suggested_folder_id = None
+    feed.suggested_folder_confidence = None
+    await session.flush()
 
 
 # ---------------------------------------------------------------------------
@@ -205,19 +265,41 @@ def _split_tags(value: str | None) -> list[str]:
     return [t.strip() for t in value.replace(";", ",").split(",") if t.strip()]
 
 
+def is_tagged(row: models.ItemAI | None) -> bool:
+    """True when ``row`` carries tagging output from the current prompt version (a summary-only row does not)."""
+    return (
+        row is not None
+        and row.prompt_version == prompts.PROMPT_VERSION
+        and (bool(row.tags) or row.content_type is not None)
+    )
+
+
+def _entry_ok(entry: object) -> bool:
+    try:
+        validate_schema(entry, prompts.ITEM_TAGGING_ENTRY_SCHEMA)
+    except LLMError as exc:
+        log.warning("tag_items: skipping malformed entry: %s", exc)
+        return False
+    return True
+
+
 async def tag_items(
-    session: AsyncSession, user: models.User, items: list[models.Item], client: LLMClient | None = None
+    session: AsyncSession,
+    user: models.User,
+    items: list[models.Item],
+    client: LLMClient | None = None,
+    *,
+    force: bool = False,
 ) -> list[models.ItemAI]:
-    """Tag ``items`` in batches of 10; writes/updates ``item_ai`` rows. Respects ``tag_items`` toggle."""
+    """Tag ``items`` in batches of ``TAG_BATCH``; writes/updates ``item_ai`` rows. Respects ``tag_items`` toggle.
+
+    Items already tagged at the current ``PROMPT_VERSION`` are skipped unless ``force`` (a retried job must not
+    re-pay for batches that succeeded). A malformed entry in a batch is skipped, not the batch.
+    """
     if not items or not ai_on(user, "tag_items"):
         return []
     client = client or get_client()
     settings = get_settings()
-    vocab = await ensure_vocabulary(session, user)
-    vocab_names = [t.name for t in vocab]
-    vocab_lookup = {n.lower(): n for n in vocab_names}
-    examples = await tagging_examples(session, user)
-
     existing: dict[uuid.UUID, models.ItemAI] = {
         row.item_id: row
         for row in (
@@ -228,9 +310,17 @@ async def tag_items(
             )
         ).all()
     }
+    todo = items if force else [i for i in items if not is_tagged(existing.get(i.id))]
+    if not todo:
+        return []
+    vocab = await ensure_vocabulary(session, user)
+    vocab_names = [t.name for t in vocab]
+    vocab_lookup = {n.lower(): n for n in vocab_names}
+    examples = await tagging_examples(session, user)
+
     written: list[models.ItemAI] = []
-    for start in range(0, len(items), TAG_BATCH):
-        batch = items[start : start + TAG_BATCH]
+    for start in range(0, len(todo), TAG_BATCH):
+        batch = todo[start : start + TAG_BATCH]
         payload = [(i, it.title, (it.content_text or "")[:TAG_TEXT_CHARS]) for i, it in enumerate(batch)]
         try:
             result = await client.chat_json(
@@ -238,14 +328,15 @@ async def tag_items(
                 prompts.ITEM_TAGGING_SYSTEM,
                 prompts.item_tagging_user(vocab_names, payload, examples),
                 prompts.ITEM_TAGGING_SCHEMA,
-                max_tokens=120 * len(batch) + 100,
+                max_tokens=TAG_TOKENS_PER_ITEM * len(batch) + TAG_TOKENS_HEADROOM,
                 workflow="tag_items",
                 name="item_tagging",
+                validate_with=prompts.ITEM_TAGGING_BATCH_SCHEMA,
             )
         except LLMError as exc:
             log.warning("tag_items batch failed for user %s: %s", user.id, exc)
             raise
-        by_index = {int(entry["index"]): entry for entry in result["items"]}
+        by_index = {int(entry["index"]): entry for entry in result["items"] if _entry_ok(entry)}
         for i, item in enumerate(batch):
             entry = by_index.get(i)
             if entry is None:
@@ -274,5 +365,6 @@ async def tag_items(
             row.prompt_version = prompts.PROMPT_VERSION
             row.generated_at = utcnow()
             written.append(row)
-    await session.flush()
+        # each batch is durable on its own: a later batch failing must not lose this one on retry
+        await session.flush()
     return written

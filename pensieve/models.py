@@ -23,6 +23,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -35,6 +36,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pensieve.db import Base
 
 EMBEDDING_DIMS = 768
+
+#: Expression index on items(id) equal to ``syncapi.common.long_id_sql(Item.id)``: the sync APIs' int64 item id.
+LONG_ID_INDEX_SQL = "((('x'||substr(replace(id::text,'-',''),1,16))::bit(64)::bigint) & 9223372036854775807)"
 
 
 def _uuid() -> uuid.UUID:
@@ -133,10 +137,15 @@ class Feed(TimestampMixin, Base):
     title: Mapped[str] = mapped_column(String(300), nullable=False, default="")
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     icon_url: Mapped[str | None] = mapped_column(String(2048))
+    icon_data: Mapped[bytes | None] = mapped_column(LargeBinary)
+    """Cached favicon bytes (served at /favicons/{feed_id}); refreshed weekly by the fetcher."""
+    icon_content_type: Mapped[str | None] = mapped_column(String(100))
     position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     # AI folder suggestion for feeds still in Inbox (folder_id NULL)
     suggested_folder_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("folders.id", ondelete="SET NULL"))
+    suggested_folder_name: Mapped[str | None] = mapped_column(String(120))
+    """A brand-new folder the filer proposes (no Folder row yet); accepting it creates the folder."""
     suggested_folder_confidence: Mapped[float | None] = mapped_column(Float)
 
     # Fetch state
@@ -185,6 +194,8 @@ class Item(Base):
         Index("ix_items_published", "published_at"),
         Index("ix_items_hash", "hash"),
         Index("ix_items_search", "search_vector", postgresql_using="gin"),
+        # Must match pensieve.syncapi.common.long_id_sql() exactly so the planner uses it for since_id/max_id.
+        Index("ix_items_long_id", text(LONG_ID_INDEX_SQL)),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid7)
@@ -195,6 +206,8 @@ class Item(Base):
     author: Mapped[str | None] = mapped_column(String(300))
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    """Set when a known guid's content hash changes and the row is updated in place."""
     content_html: Mapped[str] = mapped_column(Text, nullable=False, default="")
     """Sanitised feed HTML."""
     content_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
@@ -225,6 +238,12 @@ class ItemState(Base):
     __table_args__ = (
         Index("ix_item_states_user_unread", "user_id", "is_read"),
         Index("ix_item_states_user_starred", "user_id", "is_starred"),
+        Index(
+            "ix_item_states_user_unread_partial",
+            "user_id",
+            "item_id",
+            postgresql_where=text("is_read = false AND hidden = false"),
+        ),
     )
 
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
@@ -291,6 +310,14 @@ class ItemAI(Base):
 
 class Embedding(Base):
     __tablename__ = "embeddings"
+    __table_args__ = (
+        Index(
+            "ix_embeddings_vector_hnsw",
+            "vector",
+            postgresql_using="hnsw",
+            postgresql_ops={"vector": "vector_cosine_ops"},
+        ),
+    )
 
     item_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("items.id", ondelete="CASCADE"), primary_key=True)
     vector = mapped_column(Vector(EMBEDDING_DIMS), nullable=False)
@@ -394,7 +421,8 @@ class AIJob(Base):
     kind: Mapped[str] = mapped_column(String(30), nullable=False)  # embed | tag | cluster | digest | profile | file_feed
     target_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")  # queued|running|done|failed
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")
+    """queued|running|done|failed|partial (partial: some steps failed on the last attempt)."""
     attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     last_error: Mapped[str | None] = mapped_column(Text)
     run_after: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -407,6 +435,7 @@ class AIJob(Base):
 
 __all__ = [
     "EMBEDDING_DIMS",
+    "LONG_ID_INDEX_SQL",
     "AIJob",
     "ApiToken",
     "Cluster",

@@ -2,6 +2,10 @@
    Display: Fraunces. Body: Instrument Sans. Warm parchment ground, deep blue accent, teal = AI-generated. */
 
 :root {
+  /* Reading size and measure tokens (web package): driven by data-font / data-measure on <html>. */
+  --fs-body: 15px;
+  --fs-prose: 17px;
+  --measure: 70ch;
   --bg: #F3F1EA;
   --panel: #FBFAF6;
   --card: #FFFFFF;
@@ -49,6 +53,11 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
+:root[data-font="s"] { --fs-body: 14px; --fs-prose: 15px; }
+:root[data-font="l"] { --fs-body: 16px; --fs-prose: 19px; }
+:root[data-font="xl"] { --fs-body: 17px; --fs-prose: 21px; }
+:root[data-measure="narrow"] { --measure: 58ch; }
+:root[data-measure="wide"] { --measure: 88ch; }
 body { font-family: var(--font-body); background: var(--bg); color: var(--ink); font-size: 15px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
 a { color: var(--accent); }
 a:hover { color: var(--accent-ink); }

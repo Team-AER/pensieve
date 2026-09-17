@@ -28,15 +28,15 @@
     </div>
   </details>
 </div>
-{% if undo_ids is defined and undo_ids %}
+{% if undo_marked is defined and undo_token %}
 <form class="undo-bar" method="post" action="/items/undo-read" hx-post="/items/undo-read?{{ opts.query }}" hx-target="#list" hx-swap="innerHTML">
   {{ m.csrf_field(csrf_token) }}
-  <input type="hidden" name="ids" value="{{ undo_ids|join(',') }}">
+  <input type="hidden" name="token" value="{{ undo_token }}">
   <input type="hidden" name="view" value="{{ view.name }}">
-  <span>Marked {{ undo_ids|length }} item{{ 's' if undo_ids|length != 1 }} as read.</span>
-  <button class="btn btn-sm" type="submit">Undo</button>
+  <span>Marked {{ undo_count }} item{{ 's' if undo_count != 1 }} as read.</span>
+  <button class="btn btn-sm" type="submit">Undo{% if undo_count > settings.undo_batch_max_ids %} last {{ settings.undo_batch_max_ids }}{% endif %}</button>
 </form>
-{% elif undo_ids is defined %}
+{% elif undo_marked is defined %}
 <div class="undo-bar"><span class="muted">Nothing left to mark read.</span></div>
 {% endif %}
 <div class="pane-body list-body" id="list-body" data-list-url="{{ list_url }}?{{ opts.query }}">

@@ -12,7 +12,8 @@
 <button type="button" class="btn btn-sm" data-action="note" data-toggle="#note-form-{{ item.id }}">{{ m.icon('note') }} Note</button>
 <button type="button" class="btn btn-sm btn-ai" data-action="summarize" hx-post="/items/{{ item.id }}/summarize" hx-target="#summary-{{ item.id }}" hx-swap="innerHTML">{{ m.icon('sparkle') }} Summarize</button>
 <button type="button" class="btn btn-sm" data-action="reader" hx-post="/items/{{ item.id }}/reader-mode" hx-target="#body-{{ item.id }}" hx-swap="innerHTML">{{ m.icon('reader') }} Reader view</button>
-{% if item.url %}<a class="btn btn-sm" data-action="open" href="{{ item.url }}" target="_blank" rel="noopener noreferrer" hx-boost="false">{{ m.icon('external') }} Open original</a>{% endif %}
+{% if item.url %}<a class="btn btn-sm" data-action="open" href="{{ item.url }}" target="_blank" rel="noopener noreferrer" hx-boost="false">{{ m.icon('external') }} Open original</a>
+<button type="button" class="btn btn-sm" data-action="share" data-share-url="{{ item.url }}" data-share-title="{{ item.title or '' }}" title="Share or copy the link">{{ m.icon('share') }} Share</button>{% endif %}
 {% if cluster and cluster.source_count > 1 %}
 <button type="button" class="btn btn-sm" data-action="unmerge" hx-post="/items/{{ item.id }}/unmerge" hx-target="#toolbar-{{ item.id }}" hx-swap="innerHTML" hx-confirm="Split this item out of its story group? Pensieve won't merge it again.">{{ m.icon('split') }} Unmerge</button>
 {% endif %}

@@ -7,23 +7,39 @@ import types
 import uuid
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pensieve import models
 from pensieve.auth import hash_password
+from pensieve.web import ratelimit
 from pensieve.web.templating import make_csrf
 
 HTML = {"Accept": "text/html"}
 HX = {"HX-Request": "true"}
 
 
+def login_form(email: str, password: str, **extra: str) -> dict[str, str]:
+    """A /login form body including the anonymous CSRF token the login page embeds."""
+    return {"email": email, "password": password, "csrf_token": make_csrf(None), **extra}
+
+
 async def login(client: AsyncClient, user: models.User, password: str = "password123") -> dict[str, str]:
     """Sign in through /login and return headers carrying the CSRF token for POSTs."""
-    r = await client.post("/login", data={"email": user.email, "password": password})
+    r = await client.post("/login", data=login_form(user.email, password))
     assert r.status_code == 303, r.text
     assert "pensieve_session" in r.cookies
     return {"X-CSRF-Token": make_csrf(user.id)}
+
+
+@pytest.fixture(autouse=True)
+def memory_limiter():
+    """Never touch Redis for sign-in rate limiting in tests; a fresh in-memory limiter per test."""
+    limiter = ratelimit.MemoryRateLimiter()
+    ratelimit.set_limiter(limiter)
+    yield limiter
+    ratelimit.set_limiter(None)
 
 
 async def make_user(session: AsyncSession, role: models.UserRole = models.UserRole.reader) -> models.User:

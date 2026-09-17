@@ -75,7 +75,7 @@ ALLOWED_TAGS = frozenset(
         "del", "details", "div", "dl", "dt", "em", "figcaption", "figure", "h1", "h2", "h3", "h4", "h5", "h6",
         "hr", "i", "img", "ins", "kbd", "li", "mark", "ol", "p", "picture", "pre", "q", "s", "samp", "small",
         "source", "span", "strong", "sub", "summary", "sup", "table", "tbody", "td", "tfoot", "th", "thead",
-        "time", "tr", "u", "ul", "var", "video",
+        "time", "tr", "u", "ul", "var", "video", "iframe",
     }
 )  # fmt: skip
 
@@ -87,10 +87,11 @@ ALLOWED_ATTRIBUTES: dict[str, list[str]] = {
     "col": ["span"],
     "colgroup": ["span"],
     "details": ["open"],
-    "img": ["src", "alt", "title", "width", "height", "loading"],
+    "iframe": ["src", "width", "height", "title", "allowfullscreen", "loading"],
+    "img": ["src", "srcset", "sizes", "alt", "title", "width", "height", "loading"],
     "ol": ["start", "reversed"],
     "q": ["cite"],
-    "source": ["src", "type"],
+    "source": ["src", "srcset", "sizes", "type", "media"],
     "td": ["colspan", "rowspan"],
     "th": ["colspan", "rowspan", "scope"],
     "time": ["datetime"],
@@ -100,24 +101,140 @@ ALLOWED_ATTRIBUTES: dict[str, list[str]] = {
 ALLOWED_PROTOCOLS = frozenset({"http", "https", "mailto", "data"})
 URL_ATTRIBUTES = frozenset({"href", "src", "poster", "cite"})
 
+#: Embeds are only kept from these hosts (and their subdomains), always sandboxed.
+IFRAME_HOSTS = frozenset({"youtube.com", "youtube-nocookie.com", "player.vimeo.com"})
+IFRAME_SANDBOX = "allow-scripts allow-same-origin allow-popups allow-presentation"
+
+
+def _host_allowed(host: str | None, allowed: frozenset[str]) -> bool:
+    if not host:
+        return False
+    host = host.lower().rstrip(".")
+    return any(host == h or host.endswith("." + h) for h in allowed)
+
+
+def iframe_src_allowed(src: str | None) -> bool:
+    """``https://`` embeds from :data:`IFRAME_HOSTS` only."""
+    if not src:
+        return False
+    try:
+        parts = urlsplit(src.strip())
+    except ValueError:
+        return False
+    return parts.scheme.lower() == "https" and _host_allowed(parts.hostname, IFRAME_HOSTS)
+
+
+def _clean_url_value(value: str, base_url: str | None, *, allow_data_image: bool) -> str | None:
+    """Apply the URL rules used for ``src``/``href`` to one URL; ``None`` means drop it."""
+    value = (value or "").strip()
+    if not value:
+        return None
+    lowered = value.lower()
+    if lowered.startswith("data:"):
+        return value if allow_data_image and lowered.startswith("data:image/") else None
+    scheme = urlsplit(value).scheme.lower() if "://" in value or ":" in value.split("/", 1)[0] else ""
+    if scheme and scheme not in ("http", "https"):
+        return None
+    if base_url and not scheme:
+        return urljoin(base_url, value)
+    return value
+
+
+def _srcset_candidates(value: str) -> list[tuple[str, str]]:
+    """Split ``srcset`` per the HTML algorithm: a URL runs to whitespace; a trailing comma ends a candidate.
+
+    Commas inside URLs (``data:image/png;base64,...``) therefore stay with the URL.
+    """
+    tokens = value.split()
+    out: list[tuple[str, str]] = []
+    pending: list[str] = []
+    i = 0
+    while i < len(tokens) or pending:
+        if pending:
+            url = pending.pop(0)
+        else:
+            url = tokens[i]
+            i += 1
+        if url.endswith(","):
+            out.append((url.rstrip(","), ""))
+            continue
+        descriptor = ""
+        if i < len(tokens):
+            nxt = tokens[i]
+            i += 1
+            # A comma ends the descriptor; anything after it starts the next candidate ("1x,https://...").
+            descriptor, _, rest = nxt.partition(",")
+            if rest:
+                pending.append(rest)
+        out.append((url, descriptor))
+    return [(u, d) for u, d in out if u]
+
+
+def clean_srcset(value: str | None, base_url: str | None = None, *, allow_data_image: bool = False) -> str:
+    """Filter each ``srcset`` candidate's URL like ``src``; keeps descriptors (``2x``, ``640w``)."""
+    if not value:
+        return ""
+    kept: list[str] = []
+    for raw_url, descriptor in _srcset_candidates(value):
+        url = _clean_url_value(raw_url, base_url, allow_data_image=allow_data_image)
+        if url is None:
+            continue
+        kept.append(f"{url} {descriptor}".strip())
+    return ", ".join(kept)
+
 
 class _UrlAndLinkFilter(Filter):
-    """Runs after bleach's sanitiser: absolutises URLs, restricts ``data:`` to images, hardens ``<a>``."""
+    """Runs after bleach's sanitiser: absolutises URLs, restricts ``data:`` to images, hardens ``<a>``,
+    validates ``srcset`` candidates and keeps ``<iframe>`` only for allow-listed hosts (sandboxed)."""
 
     def __init__(self, source: Any, base_url: str | None = None) -> None:
         super().__init__(source)
         self.base_url = base_url
 
     def __iter__(self):
+        dropping_iframe = False
         for token in super().__iter__():
-            if token["type"] in ("StartTag", "EmptyTag"):
+            kind = token["type"]
+            name = token.get("name")
+            if dropping_iframe:
+                if kind == "EndTag" and name == "iframe":
+                    dropping_iframe = False
+                continue
+            if kind in ("StartTag", "EmptyTag"):
+                if name == "iframe":
+                    if not self._fix_iframe(token):
+                        dropping_iframe = kind == "StartTag"
+                        continue
+                    yield token
+                    continue
                 self._fix(token)
             yield token
+
+    def _fix_iframe(self, token: dict) -> bool:
+        data: dict = token["data"]
+        src = None
+        for key in list(data):
+            attr = key[1] if isinstance(key, tuple) else key
+            if attr == "src":
+                src = (data[key] or "").strip()
+        if not iframe_src_allowed(src):
+            return False
+        data[(None, "sandbox")] = IFRAME_SANDBOX
+        data[(None, "referrerpolicy")] = "strict-origin-when-cross-origin"
+        data[(None, "loading")] = "lazy"
+        return True
 
     def _fix(self, token: dict) -> None:
         data: dict = token["data"]
         for key in list(data):
             attr = key[1] if isinstance(key, tuple) else key
+            if attr == "srcset":
+                cleaned = clean_srcset(data[key], self.base_url, allow_data_image=token["name"] == "img")
+                if cleaned:
+                    data[key] = cleaned
+                else:
+                    del data[key]
+                continue
             if attr not in URL_ATTRIBUTES:
                 continue
             value = (data[key] or "").strip()
@@ -144,15 +261,33 @@ def _cleaner(base_url: str | None) -> Cleaner:
     )
 
 
-_SCRIPT_STYLE_RE = re.compile(r"<(script|style|iframe|object|embed|noscript)\b.*?</\1\s*>", re.IGNORECASE | re.DOTALL)
+_SCRIPT_STYLE_RE = re.compile(r"<(script|style|object|embed|noscript)\b.*?</\1\s*>", re.IGNORECASE | re.DOTALL)
+#: An iframe element, closed or not (an unclosed one swallows nothing: only the open tag is matched then).
+_IFRAME_RE = re.compile(r"<iframe\b([^>]*)>(?:.*?</iframe\s*>)?", re.IGNORECASE | re.DOTALL)
+_SRC_ATTR_RE = re.compile(r"""\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""", re.IGNORECASE)
+
+
+def _prestrip_iframe(match: re.Match) -> str:
+    """Drop iframes from unknown hosts before bleach; normalise allowed ones to an empty element."""
+    attrs = match.group(1)
+    found = _SRC_ATTR_RE.search(attrs)
+    src = next((g for g in found.groups() if g is not None), "") if found else ""
+    if not iframe_src_allowed(html_lib.unescape(src)):
+        return ""
+    return f"<iframe{attrs}></iframe>"
 
 
 def sanitize_html(raw: str | None, base_url: str | None = None) -> str:
-    """Bleach-sanitise feed HTML. Unknown tags are stripped (their text kept); script/style bodies are removed."""
+    """Bleach-sanitise feed HTML. Unknown tags are stripped (their text kept); script/style bodies are removed.
+
+    ``<iframe>`` survives only for :data:`IFRAME_HOSTS` (with a sandbox); ``<IFRAME`` in any case, closed or
+    not, from any other host is removed before bleach so nothing of it leaks through tag stripping.
+    """
     if not raw:
         return ""
     # Remove the bodies of script-like elements before bleach so their text does not survive tag stripping.
     cleaned = _SCRIPT_STYLE_RE.sub("", raw)
+    cleaned = _IFRAME_RE.sub(_prestrip_iframe, cleaned)
     return _cleaner(base_url).clean(cleaned).strip()
 
 
@@ -170,6 +305,7 @@ def html_to_text(html: str | None) -> str:
     if not html:
         return ""
     text = _SCRIPT_STYLE_RE.sub("", html)
+    text = _IFRAME_RE.sub("", text)
     text = _BLOCK_BREAK_RE.sub("\n", text)
     text = _TAG_RE.sub(" ", text)
     text = html_lib.unescape(text)
@@ -487,11 +623,14 @@ def looks_like_feed(body: bytes, content_type: str | None = None) -> bool:
 __all__ = [
     "ALLOWED_ATTRIBUTES",
     "ALLOWED_TAGS",
+    "IFRAME_HOSTS",
     "ParseError",
     "ParsedEntry",
     "ParsedFeed",
+    "clean_srcset",
     "content_hash",
     "html_to_text",
+    "iframe_src_allowed",
     "looks_like_feed",
     "normalise_for_hash",
     "parse_datetime",

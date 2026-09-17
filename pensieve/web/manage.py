@@ -6,13 +6,13 @@ import json
 import logging
 import secrets
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 import httpx
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse, Response
-from sqlalchemy import delete, func, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pensieve.auth import (
@@ -36,8 +36,8 @@ from pensieve.models import (
     User,
     UserRole,
 )
-from pensieve.web.queries import parse_uuid
-from pensieve.web.templating import DB, CsrfUser, CurrentUser, render
+from pensieve.web.queries import invalidate_nav_cache, parse_uuid
+from pensieve.web.templating import DB, FONT_SIZES, MEASURES, CsrfUser, CurrentUser, hx_trigger, render
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/manage")
@@ -60,6 +60,9 @@ FLASH = {
     "user_saved": "User updated.",
     "user_removed": "User removed.",
     "opml_imported": "OPML imported.",
+    "feeds_resumed": "All paused feeds resumed.",
+    "rule_applied": "Rule applied to existing items.",
+    "suggestion_dismissed": "Suggestion dismissed.",
 }
 
 AI_TOGGLES = ("auto_file", "tag_items", "group_stories", "memory", "digest")
@@ -196,12 +199,23 @@ async def _feeds(
                 "open_rate": open_rates.get(f.id),
             }
         )
+    paused_count = int(
+        await session.scalar(select(func.count(Feed.id)).where(Feed.user_id == user.id, Feed.paused.is_(True))) or 0
+    )
     return page(
         request,
         user,
         "feeds",
         "manage/feeds.html",
-        {"rows": rows, "folders": folders, "q": q, "folder": folder, "error": error},
+        {
+            "rows": rows,
+            "folders": folders,
+            "q": q,
+            "folder": folder,
+            "error": error,
+            "paused_count": paused_count,
+            "interval_bounds": (get_settings().fetch_min_interval_min, get_settings().fetch_max_interval_min),
+        },
         status_code=status_code,
     )
 
@@ -258,6 +272,48 @@ async def move_feed(
     feed = await get_feed_or_404(session, user, feed_id)
     folder = await get_folder(session, user, parse_uuid(folder_id))
     feed.folder_id = folder.id if folder else None
+    await session.commit()
+    invalidate_nav_cache(user.id)
+    if request.headers.get("hx-request") == "true":
+        # Drag-and-drop in the reader nav: no page to render, just refresh the counts/tree.
+        return Response(status_code=204, headers=hx_trigger("counts-changed"))
+    return back("/manage/feeds", "feed_updated")
+
+
+@router.post("/feeds/resume-all")
+async def resume_all_feeds(
+    request: Request,
+    user: CsrfUser,
+    session: DB,
+):
+    now = datetime.now(UTC)
+    await session.execute(
+        Feed.__table__.update()
+        .where(Feed.user_id == user.id, Feed.paused.is_(True))
+        .values(paused=False, error_count=0, next_fetch_at=now)
+    )
+    await session.commit()
+    return back("/manage/feeds", "feeds_resumed")
+
+
+@router.post("/feeds/{feed_id}/interval")
+async def set_feed_interval(
+    request: Request,
+    feed_id: uuid.UUID,
+    user: CsrfUser,
+    session: DB,
+    fetch_interval_min: Annotated[str, Form()] = "",
+):
+    feed = await get_feed_or_404(session, user, feed_id)
+    settings = get_settings()
+    try:
+        minutes = int(fetch_interval_min)
+    except ValueError:
+        return RedirectResponse("/manage/feeds?err=Enter+the+poll+interval+in+minutes.", status_code=303)
+    minutes = max(settings.fetch_min_interval_min, min(settings.fetch_max_interval_min, minutes))
+    feed.fetch_interval_min = minutes
+    base = feed.last_fetch_at or datetime.now(UTC)
+    feed.next_fetch_at = min(base + timedelta(minutes=minutes), datetime.now(UTC) + timedelta(minutes=minutes))
     await session.commit()
     return back("/manage/feeds", "feed_updated")
 
@@ -329,6 +385,39 @@ async def accept_suggestion(
             log.warning("record_correction unavailable: %s", exc)
     await session.commit()
     return back("/manage/feeds", "feed_updated")
+
+
+@router.post("/feeds/{feed_id}/dismiss-suggestion")
+async def dismiss_suggestion(
+    request: Request,
+    feed_id: uuid.UUID,
+    user: CsrfUser,
+    session: DB,
+):
+    """Reject the AI's folder suggestion for a feed (records the correction via the ai package when present)."""
+    feed = await get_feed_or_404(session, user, feed_id)
+    try:
+        from pensieve.ai.service import dismiss_folder_suggestion  # type: ignore[import-not-found]
+    except (ImportError, AttributeError):
+        feed.suggested_folder_id = None
+        feed.suggested_folder_name = None
+        feed.suggested_folder_confidence = None
+        await session.commit()
+        return Response(status_code=204) if request.headers.get("hx-request") == "true" else back("/manage/feeds")
+    try:
+        await dismiss_folder_suggestion(session, user, feed)
+        await session.commit()
+    except Exception as exc:  # noqa: BLE001  AI is additive; never let it break the page
+        log.warning("dismiss_folder_suggestion failed for %s: %s", feed.id, exc)
+        await session.rollback()
+        feed = await get_feed_or_404(session, user, feed_id)
+        feed.suggested_folder_id = None
+        feed.suggested_folder_name = None
+        feed.suggested_folder_confidence = None
+        await session.commit()
+    if request.headers.get("hx-request") == "true":
+        return Response(status_code=204)
+    return back("/manage/feeds", "suggestion_dismissed")
 
 
 # ---------------------------------------------------------------------------
@@ -585,6 +674,68 @@ async def delete_rule(
     return back("/manage/rules", "rule_removed")
 
 
+APPLY_RULE_MAX_ITEMS = 5000
+
+
+async def apply_rule_to_existing(session: AsyncSession, user: User, rule: FeedRule) -> int:
+    """Run one rule over the items it covers (its feed, or all the user's feeds) and merge into item_states."""
+    from pensieve.fetch.subscribe import apply_rules  # type: ignore[import-not-found]
+
+    stmt = (
+        select(Item)
+        .join(Feed, Feed.id == Item.feed_id)
+        .where(Feed.user_id == user.id)
+        .order_by(Item.published_at.desc())
+        .limit(APPLY_RULE_MAX_ITEMS)
+    )
+    if rule.feed_id is not None:
+        stmt = stmt.where(Item.feed_id == rule.feed_id)
+    items = list(await session.scalars(stmt))
+    now = datetime.now(UTC)
+    matched = apply_rules([rule], user.id, items, now)
+    if not matched:
+        return 0
+    existing = {
+        st.item_id: st
+        for st in await session.scalars(
+            select(ItemState).where(ItemState.user_id == user.id, ItemState.item_id.in_([m.item_id for m in matched]))
+        )
+    }
+    for new in matched:
+        current = existing.get(new.item_id)
+        if current is None:
+            session.add(new)
+            continue
+        # Merge: rules only ever add state, never clear what the user set.
+        if new.hidden:
+            current.hidden = True
+        if new.is_starred and not current.is_starred:
+            current.is_starred, current.starred_at = True, now
+        if new.is_read and not current.is_read:
+            current.is_read, current.read_at = True, now
+        if new.tags:
+            current.tags = [*current.tags, *[t for t in new.tags if t not in current.tags]]
+    await session.flush()
+    invalidate_nav_cache(user.id)
+    return len(matched)
+
+
+@router.post("/rules/{rule_id}/apply")
+async def apply_rule_route(
+    request: Request,
+    rule_id: uuid.UUID,
+    user: CsrfUser,
+    session: DB,
+):
+    rule = await _get_rule(session, user, rule_id)
+    try:
+        await apply_rule_to_existing(session, user, rule)
+    except ImportError:
+        return RedirectResponse("/manage/rules?err=Rules+can%27t+be+applied+retroactively+yet.", status_code=303)
+    await session.commit()
+    return back("/manage/rules", "rule_applied")
+
+
 # ---------------------------------------------------------------------------
 # AI and memory
 # ---------------------------------------------------------------------------
@@ -607,13 +758,21 @@ async def ai_page(request: Request, user: CurrentUser, session: DB):
     )
     stats = {"queued": 0, "running": 0, "done": 0, "failed": 0}
     for status_, n in stats_rows:
-        stats[status_] = int(n)
+        # "partial" (some steps failed on the last try) counts as failed for the reader's purposes
+        key = "failed" if status_ == "partial" else status_
+        stats[key] = stats.get(key, 0) + int(n)
     recent_failed = list(
         await session.scalars(
             select(AIJob)
-            .where(AIJob.user_id == user.id, AIJob.status == "failed")
+            .where(
+                AIJob.user_id == user.id,
+                or_(
+                    AIJob.status.in_(["failed", "partial"]),
+                    and_(AIJob.status == "done", AIJob.last_error.is_not(None)),  # done-with-warning
+                ),
+            )
             .order_by(AIJob.created_at.desc())
-            .limit(5)
+            .limit(8)
         )
     )
     return page(
@@ -853,11 +1012,36 @@ async def save_account(
     db_user = await session.get(User, user.id)
     if display_name.strip():
         db_user.display_name = display_name.strip()[:120]
+    form = await request.form()
     settings = dict(db_user.settings or {})
     settings["theme"] = theme if theme in {"auto", "light", "dark", "sepia"} else "auto"
+    font_size = str(form.get("font_size") or settings.get("font_size") or "m")
+    measure = str(form.get("measure") or settings.get("measure") or "normal")
+    settings["font_size"] = font_size if font_size in FONT_SIZES else "m"
+    settings["measure"] = measure if measure in MEASURES else "normal"
     db_user.settings = settings
     await session.commit()
     return back("/manage/account", "account_saved")
+
+
+@router.post("/account/font")
+async def save_font(
+    request: Request,
+    user: CsrfUser,
+    session: DB,
+    font_size: Annotated[str, Form()] = "",
+    measure: Annotated[str, Form()] = "",
+):
+    """Persist the reader's +/- font-size and line-width keys (fetch from reader.js; 204)."""
+    db_user = await session.get(User, user.id)
+    settings = dict(db_user.settings or {})
+    if font_size in FONT_SIZES:
+        settings["font_size"] = font_size
+    if measure in MEASURES:
+        settings["measure"] = measure
+    db_user.settings = settings
+    await session.commit()
+    return Response(status_code=204)
 
 
 @router.post("/account/password")

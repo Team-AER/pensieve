@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -12,8 +13,11 @@ from lxml import etree
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from pensieve import queue
 from pensieve.config import get_settings
 from pensieve.models import Feed, Folder, User
+
+log = logging.getLogger(__name__)
 
 
 class OPMLError(ValueError):
@@ -125,6 +129,16 @@ async def import_opml(session: AsyncSession, user: User, xml: bytes) -> ImportRe
         result.added.append(feed)
 
     await session.flush()
+    await session.commit()  # rows must be visible before the AI worker looks them up
+    # Feeds that landed without a folder get an AI filing suggestion, exactly as add_feed does.
+    for feed in result.added:
+        if feed.folder_id is None:
+            try:
+                await queue.enqueue(
+                    queue.AI_FILE_FEED, str(feed.id), _job_id=queue.job_id_for(queue.AI_FILE_FEED, feed.id)
+                )
+            except Exception as exc:  # noqa: BLE001 - a missing Redis must never fail an import
+                log.warning("could not enqueue %s for feed %s: %s", queue.AI_FILE_FEED, feed.id, exc)
     return result
 
 

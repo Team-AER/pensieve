@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -27,6 +27,14 @@ class LLMError(Exception):
     """The gateway failed, returned malformed output, or the output did not match the schema."""
 
 
+class LLMTruncated(LLMError):
+    """The model hit ``max_tokens`` (``finish_reason == "length"``); ``content`` holds the partial output."""
+
+    def __init__(self, message: str, content: str = "") -> None:
+        super().__init__(message)
+        self.content = content
+
+
 @dataclass
 class Usage:
     tokens_in: int = 0
@@ -39,11 +47,17 @@ class Usage:
         self.tokens_out += int(usage.get("completion_tokens") or 0)
 
 
-@dataclass
-class Health:
-    ok: bool
-    models: list[str] = field(default_factory=list)
-    latency_ms: int = 0
+_EMBED_PROBE: dict[str, Any] = {"available": None, "checked_at": 0.0}
+"""Process-wide embeddings availability: None = unknown, False after a 400/404 (re-probed after a cool-down).
+
+Shared by every ``LLMClient`` so a web request and a worker job in the same process do not each re-pay the
+probe; ``reset_embedding_probe()`` clears it (tests, or after a gateway config change).
+"""
+
+
+def reset_embedding_probe() -> None:
+    _EMBED_PROBE["available"] = None
+    _EMBED_PROBE["checked_at"] = 0.0
 
 
 def approx_tokens(text: str) -> int:
@@ -150,16 +164,23 @@ def _extract_json(content: str) -> Any:
 
 
 class LLMClient:
-    """Thin async client over the gateway. One instance per process is fine; it is stateless apart from usage."""
+    """Thin async client over the gateway. Stateless apart from token usage; the embeddings probe is process-wide."""
 
     def __init__(self, settings: Settings | None = None, http: httpx.AsyncClient | None = None) -> None:
         self.settings = settings or get_settings()
         self._http = http
         self.usage = Usage()
         """Cumulative token usage since the last ``take_usage()``; jobs mirror it into ``ai_jobs``."""
-        self.last_usage: dict = {}
-        self.embeddings_available: bool | None = None
-        """None = unknown, False once the gateway answered 404/400 on /embeddings (re-probed every call)."""
+
+    @property
+    def embeddings_available(self) -> bool | None:
+        """None = unknown, False once the gateway answered 404/400 on /embeddings (process-wide, see above)."""
+        return _EMBED_PROBE["available"]
+
+    def _embeddings_cooling_down(self) -> bool:
+        if _EMBED_PROBE["available"] is not False:
+            return False
+        return time.monotonic() - _EMBED_PROBE["checked_at"] < self.settings.llm_embeddings_reprobe_min * 60
 
     # -- plumbing -----------------------------------------------------------------------------------------
 
@@ -197,17 +218,33 @@ class LLMClient:
         budget = self.budget_for(model) - approx_tokens(system) - 64
         return system, truncate_to_tokens(user, max(budget, 256))
 
-    def _body(self, model: str, messages: list[dict], max_tokens: int, **extra: Any) -> dict:
+    def reasoning_value(self, model: str, reasoning: str | None) -> str | None:
+        """Map a caller's reasoning request onto the model's spelling. ``None`` means off.
+
+        Off is spelled ``none`` by the Ollama Qwen route (``llm_fast_reasoning_effort``) and ``off`` by
+        Flash-Next (``llm_long_reasoning_off_value``); any explicit level is passed through untouched.
+        """
+        if reasoning:
+            return reasoning
+        s = self.settings
+        if model == s.llm_long_model:
+            return s.llm_long_reasoning_off_value or None
+        if model == s.llm_fast_model:
+            return s.llm_fast_reasoning_effort or None
+        return None
+
+    def _body(
+        self, model: str, messages: list[dict], max_tokens: int, reasoning: str | None = None, **extra: Any
+    ) -> dict:
         body: dict[str, Any] = {
             "model": model,
             "messages": messages,
             "max_tokens": max_tokens,
             "temperature": 0.2,
         }
-        if model == self.settings.llm_long_model:
-            body["reasoning_effort"] = "medium"
-        elif model == self.settings.llm_fast_model and self.settings.llm_fast_reasoning_effort:
-            body["reasoning_effort"] = self.settings.llm_fast_reasoning_effort
+        effort = self.reasoning_value(model, reasoning)
+        if effort:
+            body["reasoning_effort"] = effort
         body.update(extra)
         return body
 
@@ -226,15 +263,19 @@ class LLMClient:
 
     async def _completion(self, body: dict, workflow: str) -> str:
         data = await self._post("/chat/completions", body, workflow)
-        usage = data.get("usage") or {}
-        self.usage.add(usage)
-        self.last_usage = usage
+        self.usage.add(data.get("usage") or {})
         try:
-            content = data["choices"][0]["message"]["content"]
+            choice = data["choices"][0]
+            content = choice["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
             raise LLMError("gateway response has no choices[0].message.content") from exc
         if not isinstance(content, str):
             raise LLMError("gateway returned non-text content")
+        if choice.get("finish_reason") == "length":
+            raise LLMTruncated(
+                f"{workflow}: output truncated at max_tokens={body.get('max_tokens')} on {body.get('model')}",
+                content,
+            )
         return content
 
     # -- public -------------------------------------------------------------------------------------------
@@ -249,8 +290,16 @@ class LLMClient:
         max_tokens: int = 1024,
         workflow: str,
         name: str = "response",
+        reasoning: str | None = None,
+        validate_with: dict | None = None,
     ) -> dict:
-        """Structured output. Retries once on malformed output, then once on the long model, then raises."""
+        """Structured output. Retries once on malformed output, then once on the long model, then raises.
+
+        ``reasoning`` is the per-call thinking level (``None`` = off, the right default for extraction work);
+        ``validate_with`` optionally replaces ``schema`` for local validation so callers can validate loosely
+        here and strictly per entry themselves. A truncated answer (``finish_reason == "length"``) is retried
+        with ``max_tokens`` doubled, capped at ``settings.llm_max_output_tokens``.
+        """
         system, user = self._fit(model, system, user)
         messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
         response_format = {
@@ -260,32 +309,58 @@ class LLMClient:
         attempts = [model, model]
         if model != self.settings.llm_long_model:
             attempts.append(self.settings.llm_long_model)
+        cap = max(self.settings.llm_max_output_tokens, max_tokens)
         last: Exception | None = None
         for attempt_model in attempts:
-            body = self._body(attempt_model, messages, max_tokens, response_format=response_format)
+            body = self._body(attempt_model, messages, max_tokens, reasoning, response_format=response_format)
             try:
                 content = await self._completion(body, workflow)
                 parsed = _extract_json(content)
                 if not isinstance(parsed, dict):
                     raise LLMError("model returned non-object JSON")
-                validate_schema(parsed, schema)
+                validate_schema(parsed, validate_with or schema)
                 return parsed
+            except LLMTruncated as exc:
+                last = exc
+                grown = min(max_tokens * 2, cap)
+                log.warning(
+                    "chat_json(%s) truncated on %s at max_tokens=%s; retrying with %s",
+                    workflow,
+                    attempt_model,
+                    max_tokens,
+                    grown,
+                )
+                max_tokens = grown
             except (LLMError, ValueError) as exc:
                 last = exc
                 log.warning("chat_json(%s) attempt on %s failed: %s", workflow, attempt_model, exc)
         raise LLMError(f"chat_json({workflow}) failed after {len(attempts)} attempts: {last}")
 
     async def chat_text(
-        self, model: str, system: str, user: str, *, max_tokens: int = 1024, workflow: str
+        self,
+        model: str,
+        system: str,
+        user: str,
+        *,
+        max_tokens: int = 1024,
+        workflow: str,
+        reasoning: str | None = None,
     ) -> str:
+        """Free text. A truncated answer is returned as-is (with a warning) rather than discarded."""
         system, user = self._fit(model, system, user)
         messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
-        return (await self._completion(self._body(model, messages, max_tokens), workflow)).strip()
+        try:
+            return (await self._completion(self._body(model, messages, max_tokens, reasoning), workflow)).strip()
+        except LLMTruncated as exc:
+            log.warning("chat_text(%s): %s", workflow, exc)
+            return exc.content.strip()
 
     async def embed(self, texts: list[str], workflow: str) -> list[list[float]] | None:
         """Embed in batches of 32. Returns None when the gateway does not route embeddings (404/400)."""
         if not texts:
             return []
+        if self._embeddings_cooling_down():
+            return None
         out: list[list[float]] = []
         url = f"{self.settings.llm_base_url.rstrip('/')}/embeddings"
         budget = self.settings.llm_max_input_tokens_short
@@ -297,8 +372,12 @@ class LLMClient:
             except httpx.HTTPError as exc:
                 raise LLMError(f"embeddings request failed: {exc!r}") from exc
             if resp.status_code in (400, 404):
-                log.info("embeddings unavailable at gateway (%s)", resp.status_code)
-                self.embeddings_available = False
+                log.info(
+                    "embeddings unavailable at gateway (%s); not retrying for %s min",
+                    resp.status_code,
+                    self.settings.llm_embeddings_reprobe_min,
+                )
+                _EMBED_PROBE.update(available=False, checked_at=time.monotonic())
                 return None
             if resp.status_code >= 400:
                 raise LLMError(f"embeddings returned {resp.status_code}: {resp.text[:300]}")
@@ -313,7 +392,7 @@ class LLMClient:
                 if len(v) != dims:
                     raise LLMError(f"embedding has {len(v)} dims, expected {dims}")
             out.extend(vectors)
-        self.embeddings_available = True
+        _EMBED_PROBE.update(available=True, checked_at=time.monotonic())
         return out
 
     async def health(self) -> dict:

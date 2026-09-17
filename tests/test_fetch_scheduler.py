@@ -60,8 +60,11 @@ async def test_prune_old_items_respects_exemptions(session, user):
 
 
 def test_jobs_registry():
-    assert [f.__name__ for f in jobs.FUNCTIONS] == ["fetch_feed", "fetch_reader_mode", "fetch_due_feeds", "prune_old_items"]
+    assert [f.__name__ for f in jobs.FUNCTIONS] == [
+        "fetch_feed", "fetch_reader_mode", "fetch_due_feeds", "prune_old_items", "refresh_favicons",
+    ]
     by_name = {c.name: c for c in jobs.CRON_JOBS}
-    assert set(by_name) == {"cron:fetch_due_feeds", "cron:prune_old_items"}
+    assert set(by_name) == {"cron:fetch_due_feeds", "cron:prune_old_items", "cron:refresh_favicons"}
+    assert by_name["cron:refresh_favicons"].weekday == 0
     assert by_name["cron:fetch_due_feeds"].minute == set(range(60))
     assert by_name["cron:prune_old_items"].hour == 3 and by_name["cron:prune_old_items"].minute == 15

@@ -2,9 +2,16 @@
 import httpx
 import pytest
 
-from pensieve.ai.client import LLMClient, LLMError, truncate_to_tokens, validate_schema
+from pensieve.ai.client import (
+    LLMClient,
+    LLMError,
+    LLMTruncated,
+    reset_embedding_probe,
+    truncate_to_tokens,
+    validate_schema,
+)
 from pensieve.config import get_settings
-from tests.test_ai_helpers import BASE, gateway  # noqa: F401
+from tests.test_ai_helpers import BASE, chat_response, gateway, truncated  # noqa: F401
 
 settings = get_settings()
 SCHEMA = {
@@ -39,9 +46,47 @@ async def test_chat_json_sends_headers_and_schema(gateway):
 async def test_long_model_sends_reasoning_effort(gateway):
     gateway.chat("plain text answer")
     client = LLMClient()
-    text = await client.chat_text(settings.llm_long_model, "sys", "user", workflow="digest")
+    text = await client.chat_text(settings.llm_long_model, "sys", "user", workflow="digest", reasoning="medium")
     assert text == "plain text answer"
-    assert gateway.chat_calls[0]["reasoning_effort"] == "medium"
+    assert gateway.chat_calls[0]["reasoning_effort"] == "medium"  # the caller's explicit level, passed through
+    await client.aclose()
+
+
+async def test_reasoning_off_is_spelled_per_model(gateway):
+    """Off (the default) is `off` on Flash-Next and `none` on the Ollama route; explicit levels pass through."""
+    gateway.chat({"answer": "x", "score": 0.1})
+    client = LLMClient()
+    await client.chat_json(settings.llm_long_model, "s", "u", SCHEMA, workflow="ask")
+    await client.chat_json(settings.llm_fast_model, "s", "u", SCHEMA, workflow="tag_items")
+    await client.chat_json(settings.llm_fast_model, "s", "u", SCHEMA, workflow="x", reasoning="low")
+    efforts = [c["reasoning_effort"] for c in gateway.chat_calls]
+    assert efforts == [settings.llm_long_reasoning_off_value, settings.llm_fast_reasoning_effort, "low"]
+    assert efforts[:2] == ["off", "none"]
+    assert client.reasoning_value("some-other-model", None) is None
+    await client.aclose()
+
+
+async def test_truncated_json_is_retried_with_more_tokens(gateway):
+    gateway.chat(truncated('{"answer": "cut off'), {"answer": "ok", "score": 0.5})
+    client = LLMClient()
+    out = await client.chat_json(settings.llm_fast_model, "s", "u", SCHEMA, workflow="x", max_tokens=100)
+    assert out["answer"] == "ok"
+    assert [c["max_tokens"] for c in gateway.chat_calls] == [100, 200]
+    assert [c["model"] for c in gateway.chat_calls] == [settings.llm_fast_model] * 2
+    await client.aclose()
+
+
+async def test_truncation_growth_is_capped_and_text_keeps_partial(gateway):
+    gateway.chat(truncated("{bad"), truncated("{bad"), truncated("{bad"))
+    client = LLMClient()
+    cap = settings.llm_max_output_tokens
+    with pytest.raises(LLMError):
+        await client.chat_json(settings.llm_fast_model, "s", "u", SCHEMA, workflow="x", max_tokens=cap - 10)
+    assert [c["max_tokens"] for c in gateway.chat_calls] == [cap - 10, cap, cap]
+    gateway.chat(truncated("partial prose"))
+    assert await client.chat_text(settings.llm_fast_model, "s", "u", workflow="x") == "partial prose"
+    with pytest.raises(LLMTruncated):
+        await client._completion({"model": "m", "max_tokens": 1, "messages": []}, "x")
     await client.aclose()
 
 
@@ -101,6 +146,24 @@ async def test_embed_unavailable_returns_none(gateway):
     await client.aclose()
 
 
+async def test_embed_short_circuits_after_400_until_reprobe(gateway):
+    gateway.embeddings(available=False)
+    client = LLMClient()
+    assert await client.embed(["a"], workflow="embed") is None
+    assert len(gateway.embed_calls) == 1
+    # second call (even from another client instance in the same process) does not hit the network
+    other = LLMClient()
+    assert await other.embed(["b"], workflow="embed") is None
+    assert other.embeddings_available is False and len(gateway.embed_calls) == 1
+    # after the cool-down (or a manual reset) it probes again and recovers
+    reset_embedding_probe()
+    gateway.embeddings(available=True)
+    vectors = await other.embed(["c"], workflow="embed")
+    assert vectors is not None and len(gateway.embed_calls) == 2 and other.embeddings_available is True
+    await client.aclose()
+    await other.aclose()
+
+
 async def test_health(gateway):
     client = LLMClient()
     h = await client.health()
@@ -133,6 +196,11 @@ def test_truncate_and_validate():
     validate_schema(None, {"anyOf": [{"type": "string"}, {"type": "null"}]})
     with pytest.raises(LLMError):
         validate_schema("nope", {"type": "string", "enum": ["a", "b"]})
+
+
+def test_chat_response_helper_marks_finish_reason():
+    assert chat_response("x")["choices"][0]["finish_reason"] == "stop"
+    assert chat_response("x", finish_reason="length")["choices"][0]["finish_reason"] == "length"
 
 
 async def test_base_url_from_settings(gateway):

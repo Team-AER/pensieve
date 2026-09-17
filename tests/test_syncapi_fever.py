@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+
 from sqlalchemy import select
 
 from pensieve import models
@@ -67,9 +69,18 @@ async def test_groups_feeds_and_favicons(client, session, user):
     assert set(feeds) == {long_id(d.feed_a.id), long_id(d.feed_b.id), long_id(d.feed_c.id)}
     a = feeds[long_id(d.feed_a.id)]
     assert a["title"] == "Feed A" and a["url"] == d.feed_a.url and a["site_url"] == "https://a.example.com"
-    assert a["is_spark"] == 0 and a["favicon_id"] == 0
+    assert a["is_spark"] == 0 and a["favicon_id"] == 0  # no cached icon bytes yet
     assert a["last_updated_on_time"] == int(d.feed_a.last_success_at.timestamp())
     assert body["favicons"] == []
+
+    d.feed_a.icon_data = b"\x89PNG\r\n\x1a\n" + b"\x00" * 8
+    d.feed_a.icon_content_type = "image/png"
+    await session.commit()
+    body = await _call(client, d.fever_key, "feeds", "favicons")
+    a = next(f for f in body["feeds"] if f["id"] == long_id(d.feed_a.id))
+    assert a["favicon_id"] == long_id(d.feed_a.id)
+    expected = "image/png;base64," + base64.b64encode(d.feed_a.icon_data).decode()
+    assert body["favicons"] == [{"id": long_id(d.feed_a.id), "data": expected}]
 
 
 async def test_items_paging_since_id_max_id_with_ids(client, session, user):

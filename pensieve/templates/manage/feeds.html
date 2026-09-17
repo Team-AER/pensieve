@@ -2,7 +2,9 @@
 {% import "_macros.html" as m %}
 {% block mtitle %}Feeds{% endblock %}
 {% block content %}
-<div class="page-head"><h1>Feeds</h1><span class="muted">{{ rows|length }} subscription{{ 's' if rows|length != 1 }}</span></div>
+<div class="page-head"><h1>Feeds</h1><span class="muted">{{ rows|length }} subscription{{ 's' if rows|length != 1 }}</span>
+  {% if paused_count %}<form method="post" action="/manage/feeds/resume-all" class="row">{{ m.csrf_field(csrf_token) }}<button class="btn btn-sm" type="submit">{{ m.icon('play', 14) }} Resume all paused ({{ paused_count }})</button></form>{% endif %}
+</div>
 <form class="card add-feed" method="post" action="/manage/feeds">
   {{ m.csrf_field(csrf_token) }}
   <div class="field grow"><label for="url">Add a feed or site</label><input class="input input-sm" id="url" name="url" type="url" placeholder="https://example.com/feed.xml or https://example.com" required></div>
@@ -24,21 +26,36 @@
   {% for r in rows %}
   <tr id="feed-{{ r.feed.id }}">
     <td>
-      <div class="row">{% if r.feed.icon_url %}<img class="favicon" src="{{ r.feed.icon_url }}" alt="" width="14" height="14">{% else %}<span class="favicon favicon-blank"></span>{% endif %}<a href="/reader/feed/{{ r.feed.id }}">{{ r.feed.title or r.feed.url }}</a>{% if r.feed.paused %}<span class="chip">paused</span>{% endif %}</div>
+      <div class="row"><img class="favicon" src="/favicons/{{ r.feed.id }}" alt="" width="14" height="14" loading="lazy"><a href="/reader/feed/{{ r.feed.id }}">{{ r.feed.title or r.feed.url }}</a>{% if r.feed.paused %}<span class="chip">paused</span>{% endif %}</div>
       <div class="faint ellipsis feed-url">{{ r.feed.url }}</div>
     </td>
     <td>
       {% if r.folder_name %}{{ r.folder_name }}
       {% elif r.suggested_name %}
-        <form class="row" method="post" action="/manage/feeds/{{ r.feed.id }}/accept-suggestion">{{ m.csrf_field(csrf_token) }}
-          <span class="chip chip-ai" title="AI suggestion{% if r.feed.suggested_folder_confidence %}, {{ (r.feed.suggested_folder_confidence * 100)|round|int }}% confident{% endif %}">{{ m.icon('sparkle', 12) }}{{ r.suggested_name }} · suggested</span>
-          <button class="btn btn-sm btn-accent" type="submit">Accept</button>
-        </form>
+        <div class="row">
+          <form class="row" method="post" action="/manage/feeds/{{ r.feed.id }}/accept-suggestion">{{ m.csrf_field(csrf_token) }}
+            <span class="chip chip-ai" title="AI suggestion{% if r.feed.suggested_folder_confidence %}, {{ (r.feed.suggested_folder_confidence * 100)|round|int }}% confident{% endif %}">{{ m.icon('sparkle', 12) }}{{ r.suggested_name }} · suggested</span>
+            <button class="btn btn-sm btn-accent" type="submit">Accept</button>
+          </form>
+          <form method="post" action="/manage/feeds/{{ r.feed.id }}/dismiss-suggestion">{{ m.csrf_field(csrf_token) }}<button class="btn btn-sm" type="submit" title="Keep in Inbox and drop this suggestion">Dismiss</button></form>
+        </div>
       {% else %}<span class="muted">Inbox</span>{% endif %}
     </td>
-    <td><span class="dot {{ r.dot }}" title="{{ r.health }}"></span> <span class="muted">{{ r.health|truncate(40) }}</span></td>
+    <td>
+      <div><span class="dot {{ r.dot }}" title="{{ r.health }}"></span> <span class="muted">{{ r.health|truncate(40) }}</span>{% if r.feed.paused %} <span class="chip">paused</span>{% endif %}</div>
+      <div class="faint feed-health-detail">
+        {% if r.feed.last_fetch_at %}last {{ r.feed.last_fetch_at|timeago }}{% else %}never fetched{% endif %}
+        · {% if r.feed.paused %}not scheduled{% elif r.feed.next_fetch_at %}next <time datetime="{{ r.feed.next_fetch_at.isoformat() }}">{{ r.feed.next_fetch_at.strftime('%-d %b %H:%M') }}</time>{% else %}not scheduled{% endif %}
+        {% if r.feed.error_count %}· {{ r.feed.error_count }} consecutive error{{ 's' if r.feed.error_count != 1 }}{% endif %}
+      </div>
+    </td>
     <td class="num">{% if r.open_rate is not none %}{{ (r.open_rate * 100)|round|int }}%{% else %}<span class="faint">–</span>{% endif %}</td>
-    <td class="num">{{ r.feed.fetch_interval_min }}m</td>
+    <td class="num">
+      <form method="post" action="/manage/feeds/{{ r.feed.id }}/interval" class="row feed-interval">{{ m.csrf_field(csrf_token) }}
+        <input class="input input-sm" type="number" name="fetch_interval_min" value="{{ r.feed.fetch_interval_min }}" min="{{ interval_bounds[0] }}" max="{{ interval_bounds[1] }}" step="1" aria-label="Poll interval in minutes" style="width:5.5em">
+        <span class="faint">min</span><button class="btn btn-sm" type="submit" title="Save poll interval">Set</button>
+      </form>
+    </td>
     <td class="actions">
       <details class="menu menu-right">
         <summary class="btn btn-sm btn-icon" aria-label="Feed actions">…</summary>

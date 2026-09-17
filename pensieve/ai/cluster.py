@@ -25,10 +25,10 @@ log = logging.getLogger(__name__)
 
 SERIES_RE = re.compile(r"\bPart\s+\d+\b|\(\d+/\d+\)|#\d+", re.IGNORECASE)
 SERIES_WINDOW_DAYS = 45
-JACCARD_THRESHOLD = 0.6
 BORDERLINE_MARGIN = 0.06
 NEIGHBOUR_LIMIT = 15
 JACCARD_POOL = 400
+MIN_JACCARD_TOKENS = 3  # "Item 7" vs "Item 8" share their only token; too little to call anything a story
 CONFIRM_TEXT_CHARS = 600
 _STOP = {
     "the",
@@ -64,7 +64,9 @@ _STOP = {
 
 
 def title_tokens(title: str) -> set[str]:
-    return {t for t in re.findall(r"[a-z0-9][a-z0-9+.-]*", title.lower()) if len(t) > 2 and t not in _STOP}
+    """Lower-cased word tokens minus stop words. Two-character tokens survive: "ai", "m5", "go", "ios" carry
+    most of the signal in tech headlines."""
+    return {t for t in re.findall(r"[a-z0-9][a-z0-9+.-]*", title.lower()) if len(t) > 1 and t not in _STOP}
 
 
 def jaccard(a: set[str], b: set[str]) -> float:
@@ -82,14 +84,17 @@ def _pair(a: uuid.UUID, b: uuid.UUID) -> frozenset:
 
 
 async def load_overrides(session: AsyncSession, user_id: uuid.UUID) -> dict[frozenset, str]:
+    """Latest action per item pair. Ordered by creation so a later split beats an earlier merge and vice versa."""
     rows = (
-        await session.scalars(select(models.ClusterOverride).where(models.ClusterOverride.user_id == user_id))
+        await session.scalars(
+            select(models.ClusterOverride)
+            .where(models.ClusterOverride.user_id == user_id)
+            .order_by(models.ClusterOverride.created_at, models.ClusterOverride.id)
+        )
     ).all()
     out: dict[frozenset, str] = {}
     for row in rows:
-        key = _pair(row.item_a, row.item_b)
-        # a later split beats an earlier merge and vice versa; rows come in insertion order (uuid pk, so sort)
-        out[key] = row.action
+        out[_pair(row.item_a, row.item_b)] = row.action
     return out
 
 
@@ -200,13 +205,19 @@ async def _series_siblings(session: AsyncSession, item: models.Item) -> list[mod
 
 async def _story_candidates(
     session: AsyncSession, user: models.User, item: models.Item, hours: int
-) -> list[tuple[models.Item, float]]:
-    """(item, similarity) pairs within the window, best first. Embeddings first; Jaccard on titles otherwise."""
+) -> tuple[list[tuple[models.Item, float]], str]:
+    """(item, similarity) pairs within the window, best first, plus the scale they are on.
+
+    ``"cosine"`` when the item has an embedding (neighbours by pgvector), ``"jaccard"`` otherwise (title token
+    overlap over the recent pool, gated at ``cluster_jaccard_confirm_threshold``). The two scales have their
+    own merge/confirm thresholds in ``cluster_items``.
+    """
     lo, hi = item.published_at - timedelta(hours=hours), item.published_at + timedelta(hours=hours)
     vec = (await get_vectors(session, [item.id])).get(item.id)
     if vec is not None:
         rows = await nearest(session, user, vec, limit=NEIGHBOUR_LIMIT, since=lo, exclude_item_ids={item.id})
-        return [(other, sim) for other, sim in rows if other.published_at <= hi]
+        return [(other, sim) for other, sim in rows if other.published_at <= hi], "cosine"
+    gate = get_settings().cluster_jaccard_confirm_threshold
     stmt = (
         select(models.Item)
         .where(
@@ -218,13 +229,18 @@ async def _story_candidates(
         .limit(JACCARD_POOL)
     )
     mine = title_tokens(item.title)
+    if len(mine) < MIN_JACCARD_TOKENS:
+        return [], "jaccard"
     scored = []
     for other in (await session.scalars(stmt)).all():
-        j = jaccard(mine, title_tokens(other.title))
-        if j >= JACCARD_THRESHOLD:
+        theirs = title_tokens(other.title)
+        if len(theirs) < MIN_JACCARD_TOKENS:
+            continue
+        j = jaccard(mine, theirs)
+        if j >= gate:
             scored.append((other, j))
     scored.sort(key=lambda p: -p[1])
-    return scored[:NEIGHBOUR_LIMIT]
+    return scored[:NEIGHBOUR_LIMIT], "jaccard"
 
 
 async def _confirm(
@@ -272,7 +288,14 @@ async def cluster_items(
     client = client or get_client()
     settings = get_settings()
     hours = settings.cluster_window_hours
-    threshold = settings.cluster_similarity_threshold
+    # (merge outright, ask the LLM) thresholds per similarity scale
+    bands = {
+        "cosine": (
+            settings.cluster_similarity_threshold + BORDERLINE_MARGIN,
+            settings.cluster_similarity_threshold,
+        ),
+        "jaccard": (settings.cluster_jaccard_merge_threshold, settings.cluster_jaccard_confirm_threshold),
+    }
     overrides = await load_overrides(session, user.id)
     feeds = {
         f.id: f.title
@@ -330,7 +353,8 @@ async def cluster_items(
             continue
 
         # 3. cross-source story
-        candidates = await _story_candidates(session, user, item, hours)
+        candidates, scale = await _story_candidates(session, user, item, hours)
+        merge_at, confirm_at = bands[scale]
         forced = {
             other
             for key, action in overrides.items()
@@ -353,9 +377,9 @@ async def cluster_items(
             if not allowed(other):
                 continue
             headline: str | None = None
-            if other.id in forced or sim >= threshold + BORDERLINE_MARGIN:
+            if other.id in forced or sim >= merge_at:
                 merge = True
-            elif sim >= threshold:
+            elif sim >= confirm_at:
                 merge, headline = await _confirm(client, item, other, feeds)
             else:
                 merge = False

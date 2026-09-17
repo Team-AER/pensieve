@@ -4,21 +4,34 @@ from sqlalchemy import select
 
 from pensieve import models
 from pensieve.web import items as items_mod
-from tests.test_web_support import HX, fake_module, login, seed_feed, seed_item
+from tests.test_web_support import HX, fake_module, login, memory_limiter, seed_feed, seed_item  # noqa: F401
 
 
-async def test_article_marks_read_unless_kept(client, session, user):
+async def test_article_get_is_pure_and_open_marks_read(client, session, user):
     feed = await seed_feed(session, user, "Feed")
     item = await seed_item(session, feed, "Read me", text="Body text here " * 100)
-    await login(client, user)
+    headers = await login(client, user)
+    # keep_unread suppresses the auto-open trigger entirely.
     r = await client.get(f"/items/{item.id}?keep_unread=1", headers=HX)
     assert r.status_code == 200 and "Read me" in r.text and "<html" not in r.text
+    assert f"/items/{item.id}/open" not in r.text
     assert await session.get(models.ItemState, (user.id, item.id)) is None
+    # A plain GET never writes; it renders the hx-post trigger that will.
     r = await client.get(f"/items/{item.id}", headers=HX)
+    assert r.status_code == 200 and "HX-Trigger" not in r.headers
+    assert f'hx-post="/items/{item.id}/open"' in r.text and 'hx-trigger="load"' in r.text
+    assert await session.get(models.ItemState, (user.id, item.id)) is None
+    assert "2 min read" in r.text
+    # The POST fired after render does the write, exactly once.
+    r = await client.post(f"/items/{item.id}/open", headers=headers | HX)
     assert r.status_code == 200 and "item-state" in r.headers.get("HX-Trigger", "")
     state = await session.get(models.ItemState, (user.id, item.id))
     assert state is not None and state.is_read
-    assert "2 min read" in r.text
+    r = await client.post(f"/items/{item.id}/open", headers=headers | HX)
+    assert r.status_code == 200 and "HX-Trigger" not in r.headers
+    # Once read, the article no longer renders the trigger.
+    r = await client.get(f"/items/{item.id}", headers=HX)
+    assert f"/items/{item.id}/open" not in r.text
     # Deep link renders the full reader with the article open.
     r = await client.get(f"/items/{item.id}")
     assert r.status_code == 200 and "<html" in r.text and "Read me" in r.text
@@ -79,7 +92,7 @@ async def test_notes_and_tags(client, session, user):
         pytest_monkeypatch.undo()
     ai = await session.get(models.ItemAI, (user.id, item.id))
     await session.refresh(ai)
-    assert ai.tags == [] and recorded == [("item_tag", item.id, "tags", "ai-tag", None)]
+    assert ai.tags == [] and recorded == [("item_tag", item.id, "tags", "ai-tag", "")]
 
 
 async def test_summarize_enqueues_and_polls(client, session, user, monkeypatch):

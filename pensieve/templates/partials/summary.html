@@ -5,9 +5,9 @@
   <div class="ai-summary">{% for line in ai.summary.splitlines() %}{% if line.strip() %}<p>{{ line }}</p>{% endif %}{% endfor %}</div>
 </section>
 {% elif error %}
-<div class="ai-card"><span class="muted">{{ error }}</span></div>
+<div class="ai-card"><span class="muted">{{ error }}</span> <button type="button" class="btn btn-sm btn-ai" hx-post="/items/{{ item.id }}/summarize" hx-target="#summary-{{ item.id }}" hx-swap="innerHTML">Retry</button></div>
 {% elif pending %}
-<div class="ai-card ai-pending" hx-get="/items/{{ item.id }}/summary" hx-trigger="every 2s" hx-swap="outerHTML">
+<div class="ai-card ai-pending" hx-get="/items/{{ item.id }}/summary?n={{ n or 1 }}" hx-trigger="every 2s" hx-swap="outerHTML">
   <span class="eyebrow eyebrow-ai">{{ m.icon('sparkle', 14) }} Summarizing</span>
   <span class="muted">Asking the local model… this usually takes a few seconds.</span>
 </div>

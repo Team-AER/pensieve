@@ -42,6 +42,16 @@
     const t = e.target;
     if (t.matches('[data-toggle]')) { const el = $(t.dataset.toggle); if (el) el.classList.toggle('hidden', !t.checked); if (el && t.checked) { const f = el.querySelector('textarea'); if (f) f.focus(); } }
     if (t.matches('[data-theme-select]')) { try { localStorage.setItem('pensieve.theme', t.value); } catch (_) {} document.documentElement.dataset.theme = t.value; }
+    if (t.matches('[data-font-select]')) document.documentElement.dataset.font = t.value;
+    if (t.matches('[data-measure-select]')) document.documentElement.dataset.measure = t.value;
+  });
+  document.addEventListener('click', (e) => { const b = e.target.closest('[data-action="share"]'); if (b) { e.preventDefault(); share(b); } });
+  // Signing out: tell the service worker to drop its cached reader pages and offline queue.
+  document.addEventListener('submit', (e) => {
+    const f = e.target;
+    if (f && f.getAttribute && f.getAttribute('action') === '/logout' && navigator.serviceWorker && navigator.serviceWorker.controller) {
+      navigator.serviceWorker.controller.postMessage({ type: 'clear' });
+    }
   });
 
   // ---- Selection ----
@@ -72,6 +82,56 @@
   function currentArticle() { return $('#article article.article'); }
   function articleButton(action) { const a = currentArticle(); return a ? a.querySelector('[data-action="' + action + '"]') : null; }
   function selectionMatchesArticle() { const a = currentArticle(); const s = selected(); return a && s && a.dataset.id === s.dataset.id; }
+  function csrfToken() { const m = $('meta[name="csrf-token"]'); return m ? m.content : ''; }
+  function postState(path) {
+    return fetch(path, { method: 'POST', credentials: 'same-origin', headers: { 'X-CSRF-Token': csrfToken(), 'HX-Request': 'true' } });
+  }
+  // s / m act on the open article when it matches the selection (or nothing is selected); otherwise on the row.
+  function toggleRowState(action) {
+    const row = selected();
+    if (!row) return false;
+    const id = row.dataset.id;
+    if (action === 'star') {
+      const on = row.classList.contains('starred');
+      postState('/items/' + id + '/' + (on ? 'unstar' : 'star')).then((r) => { if (r.ok) { row.classList.toggle('starred', !on); if (window.htmx) window.htmx.trigger(document.body, 'counts-changed'); } });
+    } else {
+      const on = row.classList.contains('read');
+      postState('/items/' + id + '/' + (on ? 'unread' : 'read')).then((r) => { if (r.ok) { row.classList.toggle('read', !on); if (window.htmx) window.htmx.trigger(document.body, 'counts-changed'); } });
+    }
+    return true;
+  }
+  function stateKey(action) {
+    const useArticle = currentArticle() && (selectionMatchesArticle() || !selected());
+    if (useArticle) { const b = articleButton(action); if (b) { b.click(); return; } }
+    toggleRowState(action);
+  }
+  function markAllRead() {
+    const form = $('#list form[action$="/mark-read"]');
+    if (!form) return;
+    const title = ($('#list .list-title') || {}).textContent || 'this view';
+    if (!window.confirm('Mark everything in ' + title.trim() + ' as read?')) return;
+    const everything = form.querySelector('button[name="older_than"][value=""]');
+    if (everything) form.requestSubmit(everything); else form.requestSubmit();
+  }
+  // Reading size: cycle data-font on <html>, persist through /manage/account/font.
+  const FONT_SIZES = ['s', 'm', 'l', 'xl'];
+  function stepFont(delta) {
+    const html = document.documentElement;
+    const idx = Math.max(0, FONT_SIZES.indexOf(html.dataset.font || 'm'));
+    const next = FONT_SIZES[Math.max(0, Math.min(FONT_SIZES.length - 1, idx + delta))];
+    if (next === html.dataset.font) return;
+    html.dataset.font = next;
+    const body = new URLSearchParams({ font_size: next });
+    fetch('/manage/account/font', { method: 'POST', credentials: 'same-origin', body, headers: { 'X-CSRF-Token': csrfToken() } }).catch(() => {});
+  }
+  function share(btn) {
+    const url = btn.dataset.shareUrl, title = btn.dataset.shareTitle || document.title;
+    if (!url) return;
+    if (navigator.share) { navigator.share({ title, url }).catch(() => {}); return; }
+    const done = () => { const old = btn.textContent; btn.textContent = 'Link copied'; setTimeout(() => { btn.textContent = old; }, 1500); };
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(url).then(done, () => window.prompt('Copy this link', url));
+    else window.prompt('Copy this link', url);
+  }
 
   // Keep row markers in sync with server-side state changes (HX-Trigger: item-state).
   document.body.addEventListener('item-state', (e) => {
@@ -141,8 +201,11 @@
         else open(s);
         break;
       }
-      case 's': { e.preventDefault(); const b = articleButton('star'); if (b) b.click(); break; }
-      case 'm': { e.preventDefault(); const b = articleButton('read'); if (b) b.click(); break; }
+      case 's': e.preventDefault(); stateKey('star'); break;
+      case 'm': e.preventDefault(); stateKey('read'); break;
+      case 'A': e.preventDefault(); markAllRead(); break;
+      case '+': case '=': e.preventDefault(); stepFont(1); break;
+      case '-': case '_': e.preventDefault(); stepFont(-1); break;
       case 'v': {
         e.preventDefault();
         const a = currentArticle(); const s = selected();
@@ -191,12 +254,30 @@
     touchX = touchY = null;
   }, { passive: true });
 
-  // ---- Drag-to-reorder lists (folders) ----
-  let dragging = null;
-  document.addEventListener('dragstart', (e) => { const li = e.target.closest('.sortable-row'); if (!li) return; dragging = li; li.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; });
-  document.addEventListener('dragover', (e) => { const li = e.target.closest('.sortable-row'); if (!li || !dragging || li === dragging) return; e.preventDefault(); li.classList.add('over'); });
-  document.addEventListener('dragleave', (e) => { const li = e.target.closest('.sortable-row'); if (li) li.classList.remove('over'); });
+  // ---- Drag-to-reorder lists (folders) and drag feeds between folders in the nav tree ----
+  let dragging = null, draggingFeed = null;
+  document.addEventListener('dragstart', (e) => {
+    const feed = e.target.closest('.nav-feed[data-feed-id]');
+    if (feed) { draggingFeed = feed; feed.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', feed.dataset.feedId); } catch (_) {} return; }
+    const li = e.target.closest('.sortable-row'); if (!li) return; dragging = li; li.classList.add('dragging'); e.dataTransfer.effectAllowed = 'move';
+  });
+  document.addEventListener('dragover', (e) => {
+    if (draggingFeed) { const target = e.target.closest('[data-drop-folder]'); if (target) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; target.classList.add('drop-over'); } return; }
+    const li = e.target.closest('.sortable-row'); if (!li || !dragging || li === dragging) return; e.preventDefault(); li.classList.add('over');
+  });
+  document.addEventListener('dragleave', (e) => {
+    const target = e.target.closest('[data-drop-folder]'); if (target) target.classList.remove('drop-over');
+    const li = e.target.closest('.sortable-row'); if (li) li.classList.remove('over');
+  });
   document.addEventListener('drop', (e) => {
+    if (draggingFeed) {
+      const target = e.target.closest('[data-drop-folder]'); if (!target) return;
+      e.preventDefault(); target.classList.remove('drop-over');
+      const body = new URLSearchParams({ folder_id: target.dataset.dropFolder || '' });
+      fetch('/manage/feeds/' + draggingFeed.dataset.feedId + '/move', { method: 'POST', credentials: 'same-origin', body, headers: { 'X-CSRF-Token': csrfToken(), 'HX-Request': 'true' } })
+        .then(() => { if (window.htmx) window.htmx.trigger(document.body, 'counts-changed'); });
+      return;
+    }
     const li = e.target.closest('.sortable-row'); if (!li || !dragging) return;
     e.preventDefault(); li.classList.remove('over');
     const list = li.parentElement;
@@ -206,7 +287,11 @@
     if (input) input.value = Array.from(list.querySelectorAll('.sortable-row')).map((r) => r.dataset.id).join(',');
     if (form) form.requestSubmit();
   });
-  document.addEventListener('dragend', () => { if (dragging) dragging.classList.remove('dragging'); dragging = null; });
+  document.addEventListener('dragend', () => {
+    if (dragging) dragging.classList.remove('dragging'); dragging = null;
+    if (draggingFeed) draggingFeed.classList.remove('dragging'); draggingFeed = null;
+    $$('[data-drop-folder].drop-over').forEach((t) => t.classList.remove('drop-over'));
+  });
 
   // ---- Offline queue replay ----
   window.addEventListener('online', () => { if (navigator.serviceWorker && navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage({ type: 'replay' }); });

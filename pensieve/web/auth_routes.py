@@ -19,7 +19,8 @@ from pensieve.auth import (
 )
 from pensieve.config import get_settings
 from pensieve.models import User, UserRole
-from pensieve.web.templating import DB, render
+from pensieve.web.ratelimit import client_ip, get_limiter
+from pensieve.web.templating import DB, CsrfUser, check_csrf, render
 
 router = APIRouter()
 
@@ -38,7 +39,7 @@ def set_session(response: Response, user: User) -> None:
         max_age=SESSION_MAX_AGE_S,
         httponly=True,
         samesite="lax",
-        secure=get_settings().base_url.lower().startswith("https"),
+        secure=get_settings().session_cookie_secure,
         path="/",
     )
 
@@ -63,23 +64,40 @@ async def login_submit(
     email: Annotated[str, Form()] = "",
     password: Annotated[str, Form()] = "",
     next: Annotated[str, Form()] = "/",
+    csrf_token: Annotated[str, Form()] = "",
 ):
     email = email.strip().lower()
-    user = await session.scalar(select(User).where(func.lower(User.email) == email))
-    if user is None or not verify_password(password, user.password_hash):
+
+    def fail(message: str, status_code: int, headers: dict[str, str] | None = None):
         return render(
             request,
             "login.html",
-            {"next": safe_next(next), "error": "That email and password don't match.", "email": email},
-            status_code=401,
+            {"next": safe_next(next), "error": message, "email": email},
+            status_code=status_code,
+            headers=headers,
         )
+
+    # The login form carries an anonymous CSRF token (subject "anon") so a third-party page cannot log the
+    # browser into an attacker-chosen account (login CSRF).
+    if not check_csrf(csrf_token, None):
+        return fail("Your session expired. Please try again.", 403)
+    limiter = get_limiter()
+    key = (client_ip(request), email)
+    retry_after = await limiter.blocked_for(key)
+    if retry_after:
+        return fail("Too many failed sign-ins. Try again later.", 429, {"Retry-After": str(retry_after)})
+    user = await session.scalar(select(User).where(func.lower(User.email) == email))
+    if user is None or not verify_password(password, user.password_hash):
+        await limiter.record_failure(key)
+        return fail("That email and password don't match.", 401)
+    await limiter.reset(key)
     response = RedirectResponse(safe_next(next), status_code=303)
     set_session(response, user)
     return response
 
 
 @router.post("/logout")
-async def logout():
+async def logout(user: CsrfUser):
     response = RedirectResponse("/login", status_code=303)
     response.delete_cookie(SESSION_COOKIE, path="/")
     return response

@@ -30,11 +30,12 @@ from sqlalchemy import (
     cast,
     exists,
     func,
+    literal,
     literal_column,
     select,
     tuple_,
 )
-from sqlalchemy.dialects.postgresql import BIT
+from sqlalchemy.dialects.postgresql import ARRAY, BIT
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.datastructures import ImmutableMultiDict
@@ -82,14 +83,29 @@ def item_tag_id(item_id: uuid.UUID) -> str:
 
 
 def long_id_sql(column: ColumnElement) -> ColumnElement[int]:
-    """SQL equivalent of `long_id()` for a UUID column: ('x' || first16hex)::bit(64)::bigint & INT63_MASK."""
-    hex16 = func.substr(func.replace(cast(column, Text), "-", ""), 1, 16)
+    """SQL equivalent of `long_id()` for a UUID column: ('x' || first16hex)::bit(64)::bigint & INT63_MASK.
+
+    Every constant is inlined (no bind parameters) so the expression is structurally identical to the
+    ``ix_items_long_id`` expression index (``models.LONG_ID_INDEX_SQL``) and the planner can use it.
+    """
+    hex16 = func.substr(
+        func.replace(cast(column, Text), literal_column("'-'"), literal_column("''")),
+        literal_column("1"),
+        literal_column("16"),
+    )
     as_bigint = cast(cast(literal_column("'x'").op("||")(hex16), BIT(64)), BigInteger)
     return as_bigint.op("&")(literal_column(str(INT63_MASK)))
 
 
+_HEX16_RE = re.compile(r"^[0-9a-fA-F]{16}$")
+
+
 def parse_item_id(raw: str) -> int | None:
-    """Accept `tag:google.com,2005:reader/item/<hex>`, bare 16-hex, or a decimal long id."""
+    """Accept `tag:google.com,2005:reader/item/<hex>`, bare 16-hex, or a decimal long id.
+
+    The zero-padded 16-hex form is checked before the decimal form (a hex id made only of digits would
+    otherwise be misread as decimal). Decimal long ids from `stream/items/ids` are 18-19 digits.
+    """
     raw = raw.strip()
     if raw.startswith(ITEM_TAG_PREFIX):
         raw = raw[len(ITEM_TAG_PREFIX) :]
@@ -97,16 +113,12 @@ def parse_item_id(raw: str) -> int | None:
             return int(raw, 16) & INT63_MASK
         except ValueError:
             return None
+    if _HEX16_RE.match(raw):
+        return int(raw, 16) & INT63_MASK
     try:
         return int(raw, 10) & INT63_MASK
     except ValueError:
-        pass
-    if len(raw) == 16:
-        try:
-            return int(raw, 16) & INT63_MASK
-        except ValueError:
-            return None
-    return None
+        return None
 
 
 async def items_by_long_ids(session: AsyncSession, user_id: uuid.UUID, ids: list[int]) -> list[uuid.UUID]:
@@ -486,6 +498,15 @@ def _base_rows(user_id: uuid.UUID, item_ids: list[uuid.UUID], **overrides) -> li
     return rows
 
 
+def _invalidate_nav(user_id: uuid.UUID) -> None:
+    """Drop the web package's cached unread counts for this user (best effort, lazy import)."""
+    try:
+        from pensieve.web.queries import invalidate_nav_cache
+    except ImportError:  # web package absent
+        return
+    invalidate_nav_cache(user_id)
+
+
 async def set_read(session: AsyncSession, user_id: uuid.UUID, item_ids: list[uuid.UUID], read: bool) -> None:
     if not item_ids:
         return
@@ -498,6 +519,7 @@ async def set_read(session: AsyncSession, user_id: uuid.UUID, item_ids: list[uui
         set_={"is_read": read, "read_at": now if read else None, "updated_at": now},
     )
     await session.execute(stmt)
+    _invalidate_nav(user_id)
 
 
 async def set_starred(
@@ -514,6 +536,7 @@ async def set_starred(
         set_={"is_starred": starred, "starred_at": now if starred else None, "updated_at": now},
     )
     await session.execute(stmt)
+    _invalidate_nav(user_id)
 
 
 async def edit_tags(
@@ -542,19 +565,47 @@ async def edit_tags(
     await session.flush()
 
 
+def mark_read_from_select(user_id: uuid.UUID, item_ids_select, now: datetime):
+    """``INSERT INTO item_states ... SELECT ... ON CONFLICT DO UPDATE SET is_read`` for a query of item ids.
+
+    ``item_ids_select`` must select exactly one column, the item id. The write happens entirely in the
+    database; ``RETURNING item_id`` lets callers collect what changed without a separate read.
+    """
+    sub = item_ids_select.subquery("to_read")
+    source = select(
+        literal(user_id).label("user_id"),
+        sub.c[0].label("item_id"),
+        literal(True).label("is_read"),
+        literal(False).label("is_starred"),
+        literal(now).label("read_at"),
+        literal(False).label("hidden"),
+        cast(literal_column("'{}'"), ARRAY(Text)).label("tags"),
+        literal(now).label("updated_at"),
+    )
+    stmt = pg_insert(ItemState).from_select(
+        ["user_id", "item_id", "is_read", "is_starred", "read_at", "hidden", "tags", "updated_at"], source
+    )
+    return stmt.on_conflict_do_update(
+        index_elements=[ItemState.user_id, ItemState.item_id],
+        set_={"is_read": True, "read_at": now, "updated_at": now},
+    ).returning(ItemState.item_id)
+
+
 async def mark_stream_read(
     session: AsyncSession, user_id: uuid.UUID, stream: Stream, *, before: datetime | None = None
 ) -> int:
-    """Mark every unread item in the stream (optionally published at/before `before`) as read."""
+    """Mark every unread item in the stream (optionally published at/before `before`) as read, in one
+    server-side ``INSERT ... SELECT ... ON CONFLICT DO UPDATE``."""
     where = await stream_filter(session, user_id, stream)
     if where is None:
         return 0
     stmt = visible_items(user_id).with_only_columns(Item.id).where(where, is_unread_expr())
     if before is not None:
         stmt = stmt.where(Item.published_at <= before)
-    ids = list(await session.scalars(stmt))
-    await set_read(session, user_id, ids, True)
-    return len(ids)
+    result = await session.execute(mark_read_from_select(user_id, stmt, datetime.now(UTC)))
+    count = len(result.all())
+    _invalidate_nav(user_id)
+    return count
 
 
 __all__ = [
@@ -589,6 +640,7 @@ __all__ = [
     "label_stream_id",
     "long_id",
     "long_id_sql",
+    "mark_read_from_select",
     "mark_stream_read",
     "parse_item_id",
     "parse_stream",

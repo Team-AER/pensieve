@@ -14,16 +14,17 @@ Fever wants integer ids for feeds, groups and items; all three are `common.long_
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Request, Response
 from fastapi.responses import JSONResponse
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from pensieve.models import ApiToken, Feed, Folder, Item, User
+from pensieve.models import ApiToken, Feed, Folder, Item, ItemState, User
 from pensieve.syncapi import router
 from pensieve.syncapi.common import (
     DbSession,
@@ -44,6 +45,8 @@ from pensieve.syncapi.common import (
 
 API_VERSION = 3
 PAGE_SIZE = 50
+MAX_STATE_IDS = 20_000
+RECENTLY_READ = timedelta(hours=1)
 
 fever_router = APIRouter(tags=["fever"])
 
@@ -103,7 +106,7 @@ async def _feeds(session: AsyncSession, user_id: uuid.UUID) -> list[dict]:
     return [
         {
             "id": long_id(feed.id),
-            "favicon_id": 0,
+            "favicon_id": long_id(feed.id) if feed.icon_data else 0,
             "title": feed.title or feed.url,
             "url": feed.url,
             "site_url": feed.site_url or "",
@@ -156,9 +159,49 @@ async def _items(session: AsyncSession, user_id: uuid.UUID, params) -> tuple[lis
     return items, int(total or 0)
 
 
+async def _favicons(session: AsyncSession, user_id: uuid.UUID) -> list[dict]:
+    """Cached icon bytes as ``{"id": favicon_id, "data": "<mime>;base64,<...>"}`` (Fever's shape)."""
+    rows = await session.execute(
+        select(Feed.id, Feed.icon_data, Feed.icon_content_type).where(
+            Feed.user_id == user_id, Feed.icon_data.is_not(None)
+        )
+    )
+    return [
+        {
+            "id": long_id(feed_id),
+            "data": f"{content_type or 'image/x-icon'};base64,{base64.b64encode(data).decode('ascii')}",
+        }
+        for feed_id, data, content_type in rows
+    ]
+
+
 async def _state_ids(session: AsyncSession, user_id: uuid.UUID, clause) -> str:
-    stmt = visible_items(user_id).with_only_columns(Item.id).where(clause)
+    """Comma-separated long ids for a state, newest ``MAX_STATE_IDS`` first (Fever clients want a bounded list)."""
+    stmt = (
+        visible_items(user_id)
+        .with_only_columns(Item.id)
+        .where(clause)
+        .order_by(Item.published_at.desc(), Item.id.desc())
+        .limit(MAX_STATE_IDS)
+    )
     return ",".join(str(long_id(i)) for i in await session.scalars(stmt))
+
+
+async def _unread_recently_read(session: AsyncSession, user_id: uuid.UUID) -> int:
+    """Fever ``unread_recently_read=1``: revert reads made in the last hour (an "oops" for mark-all-read)."""
+    since = datetime.now(UTC) - RECENTLY_READ
+    result = await session.execute(
+        update(ItemState)
+        .where(ItemState.user_id == user_id, ItemState.is_read.is_(True), ItemState.read_at >= since)
+        .values(is_read=False, read_at=None, updated_at=datetime.now(UTC))
+    )
+    try:
+        from pensieve.web.queries import invalidate_nav_cache
+
+        invalidate_nav_cache(user_id)
+    except ImportError:
+        pass
+    return result.rowcount or 0
 
 
 async def _mark(session: AsyncSession, user_id: uuid.UUID, params) -> None:
@@ -215,6 +258,8 @@ async def _fever(request: Request, session: AsyncSession) -> Response:
     }
     if "mark" in params:
         await _mark(session, user.id, params)
+    if params.get("unread_recently_read") in {"1", "true"}:
+        await _unread_recently_read(session, user.id)
     if "groups" in params:
         payload["groups"], payload["feeds_groups"] = await _groups(session, user.id)
     if "feeds" in params:
@@ -222,7 +267,7 @@ async def _fever(request: Request, session: AsyncSession) -> Response:
         if "feeds_groups" not in payload:
             _, payload["feeds_groups"] = await _groups(session, user.id)
     if "favicons" in params:
-        payload["favicons"] = []
+        payload["favicons"] = await _favicons(session, user.id)
     if "items" in params:
         payload["items"], payload["total_items"] = await _items(session, user.id, params)
     if "links" in params:

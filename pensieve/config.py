@@ -27,6 +27,16 @@ class Settings(BaseSettings):
     fetch_per_host_concurrency: int = 2
     item_retention_days: int = 730
 
+    # Fetch hardening, favicons, web security and login rate limiting (fetch/web/syncapi owner block)
+    fetch_max_bytes: int = 10 * 1024 * 1024  # abort any feed/page download past this many (decoded) bytes
+    fetch_total_timeout_s: float = 60.0  # wall-clock cap per fetch incl. redirects, DNS and body streaming
+    favicon_max_bytes: int = 512 * 1024
+    favicon_refresh_days: int = 7
+    session_cookie_secure: bool = False  # LAN over plain http by default; set true behind TLS (also enables HSTS)
+    login_rate_limit_attempts: int = 10  # failed sign-ins per (client ip, email) before a 429
+    login_rate_limit_window_s: int = 15 * 60
+    undo_batch_max_ids: int = 500  # mark-all-read keeps at most this many ids for Undo
+
     # LLM gateway (LiteLLM, OpenAI-compatible, keyless on the LAN). Never a public API.
     llm_base_url: str = "http://llm-proxy.cls/v1"
     llm_api_key: str = "unused"  # gateway overwrites Authorization; SDK still wants a value
@@ -48,6 +58,14 @@ class Settings(BaseSettings):
     digest_hour_local: int = 7
     digest_minute_local: int = 30
     timezone: str = "Asia/Kolkata"
+
+    # AI package (reasoning, output limits, embeddings probe, title-Jaccard clustering)
+    llm_long_reasoning_off_value: str = "off"  # Flash-Next spells "no thinking" as `off`; Ollama Qwen as `none`
+    llm_max_output_tokens: int = 8192  # ceiling when a truncated (finish_reason=length) JSON call is retried
+    llm_embeddings_reprobe_min: int = 30  # after a 400/404 on /embeddings, do not retry for this many minutes
+    llm_digest_reasoning: str = "low"  # reasoning_effort for the digest / weekly review / profile (long model)
+    cluster_jaccard_merge_threshold: float = 0.45  # no-embeddings path: title Jaccard at/above this merges outright
+    cluster_jaccard_confirm_threshold: float = 0.30  # ... and this band up to merge asks the LLM to confirm
 
 
 @lru_cache

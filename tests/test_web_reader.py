@@ -1,10 +1,11 @@
+
 import re
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 
 from pensieve import models
-from tests.test_web_support import HX, login, make_user, seed_feed, seed_item
+from tests.test_web_support import HX, login, make_user, memory_limiter, seed_feed, seed_item  # noqa: F401
 
 
 async def test_reader_lists_items_with_unread_counts(client, session, user):
@@ -88,20 +89,20 @@ async def test_mark_all_read_with_undo(client, session, user):
     # Older than a day: only the old one.
     r = await client.post("/reader/unread/mark-read", data={"older_than": "1d"}, headers=headers | HX)
     assert r.status_code == 200
-    ids = re.search(r'name="ids" value="([^"]*)"', r.text).group(1)
-    assert ids == str(old.id)
+    assert "Marked 1 item as read" in r.text
+    token = re.search(r'name="token" value="([^"]*)"', r.text).group(1)
+    assert token and str(old.id) not in r.text.split("undo-bar")[1].split("</form>")[0]  # only the token travels
     state = await session.get(models.ItemState, (user.id, old.id))
     assert state is not None and state.is_read
     assert await session.get(models.ItemState, (user.id, new.id)) is None
-    # Undo restores.
-    r = await client.post("/items/undo-read", data={"ids": ids, "view": "unread"}, headers=headers | HX)
+    # Undo restores (and a token is single-use).
+    r = await client.post("/items/undo-read", data={"token": token, "view": "unread"}, headers=headers | HX)
     assert r.status_code == 200
     await session.refresh(state)
     assert not state.is_read
     # Everything.
     r = await client.post("/reader/unread/mark-read", data={"older_than": ""}, headers=headers | HX)
-    ids = re.search(r'name="ids" value="([^"]*)"', r.text).group(1).split(",")
-    assert set(ids) == {str(old.id), str(new.id)}
+    assert "Marked 2 items as read" in r.text
     session.expire(state)
     rows = list(await session.scalars(select(models.ItemState).where(models.ItemState.user_id == user.id)))
     assert all(s.is_read for s in rows) and len(rows) == 2

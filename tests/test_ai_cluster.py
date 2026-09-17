@@ -6,7 +6,7 @@ from sqlalchemy import select
 from pensieve import models
 from pensieve.ai import cluster
 from pensieve.config import get_settings
-from tests.test_ai_helpers import angle_for, gateway, make_embedding, make_feed, make_item  # noqa: F401
+from tests.test_ai_helpers import angle_for, gateway, make_embedding, make_feed, make_item, now  # noqa: F401
 
 settings = get_settings()
 THR = settings.cluster_similarity_threshold
@@ -246,3 +246,78 @@ async def test_unmerge_keeps_cluster_with_two_left(session, user, gateway):
     await session.refresh(c)
     assert c.source_count == 2 and c.canonical_item_id == y.id
     assert await members(session, c) == {y.id, z.id}
+
+
+async def test_jaccard_regression_ios_siri_pair_merges(session, user, gateway):
+    """Real pair that the old tokeniser (len > 2, gate 0.6) missed: "ai", "ios" are two/three-letter tokens."""
+    a, b = await two_feeds(session, user)
+    x = make_item(a, "iOS 27.2 expands Siri AI to these new languages", "…", age=timedelta(hours=20))
+    y = make_item(b, "iOS 27.2 Adds Siri AI in New Languages", "…", age=timedelta(hours=1))
+    session.add_all([x, y])
+    await session.commit()
+    j = cluster.jaccard(cluster.title_tokens(x.title), cluster.title_tokens(y.title))
+    assert {"ai", "ios", "siri"} <= cluster.title_tokens(y.title)
+    assert j >= settings.cluster_jaccard_confirm_threshold
+    gateway.chat({"same_story": True, "headline": "iOS 27.2 brings Siri AI to new languages"})
+    (c,) = await cluster.cluster_items(session, user, [y])
+    await session.commit()
+    assert c.kind == "story" and await members(session, c) == {x.id, y.id} and c.source_count == 2
+    assert len(await clusters_for(session, user)) == 1
+
+
+async def test_jaccard_confirm_band_asks_llm_and_honours_no(session, user, gateway):
+    a, b = await two_feeds(session, user)
+    # tokens: {rust, 1.90, released, borrow, checker} vs {rust, 1.90, released, async, closures, stabilised}
+    x = make_item(a, "Rust 1.90 released with new borrow checker", "…", age=timedelta(hours=3))
+    y = make_item(b, "Rust 1.90 released: async closures stabilised", "…", age=timedelta(hours=1))
+    session.add_all([x, y])
+    await session.commit()
+    j = cluster.jaccard(cluster.title_tokens(x.title), cluster.title_tokens(y.title))
+    assert settings.cluster_jaccard_confirm_threshold <= j < settings.cluster_jaccard_merge_threshold
+    gateway.chat({"same_story": False, "headline": "x"})
+    assert await cluster.cluster_items(session, user, [y]) == []
+    assert len(gateway.chat_calls) == 1 and gateway.chat_calls[0]["reasoning_effort"] == "none"
+    gateway.chat({"same_story": True, "headline": "Rust 1.90 released"})
+    (c,) = await cluster.cluster_items(session, user, [y])
+    assert await members(session, c) == {x.id, y.id}
+
+
+async def test_jaccard_below_confirm_band_never_calls_llm(session, user, gateway):
+    a, b = await two_feeds(session, user)
+    x = make_item(a, "Rust 1.90 released with new borrow checker", "…", age=timedelta(hours=3))
+    y = make_item(b, "Postgres 18 ships async IO", "…", age=timedelta(hours=1))
+    session.add_all([x, y])
+    await session.commit()
+    assert await cluster.cluster_items(session, user, [y]) == [] and gateway.chat_calls == []
+
+
+async def test_jaccard_ignores_titles_with_too_few_tokens(session, user, gateway):
+    a, b = await two_feeds(session, user)
+    x = make_item(a, "Weekly roundup", "links from feed A", age=timedelta(hours=3))
+    y = make_item(b, "Weekly roundup", "links from feed B", age=timedelta(hours=1))
+    session.add_all([x, y])
+    await session.commit()
+    assert await cluster.cluster_items(session, user, [y]) == [] and gateway.chat_calls == []
+
+
+def test_title_tokens_keep_short_tokens():
+    assert cluster.title_tokens("Apple M5 and the AI race on iOS") == {"apple", "m5", "ai", "race", "ios"}
+    assert cluster.title_tokens("A B c") == set()  # single characters still drop; "a" is a stop word
+
+
+async def test_load_overrides_latest_action_wins(session, user, gateway):
+    a, b = await two_feeds(session, user)
+    x, y = make_item(a, "X", "…"), make_item(b, "Y", "…")
+    session.add_all([x, y])
+    await session.flush()
+    t0 = now()
+    # deliberately insert the *later* split first so insertion/uuid order would give the wrong answer
+    session.add(models.ClusterOverride(user_id=user.id, item_a=x.id, item_b=y.id, action="split", created_at=t0))
+    session.add(
+        models.ClusterOverride(
+            user_id=user.id, item_a=y.id, item_b=x.id, action="merge", created_at=t0 - timedelta(days=1)
+        )
+    )
+    await session.commit()
+    overrides = await cluster.load_overrides(session, user.id)
+    assert overrides == {frozenset((x.id, y.id)): "split"}

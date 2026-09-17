@@ -251,3 +251,13 @@
   .list-head .seg { display: none; }
   .list-head .seg[aria-label="Grouping"] { display: inline-flex; }
 }
+
+/* Reading size / measure (tokens in app.css; +/- keys and the account page set data-font / data-measure). */
+body { font-size: var(--fs-body); }
+.prose { font-size: var(--fs-prose); max-width: var(--measure); }
+.article-title { max-width: var(--measure); }
+/* Drag a feed onto a folder header in the nav. */
+.nav-item[data-drop-folder].drop-over, .nav-eyebrow[data-drop-folder].drop-over { outline: 2px dashed var(--accent); outline-offset: -2px; }
+.nav-feed.dragging { opacity: 0.5; }
+.feed-health-detail { font-size: 11px; margin-top: 2px; }
+.feed-interval { justify-content: flex-end; gap: 4px; }

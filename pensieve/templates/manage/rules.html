@@ -22,6 +22,7 @@
   <div class="row rule-actions">
     <span class="faint">{{ 'Global' if not r.feed_id else feed_names.get(r.feed_id, 'feed') }} · {{ 'enabled' if r.enabled else 'disabled' }}</span>
     <form method="post" action="/manage/rules/{{ r.id }}/toggle">{{ m.csrf_field(csrf_token) }}<button class="btn btn-sm" type="submit">{{ 'Disable' if r.enabled else 'Enable' }}</button></form>
+    <form method="post" action="/manage/rules/{{ r.id }}/apply" hx-confirm="Apply this rule to items already stored? Hidden, starred, tagged or read marks it adds can't be undone in bulk.">{{ m.csrf_field(csrf_token) }}<button class="btn btn-sm" type="submit" title="Run this rule over existing items">Apply to existing items</button></form>
     <form method="post" action="/manage/rules/{{ r.id }}/delete" hx-confirm="Delete this rule?">{{ m.csrf_field(csrf_token) }}<button class="btn btn-sm btn-danger" type="submit">{{ m.icon('trash', 14) }} Delete</button></form>
   </div>
 </div>

@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from pensieve import queue
-from pensieve.models import Cluster, ClusterItem, Feed, Item, ItemAI, ItemState, Note, User
+from pensieve.models import AIJob, Cluster, ClusterItem, Feed, Item, ItemAI, ItemState, Note, User
 from pensieve.web.queries import get_state, get_user_item, set_read, set_starred, upsert_states
 from pensieve.web.templating import DB, CsrfUser, CurrentUser, hx_trigger, render
 
@@ -87,24 +87,37 @@ async def article(
     session: DB,
     keep_unread: int = 0,
 ):
+    """Render the article. Pure: marking it read is a separate ``POST /items/{id}/open`` the partial fires
+    after it renders (unless ``keep_unread=1``), so prefetches, caches and crawlers never change state."""
     item, feed = await load_item(session, user, item_id)
-    marked = False
-    if not keep_unread:
-        state = await get_state(session, user, item.id)
-        if not (state and state.is_read):
-            await set_read(session, user.id, [item.id], True)
-            await session.commit()
-            marked = True
     ctx = await article_context(session, user, item, feed)
-    headers = state_headers(item, is_read=True) if marked else None
+    ctx["auto_open"] = not keep_unread and not ctx["is_read"]
     if request.headers.get("hx-request") == "true":
-        return render(request, "partials/article.html", ctx, user=user, headers=headers)
+        return render(request, "partials/article.html", ctx, user=user)
     # Deep link: render the whole reader with the article open.
     from pensieve.web.reader import render_reader, resolve_view
 
     view = await resolve_view(session, user, "all", None)
     article_html = render(request, "partials/article.html", ctx, user=user).body.decode()
     return await render_reader(request, session, user, view, article_html=article_html)
+
+
+@router.post("/items/{item_id}/open")
+async def open_item(
+    request: Request,
+    item_id: uuid.UUID,
+    user: CsrfUser,
+    session: DB,
+):
+    """The read side effect of opening an article: marks it read once and returns the refreshed toolbar."""
+    item, feed = await load_item(session, user, item_id)
+    state = await get_state(session, user, item.id)
+    headers = None
+    if not (state and state.is_read):
+        await set_read(session, user.id, [item.id], True)
+        await session.commit()
+        headers = state_headers(item, is_read=True)
+    return await _toolbar_response(request, session, user, item, feed, headers)
 
 
 @router.get("/items/{item_id}/toolbar")
@@ -243,16 +256,32 @@ async def summarize(
     return render(request, "partials/summary.html", ctx, user=user)
 
 
+SUMMARY_MAX_POLLS = 30  # x 2 s: give up after a minute and offer a retry instead of polling forever
+
+
 @router.get("/items/{item_id}/summary")
 async def summary_poll(
     request: Request,
     item_id: uuid.UUID,
     user: CurrentUser,
     session: DB,
+    n: int = 0,
 ):
     item, _feed = await load_item(session, user, item_id)
     ai = await session.get(ItemAI, (user.id, item.id))
-    ctx = {"item": item, "ai": ai, "pending": not (ai and ai.summary), "error": None}
+    error = None
+    if not (ai and ai.summary):
+        job = await session.scalar(
+            select(AIJob)
+            .where(AIJob.kind == "summarize", AIJob.target_id == item.id, AIJob.user_id == user.id)
+            .order_by(AIJob.created_at.desc())
+            .limit(1)
+        )
+        if job is not None and job.status in {"failed", "partial"}:
+            error = "The summary failed: " + (job.last_error or "the AI gateway did not answer.")[:160]
+        elif n >= SUMMARY_MAX_POLLS:
+            error = "The summary is taking longer than usual."
+    ctx = {"item": item, "ai": ai, "pending": not (ai and ai.summary) and not error, "error": error, "n": n + 1}
     return render(request, "partials/summary.html", ctx, user=user)
 
 
@@ -311,6 +340,7 @@ async def tag(
             tags = [t for t in tags if t != name]
             ai = await session.get(ItemAI, (user.id, item.id))
             if ai and name in (ai.tags or []):
+                before = list(ai.tags)
                 ai.tags = [t for t in ai.tags if t != name]
                 conf = dict(ai.confidences or {})
                 conf.pop(name, None)
@@ -318,7 +348,10 @@ async def tag(
                 try:
                     from pensieve.ai.service import record_correction  # type: ignore[import-not-found]
 
-                    await record_correction(session, user, "item_tag", item.id, "tags", name, None)
+                    # full before/after lists: the tagging few-shot renders "AI said [...] -> reader kept [...]"
+                    await record_correction(
+                        session, user, "item_tag", item.id, "tags", ",".join(before), ",".join(ai.tags)
+                    )
                 except Exception as exc:  # noqa: BLE001
                     log.warning("record_correction unavailable: %s", exc)
         elif name not in tags:

@@ -14,6 +14,7 @@ import pytest
 import respx
 
 from pensieve import models
+from pensieve.ai.client import reset_embedding_probe
 from pensieve.config import get_settings
 from pensieve.models import EMBEDDING_DIMS
 
@@ -37,13 +38,19 @@ def angle_for(similarity: float) -> float:
     return math.acos(max(-1.0, min(1.0, similarity)))
 
 
-def chat_response(payload: dict | str, *, model: str = "mock", tokens: tuple[int, int] = (100, 20)) -> dict:
+def chat_response(
+    payload: dict | str,
+    *,
+    model: str = "mock",
+    tokens: tuple[int, int] = (100, 20),
+    finish_reason: str = "stop",
+) -> dict:
     content = payload if isinstance(payload, str) else json.dumps(payload)
     return {
         "id": "chatcmpl-test",
         "model": model,
         "choices": [
-            {"index": 0, "message": {"role": "assistant", "content": content}, "finish_reason": "stop"}
+            {"index": 0, "message": {"role": "assistant", "content": content}, "finish_reason": finish_reason}
         ],
         "usage": {"prompt_tokens": tokens[0], "completion_tokens": tokens[1], "total_tokens": sum(tokens)},
     }
@@ -129,10 +136,17 @@ class Gateway:
         ]
 
 
+def truncated(payload: dict | str) -> httpx.Response:
+    """A chat response cut off by max_tokens (``finish_reason == "length"``)."""
+    return httpx.Response(200, json=chat_response(payload, finish_reason="length"))
+
+
 @pytest.fixture
 def gateway():
+    reset_embedding_probe()  # the probe is process-wide; a 404 in one test must not short-circuit the next
     with respx.mock(assert_all_called=False, assert_all_mocked=True) as router:
         yield Gateway(router)
+    reset_embedding_probe()
 
 
 # ---------------------------------------------------------------------------

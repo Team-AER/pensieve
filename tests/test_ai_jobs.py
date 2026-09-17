@@ -1,5 +1,6 @@
 # ruff: noqa: F811 -- the `gateway` fixture is imported, then named as a test parameter
-from datetime import timedelta
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import httpx
 import pytest
@@ -9,11 +10,15 @@ from sqlalchemy import select
 from pensieve import models, queue
 from pensieve.ai import jobs
 from pensieve.ai.jobs import CRON_JOBS, FUNCTIONS
+from pensieve.config import get_settings
 from tests.test_ai_helpers import (
     gateway,  # noqa: F401
     make_feed,
     make_item,
+    now,
 )
+
+settings = get_settings()
 
 
 def tagging(n):
@@ -53,7 +58,12 @@ def test_function_registry_matches_queue_contract():
     ]
     names = {c.coroutine.__name__: c for c in CRON_JOBS}
     assert set(names) == {"ai_dispatch_daily", "ai_dispatch_weekly"}
-    assert names["ai_dispatch_weekly"].weekday is not None
+    assert names["ai_dispatch_weekly"].weekday == 6 and names["ai_dispatch_weekly"].hour == 8
+    assert names["ai_dispatch_daily"].minute == {0, 15, 30, 45} and names["ai_dispatch_daily"].hour is None
+    from pensieve.worker import WorkerSettings
+
+    assert WorkerSettings.timezone == ZoneInfo(settings.timezone)
+    assert WorkerSettings.job_timeout == jobs.JOB_TIMEOUT_S
 
 
 async def test_process_new_items_runs_all_steps_and_mirrors_done(session, user, gateway):
@@ -108,10 +118,82 @@ async def test_process_new_items_retries_on_llm_error_then_finishes(session, use
         await jobs.ai_process_new_items({"job_try": 1}, str(feed.id), [str(i.id) for i in items])
     row = await ai_job(session, "process_items", feed.id)
     assert row.status == "queued" and "tag failed" not in (row.last_error or "") and "500" in row.last_error
-    # final attempt: partial failure is recorded as done-with-note, not retried forever
+    # final attempt: embeddings + clustering worked, tagging did not -> "partial", never "done"
     await jobs.ai_process_new_items({"job_try": jobs.MAX_TRIES}, str(feed.id), [str(i.id) for i in items])
     row = await ai_job(session, "process_items", feed.id)
-    assert row.status == "done" and row.attempts == jobs.MAX_TRIES and "tag failed" in row.last_error
+    assert row.status == "partial" and row.attempts == jobs.MAX_TRIES and "tag failed" in row.last_error
+
+
+async def test_process_new_items_all_steps_failing_is_failed(session, user, gateway):
+    feed, items = await seed(session, user)
+    gateway.embeddings(available=True)
+    gateway.router.post(f"{settings.llm_base_url.rstrip('/')}/embeddings").mock(
+        return_value=httpx.Response(500, text="boom")
+    )
+    gateway.chat(httpx.Response(500, text="boom"))
+    await jobs.ai_process_new_items({"job_try": jobs.MAX_TRIES}, str(feed.id), [str(i.id) for i in items])
+    row = await ai_job(session, "process_items", feed.id)
+    assert row.status == "failed" and "embed failed" in row.last_error and "tag failed" in row.last_error
+
+
+async def test_mirror_rows_keyed_by_arq_job_id(session, user, gateway):
+    feed, items = await seed(session, user, n=4)
+    gateway.chat_by_workflow({"tag_items": tagging(2)})
+    a, b = [str(i.id) for i in items[:2]], [str(i.id) for i in items[2:]]
+    await jobs.ai_process_new_items({"job_try": 1, "job_id": "backfill:x:0"}, str(feed.id), a)
+    await jobs.ai_process_new_items({"job_try": 1, "job_id": "backfill:x:1"}, str(feed.id), b)
+    rows = (
+        await session.scalars(
+            select(models.AIJob).where(models.AIJob.kind == "process_items", models.AIJob.target_id == feed.id)
+        )
+    ).all()
+    assert len(rows) == 2 and {r.id for r in rows} == {
+        jobs.mirror_id({"job_id": "backfill:x:0"}, "process_items", feed.id),
+        jobs.mirror_id({"job_id": "backfill:x:1"}, "process_items", feed.id),
+    }
+    # a retry of the same job id updates its own row
+    await jobs.ai_process_new_items({"job_try": 2, "job_id": "backfill:x:0"}, str(feed.id), a)
+    rows = (
+        await session.scalars(
+            select(models.AIJob)
+            .where(models.AIJob.kind == "process_items")
+            .execution_options(populate_existing=True)
+        )
+    ).all()
+    assert len(rows) == 2 and {r.attempts for r in rows} == {1, 2}
+
+
+async def test_cap_remainder_is_requeued_in_chunks(session, user, gateway, monkeypatch):
+    feed, items = await seed(session, user, n=5)
+    monkeypatch.setattr(settings, "ai_max_items_per_job", 2)
+    gateway.chat_by_workflow({"tag_items": tagging(2)})
+    redis = FakeRedis()
+    await jobs.ai_process_new_items({"job_try": 1, "redis": redis}, str(feed.id), [str(i.id) for i in items])
+    row = await ai_job(session, "process_items", feed.id)
+    assert row.status == "done" and "3 more re-queued in 2 job(s)" in row.last_error
+    newest_first = sorted(items, key=lambda i: i.published_at, reverse=True)
+    expected = [[str(i.id) for i in newest_first[2:4]], [str(newest_first[4].id)]]
+    assert [c[0] for c in redis.calls] == [queue.AI_PROCESS_NEW_ITEMS] * 2
+    assert [list(c[1][1]) for c in redis.calls] == expected
+    assert [c[2] for c in redis.calls] == [jobs.remainder_job_id(feed.id, n, ch) for n, ch in enumerate(expected, 1)]
+    assert all(c[2].startswith(f"process:{feed.id}:") for c in redis.calls)
+    # only the newest two were tagged by this job
+    tagged = (await session.scalars(select(models.ItemAI.item_id).where(models.ItemAI.user_id == user.id))).all()
+    assert set(tagged) == {i.id for i in newest_first[:2]}
+
+
+async def test_reaper_fails_stale_running_rows(session, user, gateway):
+    stale = models.AIJob(
+        kind="digest", user_id=user.id, status="running", started_at=now() - timedelta(seconds=jobs.JOB_TIMEOUT_S + 5)
+    )
+    fresh = models.AIJob(kind="digest", user_id=user.id, status="running", started_at=now())
+    session.add_all([stale, fresh])
+    await session.commit()
+    assert await jobs.reap_stale_jobs() == 1
+    await session.refresh(stale)
+    await session.refresh(fresh)
+    assert stale.status == "failed" and "reaped" in stale.last_error and stale.finished_at is not None
+    assert fresh.status == "running"
 
 
 async def test_file_feed_job(session, user, gateway):
@@ -180,6 +262,10 @@ class FakeRedis:
         self.calls.append((function, args, _job_id))
 
 
+def at_local(hour: int, minute: int) -> datetime:
+    return datetime.now(ZoneInfo(settings.timezone)).replace(hour=hour, minute=minute, second=0, microsecond=0)
+
+
 async def test_dispatchers_enqueue_per_user(session, user):
     other = models.User(
         email="off@example.com", password_hash="x", settings={"digest": False, "memory": True}
@@ -187,8 +273,10 @@ async def test_dispatchers_enqueue_per_user(session, user):
     session.add(other)
     await session.commit()
     redis = FakeRedis()
-    n = await jobs.ai_dispatch_daily({"redis": redis})
+    when = at_local(settings.digest_hour_local, settings.digest_minute_local)
+    n = await jobs.ai_dispatch_daily({"redis": redis}, at=when)
     assert n == 1 and redis.calls[0][0] == queue.AI_DAILY_DIGEST and redis.calls[0][1] == (str(user.id),)
+    assert redis.calls[0][2] == jobs.digest_job_id(user.id, when.date())
     assert redis.calls[0][2].startswith(f"{queue.AI_DAILY_DIGEST}:{user.id}:")
     redis = FakeRedis()
     await jobs.ai_dispatch_weekly({"redis": redis})
@@ -200,3 +288,23 @@ async def test_dispatchers_enqueue_per_user(session, user):
             (queue.AI_REFRESH_PROFILE, str(other.id)),
         ]
     )
+
+
+async def test_dispatch_daily_honours_per_user_digest_time(session, user):
+    early = models.User(email="early@example.com", password_hash="x", settings={"digest_time": "06:10"})
+    session.add(early)
+    user.settings = {"digest_time": "21:50"}
+    await session.commit()
+    redis = FakeRedis()
+    # 06:00 slot: only the 06:10 user; the default (07:30) and the 21:50 user are not due
+    assert await jobs.ai_dispatch_daily({"redis": redis}, at=at_local(6, 3)) == 1
+    assert redis.calls[0][1] == (str(early.id),)
+    redis = FakeRedis()
+    assert await jobs.ai_dispatch_daily({"redis": redis}, at=at_local(21, 45)) == 1
+    assert redis.calls[0][1] == (str(user.id),)
+    assert await jobs.ai_dispatch_daily({"redis": FakeRedis()}, at=at_local(12, 0)) == 0
+    assert jobs.user_digest_time(models.User(settings={"digest_time": "nonsense"})) == (
+        settings.digest_hour_local,
+        settings.digest_minute_local,
+    )
+    assert jobs.weekly_job_id(user.id, "2026-W38") == f"{queue.AI_WEEKLY_REVIEW}:{user.id}:2026-W38"

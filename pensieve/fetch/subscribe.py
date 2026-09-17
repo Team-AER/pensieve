@@ -6,6 +6,7 @@ import logging
 import re
 import uuid
 from datetime import UTC, datetime, timedelta
+from email.utils import parsedate_to_datetime
 
 import httpx
 from sqlalchemy import or_, select
@@ -23,7 +24,9 @@ log = logging.getLogger(__name__)
 INTERVAL_FACTOR = 1.5
 MAX_CONSECUTIVE_ERRORS = 10
 PERMANENT_REDIRECTS = frozenset({301, 308})
+RETRY_AFTER_STATUSES = frozenset({429, 503})
 MAX_ERROR_TEXT = 1000
+MAX_URL = 2048
 
 
 class FeedError(Exception):
@@ -70,17 +73,41 @@ def _schedule_success(feed: Feed, now: datetime, *, changed: bool) -> None:
     feed.next_fetch_at = now + timedelta(minutes=feed.fetch_interval_min)
 
 
-def _schedule_error(feed: Feed, now: datetime, error: str) -> None:
+def _schedule_error(feed: Feed, now: datetime, error: str, *, retry_after: timedelta | None = None) -> None:
     feed.error_count = (feed.error_count or 0) + 1
     feed.last_error = error[:MAX_ERROR_TEXT]
     feed.last_fetch_at = now
     feed.fetch_interval_min = backoff_interval(feed.error_count)
-    feed.next_fetch_at = now + timedelta(minutes=feed.fetch_interval_min)
+    wait = timedelta(minutes=feed.fetch_interval_min)
+    if retry_after is not None:
+        # Honour the server's Retry-After (clamped to the max interval) instead of our own backoff.
+        wait = max(timedelta(minutes=get_settings().fetch_min_interval_min), retry_after)
+        wait = min(wait, timedelta(minutes=get_settings().fetch_max_interval_min))
+        feed.fetch_interval_min = _clamp(wait.total_seconds() / 60)
+    feed.next_fetch_at = now + wait
     if feed.error_count >= MAX_CONSECUTIVE_ERRORS:
         feed.paused = True
         log.warning("feed %s paused after %d consecutive errors: %s", feed.url, feed.error_count, error)
     else:
         log.info("feed %s error %d: %s", feed.url, feed.error_count, error)
+
+
+def parse_retry_after(value: str | None, now: datetime) -> timedelta | None:
+    """``Retry-After`` is either delay-seconds or an HTTP-date; ``None`` when absent or unparseable."""
+    if not value:
+        return None
+    value = value.strip()
+    if value.isdigit():
+        return timedelta(seconds=int(value))
+    try:
+        when = parsedate_to_datetime(value)
+    except (TypeError, ValueError, IndexError):
+        return None
+    if when is None:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=UTC)
+    return max(timedelta(0), when - now)
 
 
 # --------------------------------------------------------------------------------------------------------------
@@ -150,8 +177,8 @@ def apply_rules(rules: list[FeedRule], user_id: uuid.UUID, items: list[Item], no
 
 
 def _entry_to_item(feed: Feed, entry: ParsedEntry) -> Item:
+    # No explicit id: Item.id defaults to a time-ordered UUIDv7 so the sync APIs' int64 ids follow insertion time.
     return Item(
-        id=uuid.uuid4(),
         feed_id=feed.id,
         guid=entry.guid,
         url=entry.url,
@@ -179,8 +206,20 @@ def _update_feed_metadata(feed: Feed, parsed: ParsedFeed) -> None:
         feed.websub_hub = parsed.hub
 
 
+def _update_item_in_place(item: Item, entry: ParsedEntry, now: datetime) -> None:
+    item.title = entry.title
+    item.content_html = entry.content_html
+    item.content_text = entry.content_text
+    item.hash = entry.hash
+    item.updated_at = now
+
+
 async def ingest(session: AsyncSession, feed: Feed, parsed: ParsedFeed, *, now: datetime | None = None) -> list[Item]:
-    """Insert entries not yet stored for this feed (by guid), apply rules, return the new ``Item`` rows."""
+    """Insert entries not yet stored for this feed, apply rules, return the new ``Item`` rows.
+
+    Dedupe order: by guid (a known guid whose content hash changed is updated in place, stamping
+    ``updated_at``), then by content hash within the feed (a re-published article under a new guid is skipped).
+    """
     now = now or _now()
     _update_feed_metadata(feed, parsed)
 
@@ -191,11 +230,31 @@ async def ingest(session: AsyncSession, feed: Feed, parsed: ParsedFeed, *, now: 
     if not fresh:
         return []
 
-    existing = set(
-        (await session.scalars(select(Item.guid).where(Item.feed_id == feed.id, Item.guid.in_(fresh)))).all()
+    existing_rows = (
+        await session.scalars(select(Item).where(Item.feed_id == feed.id, Item.guid.in_(fresh)))
+    ).all()
+    existing = {row.guid: row for row in existing_rows}
+    for guid, row in existing.items():
+        entry = fresh[guid]
+        if entry.hash and row.hash != entry.hash:
+            _update_item_in_place(row, entry, now)
+
+    candidates = [entry for guid, entry in fresh.items() if guid not in existing]
+    if not candidates:
+        await session.flush()
+        return []
+    hashes = {e.hash for e in candidates if e.hash}
+    known_hashes = set(
+        (await session.scalars(select(Item.hash).where(Item.feed_id == feed.id, Item.hash.in_(hashes)))).all()
     )
-    items = [_entry_to_item(feed, entry) for guid, entry in fresh.items() if guid not in existing]
+    items: list[Item] = []
+    for entry in candidates:
+        if entry.hash and entry.hash in known_hashes:
+            continue
+        known_hashes.add(entry.hash)
+        items.append(_entry_to_item(feed, entry))
     if not items:
+        await session.flush()
         return []
 
     session.add_all(items)
@@ -210,9 +269,21 @@ async def _notify_new_items(feed: Feed, items: list[Item]) -> None:
     if not items:
         return
     try:
+        # No _job_id: a fixed id would make arq drop a second fetch's item_ids while the first job is queued.
         await queue.enqueue(queue.AI_PROCESS_NEW_ITEMS, str(feed.id), [str(i.id) for i in items])
     except Exception as exc:  # noqa: BLE001 - a missing Redis must never fail a fetch
         log.warning("could not enqueue %s for feed %s: %s", queue.AI_PROCESS_NEW_ITEMS, feed.id, exc)
+
+
+async def _cache_favicon(session: AsyncSession, feed: Feed) -> None:
+    """Best-effort favicon download after a subscribe; never fails the caller."""
+    try:
+        from pensieve.fetch.favicon import refresh_feed_icon
+
+        if await refresh_feed_icon(session, feed):
+            await session.commit()
+    except Exception as exc:  # noqa: BLE001
+        log.info("favicon for %s not cached: %s", feed.url, exc)
 
 
 # --------------------------------------------------------------------------------------------------------------
@@ -247,7 +318,6 @@ async def add_feed(session: AsyncSession, user: User, url: str, folder_id: uuid.
     now = _now()
     settings = get_settings()
     feed = Feed(
-        id=uuid.uuid4(),
         user_id=user.id,
         folder_id=folder_id,
         url=found.feed_url,
@@ -274,6 +344,7 @@ async def add_feed(session: AsyncSession, user: User, url: str, folder_id: uuid.
             await queue.enqueue(queue.AI_FILE_FEED, str(feed.id))
         except Exception as exc:  # noqa: BLE001
             log.warning("could not enqueue %s for feed %s: %s", queue.AI_FILE_FEED, feed.id, exc)
+    await _cache_favicon(session, feed)
     return feed
 
 
@@ -291,7 +362,7 @@ async def _maybe_follow_permanent_redirect(session: AsyncSession, feed: Feed, re
         return
     if not all(r.status_code in PERMANENT_REDIRECTS for r in response.history):
         return
-    final_url = str(response.url)
+    final_url = str(response.url)[:MAX_URL]
     if final_url == feed.url:
         return
     if await _feed_exists(session, feed.user_id, final_url):
@@ -299,25 +370,42 @@ async def _maybe_follow_permanent_redirect(session: AsyncSession, feed: Feed, re
         return
     log.info("feed %s permanently moved to %s", feed.url, final_url)
     feed.url = final_url
+    # Validators belong to the old resource; a stale ETag against the new URL could 304 forever.
+    feed.etag = None
+    feed.last_modified = None
 
 
-async def refresh_feed(session: AsyncSession, feed: Feed) -> list[Item]:
-    """Poll ``feed`` once. Records errors/backoff on the row instead of raising; returns the new items."""
-    now = _now()
+def _store_validators(feed: Feed, response: httpx.Response) -> None:
+    etag = response.headers.get("etag")
+    last_modified = response.headers.get("last-modified")
+    if etag is not None or last_modified is not None or response.status_code == 200:
+        feed.etag = etag[:512] if etag else None
+        feed.last_modified = last_modified[:128] if last_modified else None
+
+
+async def _refresh(session: AsyncSession, feed: Feed, now: datetime) -> list[Item]:
     try:
         response = await fetch_http.get(feed.url, headers=_conditional_headers(feed))
     except (httpx.HTTPError, fetch_http.UnsafeURLError, OSError) as exc:
         _schedule_error(feed, now, f"{type(exc).__name__}: {exc}")
-        await session.commit()
         return []
 
-    if response.status_code == 304:
+    status = response.status_code
+    if status == 304:
+        # Some servers echo (or rotate) validators on a 304; keep whatever they send, else keep ours.
+        _store_validators(feed, response)
         _schedule_success(feed, now, changed=False)
-        await session.commit()
         return []
-    if response.status_code != 200:
-        _schedule_error(feed, now, f"HTTP {response.status_code}")
-        await session.commit()
+    if status == 410:
+        _schedule_error(feed, now, "Feed is gone (410)")
+        feed.paused = True
+        return []
+    if status in RETRY_AFTER_STATUSES:
+        retry_after = parse_retry_after(response.headers.get("retry-after"), now)
+        _schedule_error(feed, now, f"HTTP {status}", retry_after=retry_after)
+        return []
+    if status != 200:
+        _schedule_error(feed, now, f"HTTP {status}")
         return []
 
     await _maybe_follow_permanent_redirect(session, feed, response)
@@ -325,14 +413,30 @@ async def refresh_feed(session: AsyncSession, feed: Feed) -> list[Item]:
         parsed = parse_feed(response.content, str(response.url), now=now)
     except ParseError as exc:
         _schedule_error(feed, now, f"parse error: {exc}")
-        await session.commit()
         return []
 
     items = await ingest(session, feed, parsed, now=now)
-    feed.etag = response.headers.get("etag")
-    feed.last_modified = response.headers.get("last-modified")
+    _store_validators(feed, response)
     _schedule_success(feed, now, changed=bool(items))
-    await session.commit()
+    return items
+
+
+async def refresh_feed(session: AsyncSession, feed: Feed) -> list[Item]:
+    """Poll ``feed`` once. Records errors/backoff on the row instead of raising; returns the new items.
+
+    Any unexpected exception (a constraint race, an oversized value, a bug) is also recorded as an error
+    with backoff so the feed is never left permanently due.
+    """
+    now = _now()
+    try:
+        items = await _refresh(session, feed, now)
+        await session.commit()
+    except Exception as exc:
+        log.exception("refresh of feed %s failed unexpectedly", feed.url)
+        await session.rollback()
+        _schedule_error(feed, now, f"{type(exc).__name__}: {exc}")
+        await session.commit()
+        return []
 
     await _notify_new_items(feed, items)
     return items
@@ -346,6 +450,7 @@ __all__ = [
     "ingest",
     "lengthen_interval",
     "load_rules",
+    "parse_retry_after",
     "refresh_feed",
     "shorten_interval",
 ]

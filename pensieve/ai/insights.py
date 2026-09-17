@@ -6,8 +6,10 @@ Approximations (documented here and in ``memory``):
   (batch = >= 5 item_states with the same read_at second, ``common.MARK_ALL_BATCH_MIN``).
 * *open-rate* of a feed = opened items / items published, both over the last 30 days. Feeds with fewer than
   ``MIN_ITEMS_FOR_OPEN_RATE`` items in that window have an unknown open-rate and are never "safe to skip".
-* *affinity* = cosine(item embedding, centroid of the user's starred + opened embeddings from the last 30 days),
-  0.5 when either side is unavailable; +0.15 when one of the item's AI tags is mentioned in the profile text.
+* *affinity* = cosine(item embedding, centroid of the user's starred + opened embeddings from the last 30 days).
+  Without embeddings (no centroid or no item vector) it is a blend of the item's feed open-rate and the overlap
+  between the item's AI tags and the user's top tags from opened + starred history, each 0..1; 0.5 only when the
+  user has no history at all. +0.15 when one of the item's AI tags is mentioned in the profile text.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ import logging
 import uuid
 from collections import Counter, defaultdict
 from datetime import date, datetime, time, timedelta
+from typing import NamedTuple
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
@@ -53,6 +56,17 @@ STARRED_UNREAD_DAYS = 14
 TREND_WEEKS = 4
 TREND_TAGS = 8
 SUMMARY_TEXT_CHARS = 24_000
+TOP_TAGS = 20
+TOP_TAGS_DAYS = 90
+
+
+class ItemRef(NamedTuple):
+    """The four item columns the digest and review need; loading full rows for a month of items is wasteful."""
+
+    id: uuid.UUID
+    feed_id: uuid.UUID
+    published_at: datetime
+    title: str
 
 
 def _tz() -> ZoneInfo:
@@ -80,9 +94,9 @@ async def opened_and_skipped(
 
 async def _items_between(
     session: AsyncSession, user_id: uuid.UUID, start: datetime, end: datetime
-) -> list[models.Item]:
+) -> list[ItemRef]:
     stmt = (
-        select(models.Item)
+        select(models.Item.id, models.Item.feed_id, models.Item.published_at, models.Item.title)
         .where(
             models.Item.feed_id.in_(user_feed_ids(user_id)),
             models.Item.published_at >= start,
@@ -90,7 +104,7 @@ async def _items_between(
         )
         .order_by(models.Item.published_at.desc())
     )
-    return list((await session.scalars(stmt)).all())
+    return [ItemRef(*row) for row in (await session.execute(stmt)).all()]
 
 
 async def _hidden_ids(session: AsyncSession, user_id: uuid.UUID, item_ids: list[uuid.UUID]) -> set[uuid.UUID]:
@@ -150,6 +164,34 @@ async def profile_centroid(session: AsyncSession, user_id: uuid.UUID) -> list[fl
         return None
     vectors = await get_vectors(session, ids[:500])
     return centroid(list(vectors.values()))
+
+
+async def top_tags(session: AsyncSession, user_id: uuid.UUID, days: int = TOP_TAGS_DAYS) -> dict[str, float]:
+    """AI tags of what the user opened or starred in the last ``days``, weighted 0..1 (most frequent = 1)."""
+    since = utcnow() - timedelta(days=days)
+    opened, _ = await opened_and_skipped(session, user_id, since)
+    starred = set(
+        (
+            await session.scalars(
+                select(models.ItemState.item_id).where(
+                    models.ItemState.user_id == user_id,
+                    models.ItemState.is_starred.is_(True),
+                    models.ItemState.starred_at >= since,
+                )
+            )
+        ).all()
+    )
+    ids = list(opened | starred)
+    if not ids:
+        return {}
+    counts: Counter = Counter()
+    for row in (await _ai_rows(session, user_id, ids[:2000])).values():
+        counts.update(row.tags)
+    if not counts:
+        return {}
+    top = counts.most_common(TOP_TAGS)
+    peak = float(top[0][1])
+    return {name: round(n / peak, 4) for name, n in top}
 
 
 async def tag_trends(session: AsyncSession, user_id: uuid.UUID, weeks: int = TREND_WEEKS) -> list[dict]:
@@ -236,6 +278,10 @@ async def daily_digest(
     profile = await profile_text(session, user.id)
     profile_lc = profile.lower()
     open_rates = await feed_open_rates(session, user.id)
+    liked_tags = (
+        await top_tags(session, user.id) if (center is None or len(vectors) < len(items)) else {}
+    )
+    has_history = bool(liked_tags) or any(r is not None for r in open_rates.values())
 
     # cluster membership for the window's items
     membership: dict[uuid.UUID, models.Cluster] = {}
@@ -251,10 +297,19 @@ async def daily_digest(
         ).all()
         membership = {item_id: cluster for item_id, cluster in rows}
 
-    def affinity(item: models.Item) -> float:
+    def affinity(item: ItemRef) -> float:
         vec = vectors.get(item.id)
-        base = cosine(vec, center) if (vec is not None and center is not None) else DEFAULT_AFFINITY
         tags = ai_rows[item.id].tags if item.id in ai_rows else []
+        if vec is not None and center is not None:
+            base = cosine(vec, center)
+        elif has_history:
+            # no embeddings: how often the reader opens this source, blended with tag overlap against history
+            rate = open_rates.get(item.feed_id)
+            rate_score = DEFAULT_AFFINITY if rate is None else rate
+            tag_score = max((liked_tags.get(t, 0.0) for t in tags), default=0.0)
+            base = 0.5 * rate_score + 0.5 * tag_score
+        else:
+            base = DEFAULT_AFFINITY
         if profile_lc and any(t.lower() in profile_lc for t in tags):
             base = min(1.0, base + PROFILE_TAG_BOOST)
         return round(base, 4)
@@ -303,7 +358,7 @@ async def daily_digest(
                 "score": round(sources * aff, 4),
                 "feed": feeds[rep.feed_id].title if rep.feed_id in feeds else "",
                 "member_ids": member_ids,
-                "skip": low_open and aff < LOW_AFFINITY,
+                "skip": low_open and aff <= LOW_AFFINITY,
             }
         )
     entries.sort(key=lambda e: -e["score"])
@@ -338,6 +393,7 @@ async def daily_digest(
                 max_tokens=900,
                 workflow="digest",
                 name="digest",
+                reasoning=settings.llm_digest_reasoning,
             )
             summary = str(result["summary"])
             reason = str(result["safe_to_skip_reason"])
@@ -438,7 +494,7 @@ async def weekly_review(
 
     volume_by_folder: Counter = Counter()
     most_read: Counter = Counter()
-    per_feed_items: dict[uuid.UUID, list[models.Item]] = defaultdict(list)
+    per_feed_items: dict[uuid.UUID, list[ItemRef]] = defaultdict(list)
     week_tags: Counter = Counter()
     for it in week_items:
         feed = feeds.get(it.feed_id)
@@ -513,6 +569,7 @@ async def weekly_review(
             max_tokens=900,
             workflow="weekly_review",
             name="weekly_review",
+            reasoning=settings.llm_digest_reasoning,
         )
         summary = str(result["summary"])
         highlights = [str(h) for h in result["highlights"]]

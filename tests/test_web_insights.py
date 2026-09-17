@@ -1,6 +1,7 @@
+
 from pensieve import models
 from pensieve.web import insights as insights_mod
-from tests.test_web_support import HX, login, seed_feed, seed_item
+from tests.test_web_support import HX, login, memory_limiter, seed_feed, seed_item  # noqa: F401
 
 
 async def test_insights_renders_stored_daily_digest(client, session, user):

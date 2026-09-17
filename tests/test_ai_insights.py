@@ -2,7 +2,7 @@
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from pensieve import models
 from pensieve.ai import insights, service
@@ -202,3 +202,39 @@ async def test_summarize_item_stores_markdown(session, user, gateway):
     assert row.summary == md
     assert "You care about releases." in gateway.chat_calls[0]["messages"][1]["content"]
     assert gateway.chat_requests[0].headers["X-Workflow"] == "summarize_item"
+
+
+async def test_digest_without_embeddings_ranks_by_open_rate_and_tags(session, user, gateway):
+    """No centroid and no item vectors: affinity comes from feed open-rate + tag overlap, not a constant."""
+    w = await seed_digest_world(session, user)
+    await session.execute(delete(models.Embedding))
+    # a third, never-opened feed with a very recent item: recency alone would rank it first
+    dull = make_feed(user, "Dull")
+    session.add(dull)
+    await session.flush()
+    dull_hist = [make_item(dull, f"Dull old {i}", "x", age=timedelta(days=i + 2)) for i in range(6)]
+    session.add_all(dull_hist)
+    await session.flush()
+    batch = now() - timedelta(days=1, hours=1)
+    session.add_all([make_state(user, it, read=True, read_at=batch) for it in dull_hist])
+    dull_fresh = make_item(dull, "Dull but newest", "x", age=timedelta(minutes=5))
+    session.add(dull_fresh)
+    await session.commit()
+    gateway.chat({"summary": "s", "top_stories": [], "safe_to_skip_reason": "rarely opened"})
+    row = await insights.daily_digest(session, user, today())
+    body = row.body
+    skipped = set(body["safe_to_skip"]["item_ids"])
+    assert {str(w["fresh_noise"].id), str(dull_fresh.id)} <= skipped  # low open-rate feeds land in safe_to_skip
+    top_ids = [s["item_id"] for s in body["top_stories"]]
+    assert top_ids[0] == str(w["fresh_good"].id) and str(dull_fresh.id) not in top_ids
+    affinities = {s["item_id"]: s["affinity"] for s in body["top_stories"]}
+    assert affinities[str(w["fresh_good"].id)] > insights.LOW_AFFINITY  # open-rate 1.0 + kubernetes overlap
+    sent = gateway.chat_calls[0]["messages"][1]["content"]
+    assert "Dull but newest" in sent and "Celebrity gossip" in sent  # skip candidates are still listed
+    assert gateway.chat_calls[0]["reasoning_effort"] == settings.llm_digest_reasoning
+
+
+async def test_top_tags_weights_from_history(session, user, gateway):
+    await seed_digest_world(session, user)
+    assert await insights.top_tags(session, user.id) == {"kubernetes": 1.0, "devops": 1.0}
+    assert await insights.top_tags(session, user.id, days=0) == {}

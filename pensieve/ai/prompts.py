@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-PROMPT_VERSION = "2026-09-18.1"
+PROMPT_VERSION = "2026-09-18.2"
 
 CONTENT_TYPES = [
     "article",
@@ -45,38 +45,47 @@ FEED_FILING_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
-ITEM_TAGGING_SCHEMA: dict[str, Any] = {
+ITEM_TAGGING_ENTRY_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "items": {
+        "index": {"type": "integer"},
+        "tags": {
             "type": "array",
             "items": {
                 "type": "object",
                 "properties": {
-                    "index": {"type": "integer"},
-                    "tags": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "name": {"type": "string"},
-                                "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-                            },
-                            "required": ["name", "confidence"],
-                            "additionalProperties": False,
-                        },
-                    },
-                    "content_type": {"type": "string", "enum": CONTENT_TYPES},
+                    "name": {"type": "string"},
+                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
                 },
-                "required": ["index", "tags", "content_type"],
+                "required": ["name", "confidence"],
                 "additionalProperties": False,
             },
-        }
+        },
+        # No enum on purpose: the allowed list lives in the prompt text and ``categorize`` coerces an
+        # off-list label to NULL, so one stray value never rejects a whole batch.
+        "content_type": {"type": "string"},
     },
+    "required": ["index", "tags", "content_type"],
+    "additionalProperties": False,
+}
+"""One item's shape: {index, tags:[{name, confidence}], content_type}. Validated per entry by ``categorize``."""
+
+ITEM_TAGGING_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {"items": {"type": "array", "items": ITEM_TAGGING_ENTRY_SCHEMA}},
     "required": ["items"],
     "additionalProperties": False,
 }
-"""Batch form: one entry per input item. A single item's shape is {tags:[{name, confidence}], content_type}."""
+"""Batch form sent to the model as ``response_format``: one entry per input item."""
+
+ITEM_TAGGING_BATCH_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {"items": {"type": "array", "items": {"type": "object"}}},
+    "required": ["items"],
+    "additionalProperties": False,
+}
+"""Loose local validation of the batch envelope; entries are then checked one by one so a single malformed
+entry is skipped rather than failing the batch."""
 
 CLUSTER_CONFIRM_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -207,23 +216,46 @@ ASK_SYSTEM = (
 # ---------------------------------------------------------------------------
 
 
-def feed_filing_user(title: str, description: str, item_titles: list[str], folder_names: list[str]) -> str:
+def format_filing_examples(examples: list[tuple[str, str | None, str | None]]) -> str:
+    """Few-shot block from feed_folder corrections: (feed title, folder the AI suggested, folder the reader chose).
+
+    ``new`` of None means the reader dismissed the suggestion without filing the feed anywhere.
+    """
+    if not examples:
+        return ""
+    lines = ["The reader corrected earlier filing. Learn from these:"]
+    for title, old, new in examples:
+        chose = f"reader filed under [{new}]" if new else "reader dismissed it"
+        lines.append(f'- "{title}": AI suggested [{old or "none"}] → {chose}')
+    return "\n".join(lines) + "\n\n"
+
+
+def feed_filing_user(
+    title: str,
+    description: str,
+    item_titles: list[str],
+    folder_names: list[str],
+    examples: list[tuple[str, str | None, str | None]] | None = None,
+) -> str:
     lines = [f"Feed title: {title or '(untitled)'}", f"Feed description: {description or '(none)'}", ""]
     lines.append("Recent item titles:")
     lines.extend(f"- {t}" for t in item_titles[:10])
     lines.append("")
     lines.append("Existing folders: " + (", ".join(folder_names) if folder_names else "(none yet)"))
+    shots = format_filing_examples(examples or []).rstrip()
+    if shots:
+        lines.extend(["", shots])
     return "\n".join(lines)
 
 
 def format_tag_examples(examples: list[tuple[str, list[str], list[str]]]) -> str:
-    """Few-shot block from corrections: (item title, tags the AI gave, tags the reader chose)."""
+    """Few-shot block from corrections: (item title, full tag list the AI gave, full list the reader kept)."""
     if not examples:
         return ""
     lines = ["The reader corrected earlier tagging. Learn from these:"]
     for title, old, new in examples:
         lines.append(
-            f'- "{title}": AI said [{", ".join(old) or "none"}] -> reader chose [{", ".join(new) or "none"}]'
+            f'- "{title}": AI said [{", ".join(old) or "none"}] → reader kept [{", ".join(new) or "none"}]'
         )
     return "\n".join(lines) + "\n\n"
 
@@ -297,6 +329,8 @@ __all__ = [
     "FEED_FILING_SYSTEM",
     "ITEM_SUMMARY_SCHEMA",
     "ITEM_SUMMARY_SYSTEM",
+    "ITEM_TAGGING_BATCH_SCHEMA",
+    "ITEM_TAGGING_ENTRY_SCHEMA",
     "ITEM_TAGGING_SCHEMA",
     "ITEM_TAGGING_SYSTEM",
     "MAX_TAGS_PER_ITEM",

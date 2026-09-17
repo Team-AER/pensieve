@@ -89,7 +89,11 @@ async def generate(
 ):
     job = queue.AI_WEEKLY_REVIEW if kind == "weekly" else queue.AI_DAILY_DIGEST
     try:
-        await queue.enqueue(job, str(user.id), _job_id=queue.job_id_for(job, user.id))
+        # same day-/week-qualified id as the cron dispatcher, so a manual run never double-queues today's job
+        from pensieve.ai.jobs import digest_job_id, weekly_job_id  # type: ignore[import-not-found]
+
+        job_id = weekly_job_id(user.id) if kind == "weekly" else digest_job_id(user.id)
+        await queue.enqueue(job, str(user.id), _job_id=job_id)
     except Exception as exc:  # noqa: BLE001
         log.warning("could not enqueue %s: %s", job, exc)
     target = "/insights/weekly" if kind == "weekly" else "/insights"

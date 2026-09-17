@@ -1,6 +1,7 @@
 // Pensieve service worker: shell cache, stale-while-revalidate for reader GETs, offline queue for state POSTs.
-const VERSION = 'pensieve-v1';
-const SHELL = ['/static/app.css', '/static/web.css', '/static/app.js', '/static/reader.js', '/static/vendor/htmx.min.js', '/static/icon.svg', '/static/manifest.webmanifest'];
+const VERSION = 'pensieve-v2';
+const SHELL = ['/static/app.css', '/static/web.css', '/static/fonts.css', '/static/app.js', '/static/reader.js', '/static/vendor/htmx.min.js', '/static/icon.svg', '/static/manifest.webmanifest',
+  '/static/fonts/fraunces-latin.woff2', '/static/fonts/fraunces-latin-ext.woff2', '/static/fonts/fraunces-vietnamese.woff2', '/static/fonts/instrument-sans-latin.woff2', '/static/fonts/instrument-sans-latin-ext.woff2'];
 const DB_NAME = 'pensieve-offline';
 const STORE = 'queue';
 
@@ -94,6 +95,15 @@ async function replay() {
     } catch (_) { break; }
   }
 }
-self.addEventListener('message', (event) => { if (event.data && event.data.type === 'replay') event.waitUntil(replay()); });
+async function clearAll() {
+  const keys = await caches.keys();
+  await Promise.all(keys.map((k) => caches.delete(k)));
+  await new Promise((resolve) => { const r = indexedDB.deleteDatabase(DB_NAME); r.onsuccess = r.onerror = r.onblocked = () => resolve(); });
+}
+self.addEventListener('message', (event) => {
+  if (!event.data) return;
+  if (event.data.type === 'replay') event.waitUntil(replay());
+  if (event.data.type === 'clear') event.waitUntil(clearAll());
+});
 self.addEventListener('sync', (event) => { if (event.tag === 'pensieve-replay') event.waitUntil(replay()); });
 self.addEventListener('online', () => replay());

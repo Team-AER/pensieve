@@ -5,6 +5,7 @@ from sqlalchemy import select
 
 from pensieve import models
 from pensieve.fetch.opml import OPMLError, export_opml, import_opml, parse_opml
+from tests.test_fetch_helpers import fake_queue  # noqa: F401
 
 OPML = b"""<?xml version="1.0" encoding="UTF-8"?>
 <opml version="2.0">
@@ -49,7 +50,7 @@ def test_parse_opml_rejects_non_opml():
         parse_opml(b"")
 
 
-async def test_import_opml_creates_folders_and_skips_duplicates(session, user):
+async def test_import_opml_creates_folders_and_skips_duplicates(session, user, fake_queue):  # noqa: F811
     existing = models.Feed(user_id=user.id, url="https://bbc.example.com/rss", title="BBC old")
     session.add(existing)
     await session.commit()

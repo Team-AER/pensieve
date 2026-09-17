@@ -61,7 +61,8 @@ async def test_refresh_profile_stores_versions_with_diff(session, user, gateway)
     assert v1.version == 1 and v1.body_text.startswith("You follow Kubernetes")
     assert v1.diff_from_previous and "+You follow Kubernetes closely." in v1.diff_from_previous
     body = gateway.chat_calls[0]
-    assert body["model"] == settings.llm_long_model and body["reasoning_effort"] == "medium"
+    assert body["model"] == settings.llm_long_model
+    assert body["reasoning_effort"] == settings.llm_digest_reasoning == "low"
     assert gateway.chat_requests[0].headers["X-Workflow"] == "profile"
     prompt = body["messages"][1]["content"]
     assert "kubernetes" in prompt and "remember this" in prompt and '"opened_count": 5' in prompt
@@ -151,6 +152,20 @@ async def test_related_history_embeds_on_demand_and_degrades(session, user, gate
     assert await service.related_history(session, user, fresh) == []
 
 
+async def test_related_history_skips_embed_call_once_unavailable(session, user, gateway):
+    gateway.embeddings(available=False)
+    feed, items = await seed(session, user, n=2)
+    session.add(make_state(user, items[1], read=True))
+    await session.commit()
+    assert await service.related_history(session, user, items[0]) == []
+    assert len(gateway.embed_calls) == 1
+    fresh = make_item(feed, "New")
+    session.add(fresh)
+    await session.commit()
+    assert await service.related_history(session, user, fresh) == []
+    assert len(gateway.embed_calls) == 1  # short-circuited: no second request during the cool-down
+
+
 async def test_ask_reading_returns_citations(session, user, gateway):
     _feed, items = await seed(session, user, n=3)
     session.add_all([make_embedding(it, angle_for(0.9 - i * 0.1)) for i, it in enumerate(items)])
@@ -174,6 +189,44 @@ async def test_ask_reading_fulltext_only_when_embeddings_unavailable(session, us
     gateway.chat({"answer": "See [1].", "citations": [1]})
     answer = await service.ask_reading(session, user, "kubernetes")
     assert len(answer.citations) == 1
+    # no history at all: the whole subscription pool is searched and the answer says so
+    assert answer.from_history is False and answer.text.startswith(memory.NO_HISTORY_PREAMBLE)
+    assert gateway.chat_calls[0]["reasoning_effort"] == "off"  # ask is extraction: reasoning off on Flash-Next
+    assert len(gateway.embed_calls) == 1
+
+
+async def test_ask_reading_fulltext_restricted_to_history_pool(session, user, gateway):
+    gateway.embeddings(available=False)
+    _feed, items = await seed(session, user, n=4)
+    session.add(make_state(user, items[2], read=True))
+    session.add(make_state(user, items[3], starred=True))
+    await session.commit()
+    gateway.chat({"answer": "Only what you read: [1] [2].", "citations": [1, 2]})
+    answer = await service.ask_reading(session, user, "kubernetes")
+    assert answer.from_history is True and not answer.text.startswith(memory.NO_HISTORY_PREAMBLE)
+    assert {c.id for c in answer.citations} == {items[2].id, items[3].id}
+    excerpts = gateway.chat_calls[0]["messages"][1]["content"]
+    assert "Article 2" in excerpts and "Article 3" in excerpts
+    assert "Article 0" not in excerpts and "Article 1" not in excerpts
+
+
+async def test_ask_reading_persists_transcript_and_respects_memory_toggle(session, user, gateway):
+    _feed, items = await seed(session, user, n=1)
+    session.add(make_state(user, items[0], read=True))
+    await session.commit()
+    gateway.chat({"answer": "Yes [1].", "citations": [1]})
+    answer = await service.ask_reading(session, user, "did I read about kubernetes?")
+    rows = (
+        await session.scalars(
+            select(models.Insight).where(models.Insight.user_id == user.id, models.Insight.kind == "ask")
+        )
+    ).all()
+    assert len(rows) == 1 and rows[0].title == "did I read about kubernetes?"
+    assert rows[0].body["answer"] == answer.text and rows[0].item_refs == [items[0].id]
+    assert rows[0].body["from_history"] is True and len(rows[0].period) <= 20
+    user.settings = {"memory": False}
+    off = await service.ask_reading(session, user, "anything?")
+    assert off.text == memory.MEMORY_OFF_TEXT and off.citations == [] and len(gateway.chat_calls) == 1
 
 
 async def test_ask_reading_raises_ai_unavailable(session, user, gateway):

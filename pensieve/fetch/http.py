@@ -4,11 +4,17 @@ Every outbound request made through :func:`get_client` passes through :func:`ass
 redirect hops, via an httpx request hook) so no caller can accidentally reach loopback, link-local, RFC1918 or
 cloud metadata addresses. ``settings.debug`` relaxes the address checks for local development; the scheme
 check always applies.
+
+DNS rebinding is closed by :class:`PinnedBackend`: the hook resolves and validates a hostname once and records
+the addresses; the connection is then opened to one of *those* addresses (never a fresh lookup) while TLS still
+uses the hostname for SNI and certificate verification. Bodies are streamed and abandoned past
+``settings.fetch_max_bytes``; every :func:`get` is bounded by ``settings.fetch_total_timeout_s``.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import ipaddress
 import logging
 import socket
@@ -16,6 +22,7 @@ from collections.abc import AsyncIterator, Iterable
 from contextlib import asynccontextmanager
 from urllib.parse import urlsplit
 
+import httpcore
 import httpx
 
 from pensieve.config import get_settings
@@ -41,6 +48,17 @@ class UnsafeURLError(ValueError):
     """Raised when a URL must not be fetched (scheme or destination address)."""
 
 
+class ResponseTooLarge(httpx.HTTPError):
+    """The body exceeded ``settings.fetch_max_bytes`` (decoded) and was abandoned."""
+
+
+#: Addresses validated by the request hook for the current task, keyed by lower-cased hostname. The pinned
+#: network backend connects to these instead of resolving again, so the address checked is the address used.
+_validated_addresses: contextvars.ContextVar[dict[str, list[str]] | None] = contextvars.ContextVar(
+    "pensieve_validated_addresses", default=None
+)
+
+
 def resolve_host(host: str) -> list[str]:
     """Resolve ``host`` to a list of IP literals. Module-level so tests can monkeypatch it (no DNS)."""
     try:
@@ -62,7 +80,7 @@ def _address_is_public(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> boo
     return bool(ip.is_global)
 
 
-def _check_addresses(host: str, addresses: Iterable[str]) -> None:
+def _check_addresses(host: str, addresses: Iterable[str]) -> list[str]:
     addresses = list(addresses)
     if not addresses:
         raise UnsafeURLError(f"host {host!r} resolved to no addresses")
@@ -73,13 +91,21 @@ def _check_addresses(host: str, addresses: Iterable[str]) -> None:
             raise UnsafeURLError(f"host {host!r} resolved to invalid address {raw!r}") from exc
         if not _address_is_public(ip):
             raise UnsafeURLError(f"host {host!r} resolves to non-public address {raw}")
+    return addresses
 
 
-def assert_safe_url(url: str) -> None:
-    """Refuse non-http(s) URLs and, unless ``settings.debug``, any URL pointing at a non-public address.
+def _is_ip_literal(host: str) -> bool:
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return True
 
-    Hostnames are resolved with the system resolver so DNS tricks (``127.0.0.1.nip.io``) are caught.
-    Raises :class:`UnsafeURLError`.
+
+def validate_url(url: str) -> tuple[str, list[str]]:
+    """Like :func:`assert_safe_url` but returns ``(hostname, validated addresses)``.
+
+    Addresses are empty for IP literals and in ``settings.debug`` (nothing to pin).
     """
     try:
         parts = urlsplit(url)
@@ -93,21 +119,26 @@ def assert_safe_url(url: str) -> None:
     if parts.username or parts.password:
         raise UnsafeURLError("URLs with embedded credentials are not allowed")
 
-    if get_settings().debug:
-        return
-
     lowered = host.lower().rstrip(".")
+    if get_settings().debug:
+        return lowered, []
+
     if lowered in BLOCKED_HOSTNAMES or lowered.endswith(BLOCKED_HOST_SUFFIXES):
         raise UnsafeURLError(f"host {host!r} is blocked")
 
-    try:
-        literal = ipaddress.ip_address(lowered)
-    except ValueError:
-        literal = None
-    if literal is not None:
-        _check_addresses(host, [str(literal)])
-        return
-    _check_addresses(host, resolve_host(lowered))
+    if _is_ip_literal(lowered):
+        _check_addresses(host, [lowered])
+        return lowered, []
+    return lowered, _check_addresses(host, resolve_host(lowered))
+
+
+def assert_safe_url(url: str) -> None:
+    """Refuse non-http(s) URLs and, unless ``settings.debug``, any URL pointing at a non-public address.
+
+    Hostnames are resolved with the system resolver so DNS tricks (``127.0.0.1.nip.io``) are caught.
+    Raises :class:`UnsafeURLError`.
+    """
+    validate_url(url)
 
 
 async def ensure_safe_url(url: str) -> None:
@@ -116,7 +147,78 @@ async def ensure_safe_url(url: str) -> None:
 
 
 async def _guard_request(request: httpx.Request) -> None:
-    await ensure_safe_url(str(request.url))
+    """Request hook: validate the destination and pin the resolved addresses for :class:`PinnedBackend`."""
+    host, addresses = await asyncio.to_thread(validate_url, str(request.url))
+    if addresses:
+        pinned = _validated_addresses.get()
+        if pinned is None:
+            pinned = {}
+            _validated_addresses.set(pinned)
+        pinned[host] = addresses
+
+
+class PinnedBackend(httpcore.AsyncNetworkBackend):
+    """httpcore network backend that connects to the address the SSRF guard validated.
+
+    ``connect_tcp`` receives the URL's hostname; instead of letting the OS resolve it again (the classic
+    DNS-rebinding window) it looks up the addresses the request hook validated in this task, or resolves and
+    validates itself when none were recorded (e.g. a client used without the hook). TLS is unaffected:
+    httpcore wraps the socket with ``server_hostname=<hostname>`` so SNI and certificate checks use the name.
+    """
+
+    def __init__(self, inner: httpcore.AsyncNetworkBackend | None = None) -> None:
+        self._inner = inner or httpcore.AnyIOBackend()
+
+    def _addresses_for(self, host: str) -> list[str]:
+        lowered = host.lower().rstrip(".")
+        if get_settings().debug or _is_ip_literal(lowered):
+            return [lowered]
+        pinned = _validated_addresses.get() or {}
+        addresses = pinned.get(lowered)
+        if addresses:
+            return addresses
+        if lowered in BLOCKED_HOSTNAMES or lowered.endswith(BLOCKED_HOST_SUFFIXES):
+            raise UnsafeURLError(f"host {host!r} is blocked")
+        return _check_addresses(host, resolve_host(lowered))
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options=None,
+    ) -> httpcore.AsyncNetworkStream:
+        try:
+            addresses = await asyncio.to_thread(self._addresses_for, host)
+        except UnsafeURLError as exc:
+            raise httpcore.ConnectError(str(exc)) from exc
+        last: Exception | None = None
+        for address in addresses:
+            try:
+                return await self._inner.connect_tcp(
+                    address, port, timeout=timeout, local_address=local_address, socket_options=socket_options
+                )
+            except (httpcore.ConnectError, OSError) as exc:
+                last = exc
+        assert last is not None
+        raise last
+
+    async def connect_unix_socket(self, path: str, timeout: float | None = None, socket_options=None):
+        return await self._inner.connect_unix_socket(path, timeout=timeout, socket_options=socket_options)
+
+    async def sleep(self, seconds: float) -> None:
+        await self._inner.sleep(seconds)
+
+
+class PinnedTransport(httpx.AsyncHTTPTransport):
+    """``httpx.AsyncHTTPTransport`` whose connection pool uses :class:`PinnedBackend`."""
+
+    def __init__(self, **kwargs) -> None:
+        super().__init__(**kwargs)
+        pool = getattr(self, "_pool", None)
+        if isinstance(pool, httpcore.AsyncConnectionPool):
+            pool._network_backend = PinnedBackend(pool._network_backend)
 
 
 def get_client(**overrides) -> httpx.AsyncClient:
@@ -133,6 +235,7 @@ def get_client(**overrides) -> httpx.AsyncClient:
         "follow_redirects": True,
         "max_redirects": 5,
         "event_hooks": {"request": [_guard_request]},
+        "transport": PinnedTransport(),
     }
     kwargs.update(overrides)
     return httpx.AsyncClient(**kwargs)
@@ -166,17 +269,65 @@ async def host_slot(url: str) -> AsyncIterator[None]:
         yield
 
 
-async def get(url: str, *, client: httpx.AsyncClient | None = None, headers: dict | None = None) -> httpx.Response:
-    """GET ``url`` with the SSRF guard and per-host limiter; opens a temporary client when none is passed."""
+async def _read_capped(response: httpx.Response, max_bytes: int) -> httpx.Response:
+    """Stream the body up to ``max_bytes`` (decoded) and return a fully-read response; abandon it otherwise."""
+    declared = response.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > max_bytes:
+        await response.aclose()
+        raise ResponseTooLarge(f"response declares {declared} bytes (limit {max_bytes})")
+    chunks: list[bytes] = []
+    total = 0
+    try:
+        async for chunk in response.aiter_bytes():
+            total += len(chunk)
+            if total > max_bytes:
+                raise ResponseTooLarge(f"response exceeded {max_bytes} bytes")
+            chunks.append(chunk)
+    finally:
+        await response.aclose()
+    return httpx.Response(
+        status_code=response.status_code,
+        headers=response.headers,
+        content=b"".join(chunks),
+        request=response.request,
+        history=list(response.history),
+        extensions=response.extensions,
+        default_encoding=response.default_encoding,
+    )
+
+
+async def _get_streamed(client: httpx.AsyncClient, url: str, headers: dict | None, max_bytes: int) -> httpx.Response:
+    request = client.build_request("GET", url, headers=headers)
+    response = await client.send(request, stream=True)
+    return await _read_capped(response, max_bytes)
+
+
+async def get(
+    url: str,
+    *,
+    client: httpx.AsyncClient | None = None,
+    headers: dict | None = None,
+    max_bytes: int | None = None,
+) -> httpx.Response:
+    """GET ``url`` with the SSRF guard, per-host limiter, body cap and total timeout.
+
+    Opens a temporary client when none is passed. Raises :class:`ResponseTooLarge` (an ``httpx.HTTPError``)
+    past ``max_bytes`` and ``TimeoutError`` past ``settings.fetch_total_timeout_s``.
+    """
+    settings = get_settings()
+    limit = max_bytes if max_bytes is not None else settings.fetch_max_bytes
     await ensure_safe_url(url)
-    async with host_slot(url):
+    async with asyncio.timeout(settings.fetch_total_timeout_s), host_slot(url):
         if client is not None:
-            return await client.get(url, headers=headers)
+            return await _get_streamed(client, url, headers, limit)
         async with get_client() as own:
-            return await own.get(url, headers=headers)
+            return await _get_streamed(own, url, headers, limit)
 
 
 __all__ = [
+    "PinnedBackend",
+    "PinnedTransport",
+    "ResponseTooLarge",
     "UnsafeURLError",
     "assert_safe_url",
     "ensure_safe_url",
@@ -184,4 +335,5 @@ __all__ = [
     "get_client",
     "host_slot",
     "resolve_host",
+    "validate_url",
 ]

@@ -1,10 +1,11 @@
+
 import uuid
 
 from sqlalchemy import select
 
 from pensieve import models
 from pensieve.auth import hash_api_token
-from tests.test_web_support import fake_module, login, make_user, seed_feed
+from tests.test_web_support import fake_module, login, make_user, memory_limiter, seed_feed  # noqa: F401
 
 
 async def test_add_feed_uses_fetch_package(client, session, user, monkeypatch):
@@ -196,7 +197,7 @@ async def test_household_users_admin_only(client, session, user):
     assert r.status_code == 403
     r = await client.post("/manage/users", data={"email": "x@example.com"}, headers=headers)
     assert r.status_code == 403
-    await client.post("/logout")
+    await client.post("/logout", headers=headers)
     headers = await login(client, user)  # admin
     r = await client.get("/manage/users")
     assert r.status_code == 200 and reader.email in r.text
@@ -227,7 +228,7 @@ async def test_account_profile_and_password(client, session, user):
     assert "wrong" in r.headers["location"]
     r = await client.post("/manage/account/password", data={"current_password": "password123", "new_password": "newpassword1", "confirm_password": "newpassword1"}, headers=headers)
     assert r.headers["location"].endswith("password_changed")
-    await client.post("/logout")
+    await client.post("/logout", headers=headers)
     await login(client, user, password="newpassword1")
 
 

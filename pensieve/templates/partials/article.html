@@ -3,10 +3,11 @@
   <div class="toolbar" id="toolbar-{{ item.id }}">
     {% include "partials/toolbar.html" %}
   </div>
+  {% if auto_open is defined and auto_open %}<span hidden hx-post="/items/{{ item.id }}/open" hx-trigger="load" hx-target="#toolbar-{{ item.id }}" hx-swap="innerHTML"></span>{% endif %}
   <header class="col" style="gap:10px">
     <h1 class="article-title">{% if item.url %}<a class="plain" href="{{ item.url }}" target="_blank" rel="noopener noreferrer">{{ item.title or '(untitled)' }}</a>{% else %}{{ item.title or '(untitled)' }}{% endif %}</h1>
     <div class="article-meta">
-      <span class="row">{% if feed.icon_url %}<img class="favicon" src="{{ feed.icon_url }}" alt="" width="14" height="14">{% endif %}<a href="/reader/feed/{{ feed.id }}">{{ feed.title or feed.url }}</a></span>
+      <span class="row">{% if feed.icon_url %}<img class="favicon" src="/favicons/{{ feed.id }}" alt="" width="14" height="14" loading="lazy">{% endif %}<a href="/reader/feed/{{ feed.id }}">{{ feed.title or feed.url }}</a></span>
       {% if item.author %}<span>by {{ item.author }}</span>{% endif %}
       <time datetime="{{ item.published_at.isoformat() }}" title="{{ item.published_at.strftime('%-d %b %Y, %H:%M') }}">{{ item.published_at|timeago }}</time>
       <span>{{ item.content_text|reading_time }}</span>

@@ -9,19 +9,24 @@ from typing import Annotated
 
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
-from sqlalchemy import and_, exists, func, or_, select
+from sqlalchemy import and_, exists, func, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from pensieve.models import Cluster, ClusterItem, Feed, Folder, Item, ItemAI, ItemState, Tag, User
+from pensieve.web.cursor import decode_cursor, encode_cursor
 from pensieve.web.queries import (
+    NavCounts,
+    get_cached_nav_counts,
     is_unread,
+    mark_read_where,
     not_hidden,
     parse_uuid,
-    set_read,
+    set_cached_nav_counts,
     undo_read,
 )
 from pensieve.web.templating import DB, CsrfUser, CurrentUser, hx_trigger, render
+from pensieve.web.undo import load_undo, save_undo
 
 router = APIRouter()
 
@@ -56,11 +61,16 @@ class View:
 class ListOptions:
     grouped: bool = True
     sort: str = "newest"
-    page: int = 1
+    after: str | None = None
+    """Keyset cursor (``<published_usec>.<id hex>``) of the last row of the previous page; None = first page."""
 
     @property
     def query(self) -> str:
         return f"grouped={1 if self.grouped else 0}&sort={self.sort}"
+
+    @property
+    def first_page(self) -> bool:
+        return not self.after
 
 
 @dataclass
@@ -100,11 +110,10 @@ def list_options(request: Request) -> ListOptions:
     sort = params.get("sort", "newest")
     if sort not in {"newest", "oldest"}:
         sort = "newest"
-    try:
-        page = max(1, int(params.get("page", "1")))
-    except ValueError:
-        page = 1
-    return ListOptions(grouped=grouped, sort=sort, page=page)
+    after = params.get("after") or None
+    if after and decode_cursor(after) is None:
+        after = None
+    return ListOptions(grouped=grouped, sort=sort, after=after)
 
 
 async def resolve_view(session: AsyncSession, user: User, kind: str, key: str | None) -> View:
@@ -164,30 +173,62 @@ def apply_view_filter(stmt, view: View, user_id: uuid.UUID, state):
     return stmt
 
 
-def view_items_stmt(view: View, user_id: uuid.UUID, grouped: bool):
-    """Base select of (Item, Feed, ItemState, cluster_id, source_count) for a view, user-scoped."""
-    state = aliased(ItemState)
-    uc = cluster_subquery(user_id)
+def _filtered_stmt(view: View, user_id: uuid.UUID, columns, state, uc):
     stmt = (
-        select(Item, Feed, state, uc.c.cluster_id, uc.c.source_count)
+        select(*columns)
+        .select_from(Item)
         .join(Feed, Item.feed_id == Feed.id)
         .outerjoin(state, and_(state.item_id == Item.id, state.user_id == user_id))
         .outerjoin(uc, uc.c.item_id == Item.id)
         .where(Feed.user_id == user_id)
         .where(not_hidden(state))
     )
-    stmt = apply_view_filter(stmt, view, user_id, state)
+    return apply_view_filter(stmt, view, user_id, state)
+
+
+def view_items_stmt(view: View, user_id: uuid.UUID, grouped: bool):
+    """Base select of (Item, Feed, ItemState, cluster_id, source_count) for a view, user-scoped.
+
+    Grouped: one row per cluster, represented by the cluster's canonical item when the view's filter keeps it,
+    otherwise by the newest member that passes the filter (so an unread member still shows after the canonical
+    was read, and a feed view shows its own member of a cross-feed story).
+    """
+    state = aliased(ItemState)
+    uc = cluster_subquery(user_id)
+    stmt = _filtered_stmt(view, user_id, [Item, Feed, state, uc.c.cluster_id, uc.c.source_count], state, uc)
     if grouped:
-        stmt = stmt.where(or_(uc.c.cluster_id.is_(None), uc.c.canonical_item_id == Item.id))
+        representatives = (
+            _filtered_stmt(view, user_id, [Item.id], state, uc)
+            .where(uc.c.cluster_id.is_not(None))
+            .distinct(uc.c.cluster_id)
+            .order_by(
+                uc.c.cluster_id,
+                (uc.c.canonical_item_id == Item.id).desc(),
+                Item.published_at.desc(),
+                Item.id.desc(),
+            )
+            .correlate(None)
+        )
+        stmt = stmt.where(or_(uc.c.cluster_id.is_(None), Item.id.in_(representatives)))
     return stmt
 
 
 async def list_rows(
     session: AsyncSession, user: User, view: View, opts: ListOptions
 ) -> tuple[list[Row], bool]:
+    """One page of rows after the keyset cursor in ``opts.after``; stable when items arrive between pages."""
     stmt = view_items_stmt(view, user.id, opts.grouped)
-    order = Item.published_at.desc() if opts.sort == "newest" else Item.published_at.asc()
-    stmt = stmt.order_by(order, Item.id.desc()).offset((opts.page - 1) * PAGE_SIZE).limit(PAGE_SIZE + 1)
+    key = tuple_(Item.published_at, Item.id)
+    cursor = decode_cursor(opts.after)
+    if opts.sort == "newest":
+        stmt = stmt.order_by(Item.published_at.desc(), Item.id.desc())
+        if cursor is not None:
+            stmt = stmt.where(key < cursor)
+    else:
+        stmt = stmt.order_by(Item.published_at.asc(), Item.id.asc())
+        if cursor is not None:
+            stmt = stmt.where(key > cursor)
+    stmt = stmt.limit(PAGE_SIZE + 1)
     result = (await session.execute(stmt)).all()
     has_more = len(result) > PAGE_SIZE
     rows: list[Row] = []
@@ -236,7 +277,11 @@ async def view_counts(session: AsyncSession, user: User, view: View) -> tuple[in
     return int(unread or 0), int(total or 0)
 
 
-async def nav_data(session: AsyncSession, user: User, view: View) -> NavData:
+async def _nav_counts(session: AsyncSession, user: User) -> NavCounts:
+    """Unread per feed, starred total and per-tag unread counts; cached ``NAV_CACHE_TTL_S`` per user."""
+    cached = get_cached_nav_counts(user.id)
+    if cached is not None:
+        return cached
     state = aliased(ItemState)
     unread_join = (
         select(Feed.id, func.count(Item.id))
@@ -247,29 +292,11 @@ async def nav_data(session: AsyncSession, user: User, view: View) -> NavData:
         .group_by(Feed.id)
     )
     unread_by_feed = {fid: int(n) for fid, n in await session.execute(unread_join)}
-
     starred = await session.scalar(
         select(func.count(ItemState.item_id)).where(
             ItemState.user_id == user.id, ItemState.is_starred.is_(True), ItemState.hidden.is_(False)
         )
     )
-    feeds = list(
-        await session.scalars(select(Feed).where(Feed.user_id == user.id).order_by(Feed.position, Feed.title))
-    )
-    folders = list(
-        await session.scalars(
-            select(Folder).where(Folder.user_id == user.id).order_by(Folder.position, Folder.name)
-        )
-    )
-    by_folder: dict[uuid.UUID | None, list[tuple[Feed, int]]] = {}
-    for f in feeds:
-        by_folder.setdefault(f.folder_id, []).append((f, unread_by_feed.get(f.id, 0)))
-    folder_navs = [
-        FolderNav(folder=fo, feeds=by_folder.get(fo.id, []), count=sum(n for _, n in by_folder.get(fo.id, [])))
-        for fo in folders
-    ]
-    inbox = by_folder.get(None, [])
-
     # Tag counts (unread items per tag), for user tags on item_states and AI tags on item_ai.
     user_sq = (
         select(func.unnest(ItemState.tags).label("tag"))
@@ -291,6 +318,38 @@ async def nav_data(session: AsyncSession, user: User, view: View) -> NavData:
     ai_tag_counts = {
         t: int(n) for t, n in await session.execute(select(ai_sq.c.tag, func.count()).group_by(ai_sq.c.tag))
     }
+    counts = NavCounts(
+        unread_by_feed=unread_by_feed,
+        starred=int(starred or 0),
+        user_tag_counts=user_tag_counts,
+        ai_tag_counts=ai_tag_counts,
+    )
+    set_cached_nav_counts(user.id, counts)
+    return counts
+
+
+async def nav_data(session: AsyncSession, user: User, view: View) -> NavData:
+    counts = await _nav_counts(session, user)
+    unread_by_feed = counts.unread_by_feed
+    starred = counts.starred
+    user_tag_counts = counts.user_tag_counts
+    ai_tag_counts = counts.ai_tag_counts
+    feeds = list(
+        await session.scalars(select(Feed).where(Feed.user_id == user.id).order_by(Feed.position, Feed.title))
+    )
+    folders = list(
+        await session.scalars(
+            select(Folder).where(Folder.user_id == user.id).order_by(Folder.position, Folder.name)
+        )
+    )
+    by_folder: dict[uuid.UUID | None, list[tuple[Feed, int]]] = {}
+    for f in feeds:
+        by_folder.setdefault(f.folder_id, []).append((f, unread_by_feed.get(f.id, 0)))
+    folder_navs = [
+        FolderNav(folder=fo, feeds=by_folder.get(fo.id, []), count=sum(n for _, n in by_folder.get(fo.id, [])))
+        for fo in folders
+    ]
+    inbox = by_folder.get(None, [])
     tags = list(await session.scalars(select(Tag).where(Tag.user_id == user.id).order_by(Tag.position, Tag.name)))
     user_tags = sorted({t.name for t in tags if t.kind == "user"} | set(user_tag_counts))
     ai_tags = sorted({t.name for t in tags if t.kind == "ai"} | set(ai_tag_counts))
@@ -309,6 +368,7 @@ async def nav_data(session: AsyncSession, user: User, view: View) -> NavData:
 async def mark_view_read(
     session: AsyncSession, user: User, view: View, older_than: str | None
 ) -> list[uuid.UUID]:
+    """Mark the view's unread items read in one server-side statement; returns the affected ids."""
     state = aliased(ItemState)
     stmt = (
         select(Item.id)
@@ -320,9 +380,7 @@ async def mark_view_read(
     delta = {"1d": timedelta(days=1), "1w": timedelta(weeks=1)}.get(older_than or "")
     if delta:
         stmt = stmt.where(Item.published_at < datetime.now(UTC) - delta)
-    ids = list(await session.scalars(stmt))
-    await set_read(session, user.id, ids, True)
-    return ids
+    return await mark_read_where(session, user.id, stmt)
 
 
 # ---------------------------------------------------------------------------
@@ -342,6 +400,7 @@ async def render_reader(
         "opts": opts,
         "rows": rows,
         "has_more": has_more,
+        "next_cursor": encode_cursor(rows[-1].item) if rows and has_more else None,
         "unread": unread,
         "total": total,
         "nav": nav,
@@ -421,8 +480,15 @@ async def reader_keyed_list(
 async def render_list(request: Request, session: AsyncSession, user: User, view: View, extra: dict | None = None):
     opts = list_options(request)
     rows, has_more = await list_rows(session, user, view, opts)
-    ctx = {"view": view, "opts": opts, "rows": rows, "has_more": has_more, "list_url": f"{view.path}/list"}
-    if opts.page > 1 and request.headers.get("hx-request") == "true":
+    ctx = {
+        "view": view,
+        "opts": opts,
+        "rows": rows,
+        "has_more": has_more,
+        "next_cursor": encode_cursor(rows[-1].item) if rows and has_more else None,
+        "list_url": f"{view.path}/list",
+    }
+    if not opts.first_page and request.headers.get("hx-request") == "true":
         return render(request, "partials/rows.html", ctx, user=user)
     unread, total = await view_counts(session, user, view)
     ctx.update({"unread": unread, "total": total})
@@ -438,7 +504,8 @@ async def render_list(request: Request, session: AsyncSession, user: User, view:
 async def _mark_read_common(request, session, user, view: View, older_than: str | None):
     ids = await mark_view_read(session, user, view, older_than)
     await session.commit()
-    extra = {"undo_ids": ids}
+    token = await save_undo(user.id, ids)
+    extra = {"undo_token": token, "undo_count": len(ids), "undo_marked": True}
     headers = hx_trigger("counts-changed")
     response = await render_list(request, session, user, view, extra=extra)
     if request.headers.get("hx-request") != "true":
@@ -478,10 +545,17 @@ async def undo_read_route(
     request: Request,
     session: DB,
     user: CsrfUser,
+    token: Annotated[str, Form()] = "",
     ids: Annotated[str, Form()] = "",
     view: Annotated[str, Form()] = "unread",
 ):
-    item_ids = [u for u in (parse_uuid(p) for p in ids.split(",")) if u]
+    """Undo a mark-all-read batch by token (ids are looked up in the undo store, never trusted from the form).
+    A raw ``ids`` list is still accepted for offline replays, capped at the same batch size."""
+    item_ids = await load_undo(user.id, token)
+    if not item_ids and ids:
+        from pensieve.config import get_settings
+
+        item_ids = [u for u in (parse_uuid(p) for p in ids.split(",")) if u][: get_settings().undo_batch_max_ids]
     await undo_read(session, user.id, item_ids)
     await session.commit()
     kind, _, key = view.partition("/")

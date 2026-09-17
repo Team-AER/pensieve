@@ -102,6 +102,20 @@ def theme_for(user: User | None) -> str:
     return str(settings.get("theme") or "auto")
 
 
+FONT_SIZES = ("s", "m", "l", "xl")
+MEASURES = ("narrow", "normal", "wide")
+
+
+def font_size_for(user: User | None) -> str:
+    value = str((user.settings or {}).get("font_size") or "m") if user else "m"
+    return value if value in FONT_SIZES else "m"
+
+
+def measure_for(user: User | None) -> str:
+    value = str((user.settings or {}).get("measure") or "normal") if user else "normal"
+    return value if value in MEASURES else "normal"
+
+
 def _csrf_serializer() -> URLSafeTimedSerializer:
     return URLSafeTimedSerializer(get_settings().secret_key, salt="csrf")
 
@@ -187,6 +201,8 @@ def render(
         "request": request,
         "user": user,
         "theme": theme_for(user),
+        "font_size": font_size_for(user),
+        "measure": measure_for(user),
         "csrf_token": make_csrf(user.id if user else None),
         "settings": get_settings(),
         "htmx": is_htmx(request),

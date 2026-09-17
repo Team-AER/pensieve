@@ -10,6 +10,11 @@
   <div class="field"><label for="display_name">Display name</label><input class="input input-sm" id="display_name" name="display_name" value="{{ user.display_name }}"></div>
   <div class="field"><label for="theme">Theme</label>
     <select class="input input-sm" id="theme" name="theme" data-theme-select>{% for t in ['auto','light','dark','sepia'] %}<option value="{{ t }}"{% if theme == t %} selected{% endif %}>{{ t }}</option>{% endfor %}</select></div>
+  <div class="field"><label for="font_size">Reading text size</label>
+    <select class="input input-sm" id="font_size" name="font_size" data-font-select>{% for f, label in [('s','Small'),('m','Medium'),('l','Large'),('xl','Extra large')] %}<option value="{{ f }}"{% if font_size == f %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+    <span class="faint">Also <kbd>+</kbd> / <kbd>-</kbd> in the reader.</span></div>
+  <div class="field"><label for="measure">Line width</label>
+    <select class="input input-sm" id="measure" name="measure" data-measure-select>{% for w, label in [('narrow','Narrow'),('normal','Normal'),('wide','Wide')] %}<option value="{{ w }}"{% if measure == w %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
   <div class="row"><button class="btn btn-primary btn-sm" type="submit">Save</button></div>
 </form>
 <form class="card section" method="post" action="/manage/account/password">{{ m.csrf_field(csrf_token) }}

@@ -7,8 +7,11 @@ ApiToken of kind `greader`; ClientLogin also accepts the account password and mi
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -16,7 +19,7 @@ from itsdangerous import URLSafeTimedSerializer
 from sqlalchemy import delete, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from pensieve.auth import generate_api_token, hash_api_token, user_from_api_token, verify_password
+from pensieve.auth import hash_api_token, user_from_api_token, verify_password
 from pensieve.config import get_settings
 from pensieve.models import ApiToken, Feed, Folder, Item, ItemAI, ItemState, Tag, User
 from pensieve.syncapi import router
@@ -41,6 +44,7 @@ from pensieve.syncapi.common import (
     item_tag_id,
     items_by_long_ids,
     label_stream_id,
+    long_id,
     mark_stream_read,
     parse_item_id,
     parse_stream,
@@ -60,7 +64,9 @@ MAX_CONTENT_ITEMS = 1000
 MAX_ID_ITEMS = 10_000
 DEFAULT_N = 20
 PASSWORD_TOKEN_LABEL = "Google Reader client"
+CLIENT_TOKEN_REUSE = timedelta(days=30)
 
+log = logging.getLogger(__name__)
 greader_router = APIRouter(tags=["greader"])
 
 
@@ -116,6 +122,58 @@ async def _add_feed(session: AsyncSession, user: User, url: str, folder_id: uuid
 # ---------------------------------------------------------------------------
 
 
+def _derived_client_token(token_id: uuid.UUID) -> str:
+    """Plaintext of a ClientLogin-minted token, reproducible from its row id and the server secret.
+
+    Only the SHA-256 of a token is stored, so a password login could otherwise never hand back the same
+    token twice; deriving it with HMAC(secret_key, row id) keeps one token per client per 30 days.
+    """
+    digest = hmac.new(get_settings().secret_key.encode(), f"clientlogin:{token_id}".encode(), hashlib.sha256)
+    return digest.hexdigest()[:40]
+
+
+async def _reusable_client_token(session: AsyncSession, user: User) -> str | None:
+    """An unrevoked ClientLogin token for `user` created in the last 30 days whose plaintext we can derive."""
+    since = datetime.now(UTC) - CLIENT_TOKEN_REUSE
+    rows = await session.scalars(
+        select(ApiToken)
+        .where(
+            ApiToken.user_id == user.id,
+            ApiToken.kind == "greader",
+            ApiToken.label == PASSWORD_TOKEN_LABEL,
+            ApiToken.revoked_at.is_(None),
+            ApiToken.created_at >= since,
+        )
+        .order_by(ApiToken.created_at.desc())
+    )
+    for row in rows:
+        candidate = _derived_client_token(row.id)
+        if hmac.compare_digest(hash_api_token(candidate), row.token_hash):
+            row.last_used_at = datetime.now(UTC)
+            return candidate
+    return None
+
+
+async def _mint_client_token(session: AsyncSession, user: User) -> str:
+    row = ApiToken(
+        id=uuid.uuid4(),
+        user_id=user.id,
+        label=PASSWORD_TOKEN_LABEL,
+        token_hash="pending",
+        kind="greader",
+        last_used_at=datetime.now(UTC),
+    )
+    token = _derived_client_token(row.id)
+    row.token_hash = hash_api_token(token)
+    session.add(row)
+    await session.flush()
+    return token
+
+
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
 async def _client_login(request: Request, session: AsyncSession) -> Response:
     params = await read_params(request)
     email = (params.get("Email") or params.get("email") or "").strip()
@@ -123,29 +181,39 @@ async def _client_login(request: Request, session: AsyncSession) -> Response:
     if not email or not secret:
         return PlainTextResponse("Error=BadAuthentication\n", status_code=status.HTTP_401_UNAUTHORIZED)
 
+    try:
+        from pensieve.web.ratelimit import get_limiter
+    except ImportError:  # web package absent
+        limiter = None
+    else:
+        limiter = get_limiter()
+    key = (_client_ip(request), email.lower())
+    if limiter is not None:
+        retry_after = await limiter.blocked_for(key)
+        if retry_after:
+            return PlainTextResponse(
+                "Error=BadAuthentication\n",
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                headers={"Retry-After": str(retry_after)},
+            )
+
     user = await user_from_api_token(secret, session)
     token = secret
     if user is None or user.email.lower() != email.lower():
         user = await session.scalar(select(User).where(func.lower(User.email) == email.lower()))
         if user is None or not verify_password(secret, user.password_hash):
+            if limiter is not None:
+                await limiter.record_failure(key)
             return PlainTextResponse("Error=BadAuthentication\n", status_code=status.HTTP_401_UNAUTHORIZED)
-        token = generate_api_token()
-        session.add(
-            ApiToken(
-                user_id=user.id,
-                label=PASSWORD_TOKEN_LABEL,
-                token_hash=hash_api_token(token),
-                kind="greader",
-                last_used_at=datetime.now(UTC),
-            )
-        )
-        await session.flush()
+        token = await _reusable_client_token(session, user) or await _mint_client_token(session, user)
+    if limiter is not None:
+        await limiter.reset(key)
     return PlainTextResponse(f"SID={token}\nLSID=null\nAuth={token}\n")
 
 
 @greader_router.post("/accounts/ClientLogin")
-@greader_router.get("/accounts/ClientLogin")
 async def client_login(request: Request, session: DbSession) -> Response:
+    """POST only: credentials in a query string end up in access logs and browser history."""
     return await _client_login(request, session)
 
 
@@ -186,15 +254,32 @@ async def options_any(rest: str) -> Response:
 # ---------------------------------------------------------------------------
 
 
+def _sortid(feed_id: uuid.UUID) -> str:
+    """8-hex sort key, as Google Reader emitted; derived from the feed id so it is stable."""
+    return f"{long_id(feed_id) & 0xFFFFFFFF:08x}"
+
+
 @greader_router.get(f"{API}/subscription/list")
 async def subscription_list(user: ReaderUser, session: DbSession) -> Response:
     folders = await folder_map(session, user.id)
     feeds = await session.scalars(
         select(Feed).where(Feed.user_id == user.id).order_by(Feed.position, Feed.title, Feed.created_at)
     )
+    oldest = dict(
+        (
+            await session.execute(
+                select(Item.feed_id, func.min(Item.published_at))
+                .join(Feed, Feed.id == Item.feed_id)
+                .where(Feed.user_id == user.id)
+                .group_by(Item.feed_id)
+            )
+        ).all()
+    )
+    base = str(get_settings().base_url).rstrip("/")
     subscriptions = []
     for feed in feeds:
         folder = folders.get(feed.folder_id) if feed.folder_id else None
+        first = oldest.get(feed.id)
         subscriptions.append(
             {
                 "id": feed_stream_id(feed.id),
@@ -202,9 +287,11 @@ async def subscription_list(user: ReaderUser, session: DbSession) -> Response:
                 "categories": (
                     [{"id": label_stream_id(folder.name), "label": folder.name}] if folder is not None else []
                 ),
+                "sortid": _sortid(feed.id),
+                "firstitemmsec": str(to_msec(first)) if first else "0",
                 "url": feed.url,
                 "htmlUrl": feed.site_url or "",
-                "iconUrl": feed.icon_url or "",
+                "iconUrl": f"{base}/favicons/{feed.id}" if feed.icon_data else (feed.icon_url or ""),
             }
         )
     return _json({"subscriptions": subscriptions})
@@ -478,7 +565,7 @@ def _item_json(
         "crawlTimeMsec": str(to_msec(item.fetched_at or item.published_at)),
         "timestampUsec": str(to_usec(item.published_at)),
         "published": to_sec(item.published_at),
-        "updated": to_sec(item.published_at),
+        "updated": to_sec(item.updated_at or item.published_at),
         "title": item.title or "",
         "canonical": [{"href": item.url or ""}],
         "alternate": [{"href": item.url or "", "type": "text/html"}],

@@ -8,13 +8,13 @@
 <div class="nav-section">
   <div class="eyebrow nav-eyebrow">Folders</div>
   {% for fn in nav.folders %}
-  <a class="nav-item{% if view.kind == 'folder' and view.key == fn.folder.id|string %} active{% endif %}" href="/reader/folder/{{ fn.folder.id }}">
+  <a class="nav-item{% if view.kind == 'folder' and view.key == fn.folder.id|string %} active{% endif %}" href="/reader/folder/{{ fn.folder.id }}" data-drop-folder="{{ fn.folder.id }}">
     <span class="row">{{ m.icon('folder') }} {{ fn.folder.name }}</span><span class="count">{{ fn.count }}</span>
   </a>
   {% if (view.kind == 'folder' and view.key == fn.folder.id|string) or (view.kind == 'feed' and fn.feeds|selectattr('0.id', 'equalto', view.feed_id)|list) %}
     {% for feed, n in fn.feeds %}
-    <a class="nav-item nav-feed{% if view.kind == 'feed' and view.key == feed.id|string %} active{% endif %}" href="/reader/feed/{{ feed.id }}">
-      <span class="row">{% if feed.icon_url %}<img class="favicon" src="{{ feed.icon_url }}" alt="" width="14" height="14" loading="lazy">{% else %}<span class="favicon favicon-blank"></span>{% endif %}<span class="grow ellipsis">{{ feed.title or feed.url }}</span></span><span class="count">{{ n }}</span>
+    <a class="nav-item nav-feed{% if view.kind == 'feed' and view.key == feed.id|string %} active{% endif %}" href="/reader/feed/{{ feed.id }}" draggable="true" data-feed-id="{{ feed.id }}">
+      <span class="row"><img class="favicon" src="/favicons/{{ feed.id }}" alt="" width="14" height="14" loading="lazy"><span class="grow ellipsis">{{ feed.title or feed.url }}</span></span><span class="count">{{ n }}</span>
     </a>
     {% endfor %}
   {% endif %}
@@ -24,10 +24,10 @@
 </div>
 {% if nav.inbox %}
 <div class="nav-section">
-  <div class="eyebrow nav-eyebrow">Inbox <span class="faint">unfiled</span></div>
+  <div class="eyebrow nav-eyebrow" data-drop-folder="">Inbox <span class="faint">unfiled</span></div>
   {% for feed, n in nav.inbox %}
-  <a class="nav-item nav-feed{% if view.kind == 'feed' and view.key == feed.id|string %} active{% endif %}" href="/reader/feed/{{ feed.id }}">
-    <span class="row">{% if feed.icon_url %}<img class="favicon" src="{{ feed.icon_url }}" alt="" width="14" height="14" loading="lazy">{% else %}<span class="favicon favicon-blank"></span>{% endif %}<span class="grow ellipsis">{{ feed.title or feed.url }}</span></span><span class="count">{{ n }}</span>
+  <a class="nav-item nav-feed{% if view.kind == 'feed' and view.key == feed.id|string %} active{% endif %}" href="/reader/feed/{{ feed.id }}" draggable="true" data-feed-id="{{ feed.id }}">
+    <span class="row"><img class="favicon" src="/favicons/{{ feed.id }}" alt="" width="14" height="14" loading="lazy"><span class="grow ellipsis">{{ feed.title or feed.url }}</span></span><span class="count">{{ n }}</span>
   </a>
   {% endfor %}
   <div class="inbox-notice">

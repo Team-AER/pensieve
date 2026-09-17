@@ -53,10 +53,27 @@ async def prune_old_items(ctx: dict) -> int:
         return await scheduler.prune_old_items(session)
 
 
-FUNCTIONS = [fetch_feed, fetch_reader_mode, fetch_due_feeds, prune_old_items]
+async def refresh_favicons(ctx: dict) -> int:
+    """Cron (weekly): cache favicon bytes for feeds missing one or not refreshed in ``favicon_refresh_days``."""
+    from pensieve.fetch.favicon import refresh_stale_icons
+
+    async with session_scope() as session:
+        return await refresh_stale_icons(session)
+
+
+FUNCTIONS = [fetch_feed, fetch_reader_mode, fetch_due_feeds, prune_old_items, refresh_favicons]
 CRON_JOBS = [
     cron(fetch_due_feeds, minute=set(range(60)), unique=True),
     cron(prune_old_items, hour=3, minute=15, unique=True),
+    cron(refresh_favicons, weekday=0, hour=4, minute=5, unique=True),
 ]
 
-__all__ = ["CRON_JOBS", "FUNCTIONS", "fetch_due_feeds", "fetch_feed", "fetch_reader_mode", "prune_old_items"]
+__all__ = [
+    "CRON_JOBS",
+    "FUNCTIONS",
+    "fetch_due_feeds",
+    "fetch_feed",
+    "fetch_reader_mode",
+    "prune_old_items",
+    "refresh_favicons",
+]

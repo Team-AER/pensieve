@@ -43,8 +43,10 @@ async def test_client_login_with_token(client, session, user):
     assert r.headers["content-type"].startswith("text/plain")
     assert f"Auth={d.token}\n" in r.text and r.text.startswith("SID=")
 
-    # Legacy clients also GET with query params, and the prefixed mount works too.
+    # ClientLogin is POST only (credentials never belong in a query string); the prefixed mount works too.
     r = await client.get("/api/greader/accounts/ClientLogin", params={"Email": user.email, "Passwd": d.token})
+    assert r.status_code == 405
+    r = await client.post("/api/greader/accounts/ClientLogin", data={"Email": user.email, "Passwd": d.token})
     assert r.status_code == 200 and f"Auth={d.token}" in r.text
 
     # A valid token presented with someone else's email is rejected.
@@ -64,6 +66,21 @@ async def test_client_login_with_password_mints_token(client, session, user):
     r = await client.get(f"{API}/user-info", headers=auth(token))
     assert r.status_code == 200
     assert r.json()["userEmail"] == user.email and r.json()["userId"] == str(user.id)
+
+    # A second password login within 30 days hands back the same token instead of minting another.
+    r = await client.post("/accounts/ClientLogin", data={"Email": user.email, "Passwd": "password123"})
+    again = next(line.split("=", 1)[1] for line in r.text.splitlines() if line.startswith("Auth="))
+    assert again == token
+    rows = list(await session.scalars(select(models.ApiToken).where(models.ApiToken.user_id == user.id)))
+    assert len(rows) == 1
+    # A revoked token is not reused.
+    rows[0].revoked_at = rows[0].created_at
+    await session.commit()
+    r = await client.post("/accounts/ClientLogin", data={"Email": user.email, "Passwd": "password123"})
+    third = next(line.split("=", 1)[1] for line in r.text.splitlines() if line.startswith("Auth="))
+    assert third != token
+    rows = list(await session.scalars(select(models.ApiToken).where(models.ApiToken.user_id == user.id)))
+    assert len(rows) == 2
 
     r = await client.post("/accounts/ClientLogin", data={"Email": user.email, "Passwd": "wrong"})
     assert r.status_code == 401 and r.text.startswith("Error=BadAuthentication")
