@@ -337,6 +337,7 @@ async def tag_items(
             log.warning("tag_items batch failed for user %s: %s", user.id, exc)
             raise
         by_index = {int(entry["index"]): entry for entry in result["items"] if _entry_ok(entry)}
+        values: list[dict] = []
         for i, item in enumerate(batch):
             entry = by_index.get(i)
             if entry is None:
@@ -353,18 +354,37 @@ async def tag_items(
                 if len(tags) >= prompts.MAX_TAGS_PER_ITEM:
                     break
             content_type = entry["content_type"] if entry["content_type"] in prompts.CONTENT_TYPES else None
-            row = existing.get(item.id)
-            if row is None:
-                row = models.ItemAI(user_id=user.id, item_id=item.id)
-                session.add(row)
-                existing[item.id] = row
-            row.tags = tags
-            row.confidences = confidences
-            row.content_type = content_type
-            row.model = settings.llm_fast_model
-            row.prompt_version = prompts.PROMPT_VERSION
-            row.generated_at = utcnow()
-            written.append(row)
+            values.append(
+                {
+                    "user_id": user.id,
+                    "item_id": item.id,
+                    "tags": tags,
+                    "confidences": confidences,
+                    "content_type": content_type,
+                    "model": settings.llm_fast_model,
+                    "prompt_version": prompts.PROMPT_VERSION,
+                    "generated_at": utcnow(),
+                }
+            )
+        if not values:
+            continue
+        # Upsert rather than add(): two jobs can tag the same item at once (a backfill chunk and the
+        # fetch-time job, or a retry racing its predecessor), and the pkey (user_id, item_id) would raise.
+        stmt = pg_insert(models.ItemAI).values(values)
+        updatable = ("tags", "confidences", "content_type", "model", "prompt_version", "generated_at")
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["user_id", "item_id"], set_={k: getattr(stmt.excluded, k) for k in updatable}
+        )
+        await session.execute(stmt)
         # each batch is durable on its own: a later batch failing must not lose this one on retry
-        await session.flush()
+        rows = (
+            await session.scalars(
+                select(models.ItemAI)
+                .where(models.ItemAI.user_id == user.id, models.ItemAI.item_id.in_([v["item_id"] for v in values]))
+                .execution_options(populate_existing=True)
+            )
+        ).all()
+        for row in rows:
+            existing[row.item_id] = row
+        written.extend(rows)
     return written
