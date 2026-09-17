@@ -7,7 +7,8 @@ import asyncio
 import json
 import sys
 import uuid
-from datetime import UTC, date, datetime
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 
@@ -35,7 +36,7 @@ async def cmd_health(_: argparse.Namespace) -> int:
 
 
 async def cmd_digest(args: argparse.Namespace) -> int:
-    day = date.fromisoformat(args.day) if args.day else datetime.now(UTC).date()
+    day = date.fromisoformat(args.day) if args.day else datetime.now(ZoneInfo(get_settings().timezone)).date()
     async with session_scope() as session:
         user = await _user_by_email(session, args.email)
         row = await insights.daily_digest(session, user, day)

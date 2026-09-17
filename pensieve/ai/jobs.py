@@ -167,6 +167,12 @@ async def _load_user(session: AsyncSession, user_id: uuid.UUID) -> models.User |
 # ---------------------------------------------------------------------------
 
 
+async def _feed_owner(feed_id: uuid.UUID) -> uuid.UUID | None:
+    """Feed jobs are mirrored under the feed's owner so the Manage page's queue counts are per user."""
+    async with session_scope() as session:
+        return await session.scalar(select(models.Feed.user_id).where(models.Feed.id == feed_id))
+
+
 async def ai_process_new_items(ctx: dict, feed_id: str, item_ids: list[str]) -> None:
     """Embed -> tag -> cluster new items of one feed, each step independently guarded."""
     fid = uuid.UUID(str(feed_id))
@@ -213,7 +219,7 @@ async def ai_process_new_items(ctx: dict, feed_id: str, item_ids: list[str]) -> 
             raise errors[0]
         return "; ".join(notes)[:2000] or None
 
-    await _guarded(ctx, "process_items", fid, None, work)
+    await _guarded(ctx, "process_items", fid, await _feed_owner(fid), work)
 
 
 async def ai_file_feed(ctx: dict, feed_id: str) -> None:
@@ -229,7 +235,7 @@ async def ai_file_feed(ctx: dict, feed_id: str) -> None:
         folder = await categorize.file_feed(session, user, feed, client)
         return f"suggested {folder.name}" if folder else "no suggestion"
 
-    await _guarded(ctx, "file_feed", fid, None, work)
+    await _guarded(ctx, "file_feed", fid, await _feed_owner(fid), work)
 
 
 def _today() -> date:
