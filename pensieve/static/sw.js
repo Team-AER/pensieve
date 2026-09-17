@@ -1,6 +1,10 @@
 // Pensieve service worker: shell cache, stale-while-revalidate for reader GETs, offline queue for state POSTs.
-const VERSION = 'pensieve-v2';
-const SHELL = ['/static/app.css', '/static/web.css', '/static/fonts.css', '/static/app.js', '/static/reader.js', '/static/vendor/htmx.min.js', '/static/icon.svg', '/static/manifest.webmanifest',
+// Registered as /sw.js?v=<build stamp>; the stamp names the cache so a new build drops the old shell.
+const BUILD = new URL(self.location.href).searchParams.get('v') || 'dev';
+const VERSION = 'pensieve-' + BUILD;
+const V = '?v=' + BUILD;
+const SHELL = ['/static/app.css' + V, '/static/web.css' + V, '/static/fonts.css' + V, '/static/app.js' + V, '/static/reader.js' + V, '/static/vendor/htmx.min.js' + V,
+  '/static/icon.svg' + V, '/static/icon-192.png' + V, '/static/manifest.webmanifest' + V,
   '/static/fonts/fraunces-latin.woff2', '/static/fonts/fraunces-latin-ext.woff2', '/static/fonts/fraunces-vietnamese.woff2', '/static/fonts/instrument-sans-latin.woff2', '/static/fonts/instrument-sans-latin-ext.woff2'];
 const DB_NAME = 'pensieve-offline';
 const STORE = 'queue';
@@ -25,6 +29,8 @@ function isStateChange(url) {
   return /^\/items\/[^/]+\/(read|unread|star|unstar|tag|note)$/.test(url.pathname) || url.pathname === '/items/undo-read' || /\/mark-read$/.test(url.pathname);
 }
 
+const OFFLINE_HTML = '<div class="empty-state"><div class="empty-icon"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 3l18 18"/><path d="M5 10a12 12 0 0 1 4-2.5M12 6a12 12 0 0 1 9 4M8.5 13.5a7 7 0 0 1 2-1.2M12 10a7 7 0 0 1 5 2.5M12 17h.01"/></svg></div><div class="empty-title">You are offline</div><p>This page is not cached yet. Items you opened before are still available.</p></div>';
+
 async function staleWhileRevalidate(request) {
   const cache = await caches.open(VERSION);
   const key = cacheKey(request);
@@ -36,7 +42,7 @@ async function staleWhileRevalidate(request) {
   if (cached) { network.catch(() => {}); return cached; }
   const resp = await network;
   if (resp) return resp;
-  return new Response('<div class="list-empty"><div class="eyebrow">Offline</div><p class="muted">This page isn\'t cached yet.</p></div>', { status: 503, headers: { 'Content-Type': 'text/html' } });
+  return new Response(OFFLINE_HTML, { status: 503, headers: { 'Content-Type': 'text/html' } });
 }
 
 self.addEventListener('fetch', (event) => {

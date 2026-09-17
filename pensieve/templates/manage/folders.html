@@ -2,41 +2,54 @@
 {% import "_macros.html" as m %}
 {% block mtitle %}Folders and tags{% endblock %}
 {% block content %}
-<div class="page-head"><h1>Folders and tags</h1></div>
+<div class="page-head">
+  <div class="page-head-text">
+    <h1>Folders and tags</h1>
+    <p class="page-summary">{{ folders|length }} folder{{ 's' if folders|length != 1 }} · {{ tags|length }} tag{{ 's' if tags|length != 1 }}</p>
+  </div>
+</div>
 <div class="two-col">
-<section class="card section">
-  <div class="card-head"><h2>Folders</h2><span class="faint">drag to reorder</span></div>
-  <form method="post" action="/manage/folders" class="row">{{ m.csrf_field(csrf_token) }}<input class="input input-sm grow" name="name" placeholder="New folder" required aria-label="New folder name"><button class="btn btn-sm btn-primary" type="submit">{{ m.icon('plus', 14) }} Add</button></form>
-  <form id="folder-order" method="post" action="/manage/folders/reorder">{{ m.csrf_field(csrf_token) }}<input type="hidden" name="order" id="folder-order-value">
+<section class="card section" aria-labelledby="folders-h">
+  <div class="card-head"><h2 id="folders-h">Folders</h2><span class="faint">drag to reorder</span></div>
+  <form method="post" action="/manage/folders" class="field-row">{{ m.csrf_field(csrf_token) }}
+    <div class="field grow"><label for="new-folder">New folder</label><input class="input input-sm" id="new-folder" name="name" placeholder="e.g. Homelab" required></div>
+    <div class="field fixed"><button class="btn btn-primary" type="submit">{{ m.icon('plus', 14) }} Add</button></div>
+  </form>
+  <form id="folder-order" method="post" action="/manage/folders/reorder" hidden>{{ m.csrf_field(csrf_token) }}<input type="hidden" name="order" id="folder-order-value"></form>
     <ul class="sortable" data-sortable="#folder-order-value" data-submit="#folder-order">
     {% for f in folders %}
       <li class="sortable-row" draggable="true" data-id="{{ f.id }}">
-        <span class="handle" aria-hidden="true">⋮⋮</span>
-        <form method="post" action="/manage/folders/{{ f.id }}/rename" class="row grow">{{ m.csrf_field(csrf_token) }}<input class="input input-sm grow" name="name" value="{{ f.name }}" aria-label="Folder name"><button class="btn btn-sm" type="submit">Rename</button></form>
-        <span class="faint">{{ feed_counts.get(f.id, 0) }} feeds</span>
-        {% if f.ai_suggested %}<span class="chip chip-ai">AI</span>{% endif %}
-        <form method="post" action="/manage/folders/{{ f.id }}/delete" hx-confirm="Delete folder {{ f.name }}? Its feeds move to Inbox.">{{ m.csrf_field(csrf_token) }}<button class="btn btn-sm btn-icon btn-danger" type="submit" aria-label="Delete folder">{{ m.icon('trash', 14) }}</button></form>
+        <span class="handle" aria-hidden="true">{{ m.icon('grip', 16) }}</span>
+        <form method="post" action="/manage/folders/{{ f.id }}/rename" class="row grow">{{ m.csrf_field(csrf_token) }}<label class="sr-only" for="folder-{{ f.id }}">Folder name</label><input class="input input-sm grow" id="folder-{{ f.id }}" name="name" value="{{ f.name }}"><button class="btn btn-sm" type="submit">Rename</button></form>
+        <span class="faint tiny">{{ feed_counts.get(f.id, 0) }} feeds</span>
+        {% if f.ai_suggested %}<span class="chip chip-ai chip-sm">AI</span>{% endif %}
+        <form method="post" action="/manage/folders/{{ f.id }}/delete" hx-confirm="Delete folder {{ f.name }}? Its feeds move to Inbox." data-confirm-title="Delete folder?" data-confirm-label="Delete" data-confirm-danger>{{ m.csrf_field(csrf_token) }}<button class="btn btn-sm btn-icon btn-danger" type="submit" aria-label="Delete folder {{ f.name }}">{{ m.icon('trash', 14) }}</button></form>
       </li>
-    {% else %}<li class="muted">No folders yet.</li>{% endfor %}
+    {% else %}<li>{{ m.empty_state('No folders yet', 'Folders group feeds in the reader. The model can suggest one for every new feed.', 'folder', compact=True) }}</li>{% endfor %}
     </ul>
-  </form>
 </section>
-<section class="card section">
-  <div class="card-head"><h2>Tags</h2><span class="faint">AI tags are the tagger's label set</span></div>
+<section class="card section" aria-labelledby="tags-h">
+  <div class="card-head"><h2 id="tags-h">Tags</h2><span class="faint">AI tags are the tagger's label set</span></div>
   <form method="post" action="/manage/tags" class="col">{{ m.csrf_field(csrf_token) }}
-    <div class="row"><input class="input input-sm grow" name="name" placeholder="New tag" required aria-label="Tag name"><select class="input input-sm" name="kind" aria-label="Kind"><option value="user">user</option><option value="ai">ai</option></select></div>
-    <div class="row"><input class="input input-sm grow" name="description" placeholder="Description the tagger uses (for ai tags)" aria-label="Description"><button class="btn btn-sm btn-primary" type="submit">{{ m.icon('plus', 14) }} Add</button></div>
+    <div class="field-row">
+      <div class="field grow"><label for="new-tag">New tag</label><input class="input input-sm" id="new-tag" name="name" placeholder="e.g. Local LLM" required></div>
+      <div class="field fixed"><label for="new-tag-kind">Kind</label><select class="input input-sm" id="new-tag-kind" name="kind"><option value="user">user</option><option value="ai">ai</option></select></div>
+    </div>
+    <div class="field-row">
+      <div class="field grow"><label for="new-tag-desc">Description</label><input class="input input-sm" id="new-tag-desc" name="description" placeholder="What the tagger should look for (ai tags)"></div>
+      <div class="field fixed"><button class="btn btn-primary" type="submit">{{ m.icon('plus', 14) }} Add</button></div>
+    </div>
   </form>
   <ul class="plain-list tags-manage">
   {% for t in tags %}
     <li class="tag-row">
       <form method="post" action="/manage/tags/{{ t.id }}/update" class="col grow">{{ m.csrf_field(csrf_token) }}
-        <div class="row"><span class="chip{% if t.kind == 'ai' %} chip-ai{% endif %}">{% if t.kind == 'ai' %}{{ m.icon('sparkle', 12) }}{% else %}{{ m.icon('tag', 12) }}{% endif %}{{ t.name }}</span><input class="input input-sm grow" name="name" value="{{ t.name }}" aria-label="Tag name"><select class="input input-sm" name="kind" aria-label="Kind"><option value="user"{% if t.kind == 'user' %} selected{% endif %}>user</option><option value="ai"{% if t.kind == 'ai' %} selected{% endif %}>ai</option></select></div>
-        <div class="row"><input class="input input-sm grow" name="description" value="{{ t.description }}" placeholder="Description" aria-label="Description"><button class="btn btn-sm" type="submit">Save</button></div>
+        <div class="row"><span class="chip{% if t.kind == 'ai' %} chip-ai{% endif %}">{% if t.kind == 'ai' %}{{ m.icon('sparkle', 12) }}{% else %}{{ m.icon('tag', 12) }}{% endif %}{{ t.name }}</span><label class="sr-only" for="tag-{{ t.id }}">Tag name</label><input class="input input-sm grow" id="tag-{{ t.id }}" name="name" value="{{ t.name }}"><label class="sr-only" for="tag-kind-{{ t.id }}">Kind</label><select class="input input-sm" id="tag-kind-{{ t.id }}" name="kind"><option value="user"{% if t.kind == 'user' %} selected{% endif %}>user</option><option value="ai"{% if t.kind == 'ai' %} selected{% endif %}>ai</option></select></div>
+        <div class="row"><label class="sr-only" for="tag-desc-{{ t.id }}">Description</label><input class="input input-sm grow" id="tag-desc-{{ t.id }}" name="description" value="{{ t.description }}" placeholder="Description"><button class="btn btn-sm" type="submit">Save</button></div>
       </form>
-      <form method="post" action="/manage/tags/{{ t.id }}/delete" hx-confirm="Delete tag {{ t.name }}?">{{ m.csrf_field(csrf_token) }}<button class="btn btn-sm btn-icon btn-danger" type="submit" aria-label="Delete tag">{{ m.icon('trash', 14) }}</button></form>
+      <form method="post" action="/manage/tags/{{ t.id }}/delete" hx-confirm="Delete tag {{ t.name }}?" data-confirm-title="Delete tag?" data-confirm-label="Delete" data-confirm-danger>{{ m.csrf_field(csrf_token) }}<button class="btn btn-sm btn-icon btn-danger" type="submit" aria-label="Delete tag {{ t.name }}">{{ m.icon('trash', 14) }}</button></form>
     </li>
-  {% else %}<li class="muted">No tags yet.</li>{% endfor %}
+  {% else %}<li>{{ m.empty_state('No tags yet', 'User tags are yours to apply; AI tags tell the tagger what to look for.', 'tag', compact=True) }}</li>{% endfor %}
   </ul>
 </section>
 </div>

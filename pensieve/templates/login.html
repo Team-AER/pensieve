@@ -1,30 +1,41 @@
 {% extends "base.html" %}
 {% import "_macros.html" as m %}
 {% block title %}Sign in · Pensieve{% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/web.css">{% endblock %}
 {% block body %}
-<main class="split">
-  <section class="split-brand">
-    <a class="brand brand-light" href="/">{{ m.icon('layers', 22) }} Pensieve</a>
-    <h1 class="split-headline">Your feeds, sorted, grouped and remembered.</h1>
-    <p class="split-sub">A self-hosted reader with a local model that files new sources, groups the same story across outlets and remembers what you cared about.</p>
+<div class="split">
+  <section class="split-brand" aria-label="About Pensieve">
+    <svg class="split-art" viewBox="0 0 720 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+      <g fill="none" stroke="currentColor" stroke-width="1.5">
+        <ellipse cx="360" cy="560" rx="420" ry="260"/>
+        <ellipse cx="360" cy="560" rx="340" ry="205" transform="rotate(-8 360 560)"/>
+        <ellipse cx="360" cy="560" rx="260" ry="150" transform="rotate(-16 360 560)"/>
+        <ellipse cx="360" cy="560" rx="180" ry="95" transform="rotate(-24 360 560)"/>
+        <ellipse cx="360" cy="560" rx="100" ry="45" transform="rotate(-32 360 560)"/>
+      </g>
+    </svg>
+    <a class="brand brand-light" href="/">{{ m.icon('mark', 36) }} Pensieve</a>
+    <div class="split-copy">
+      <p class="split-headline" role="heading" aria-level="2">Your feeds, sorted, grouped and remembered.</p>
+      <p class="split-sub">Google Reader speed. Reeder polish. A local model that files, clusters and recalls what you read, without a byte leaving your network.</p>
+    </div>
     <ul class="split-points">
-      <li>{{ m.icon('folder') }} Auto-filed folders you can overrule in one click</li>
-      <li>{{ m.icon('layers') }} One row per story, every source a tap away</li>
-      <li>{{ m.icon('sparkle') }} Daily digest and a memory you can edit</li>
+      <li>Self-hosted</li><li>Reeder compatible</li><li>LAN-only inference</li>
     </ul>
   </section>
-  <section class="split-form">
+  <main class="split-form" id="main">
     <form method="post" action="/login" class="auth-form" hx-boost="false">
-      <h2>Sign in</h2>
-      <p class="muted">Use the account set up on this Pensieve.</p>
-      {% if error %}<div class="flash flash-error" role="alert">{{ error }}</div>{% endif %}
+      <div class="auth-intro">
+        <h1>Sign in</h1>
+        <p class="muted">Household account on this Pensieve.</p>
+      </div>
+      {% if error %}<div class="flash flash-error" role="alert">{{ m.icon('warning', 14) }} {{ error }}</div>{% endif %}
       <input type="hidden" name="next" value="{{ next }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-      <div class="field"><label for="email">Email</label><input class="input" id="email" name="email" type="email" autocomplete="username" required value="{{ email }}" autofocus></div>
-      <div class="field"><label for="password">Password</label><input class="input" id="password" name="password" type="password" autocomplete="current-password" required></div>
+      <div class="field"><label for="email">Email</label><input class="input" id="email" name="email" type="email" placeholder="you@example.com" autocomplete="username" required value="{{ email }}" autofocus></div>
+      <div class="field"><label for="password">Password</label><input class="input" id="password" name="password" type="password" placeholder="••••••••••" autocomplete="current-password" required></div>
       <button class="btn btn-primary btn-lg" type="submit">Sign in</button>
+      <p class="auth-note">Using Reeder or NetNewsWire? <a href="/manage/tokens">Create an API token</a> after signing in.</p>
     </form>
-  </section>
-</main>
+  </main>
+</div>
 {% endblock %}

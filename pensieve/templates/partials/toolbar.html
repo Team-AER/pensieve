@@ -1,20 +1,31 @@
 {% import "_macros.html" as m %}
 {% if is_starred %}
-<button type="button" class="btn btn-sm" aria-pressed="true" data-action="star" hx-post="/items/{{ item.id }}/unstar" hx-target="#toolbar-{{ item.id }}" hx-swap="innerHTML">{{ m.icon('star-filled') }} Starred</button>
+<button type="button" class="btn btn-sm btn-iconic" aria-pressed="true" data-action="star" title="Starred (s)" hx-post="/items/{{ item.id }}/unstar" hx-target="#toolbar-{{ item.id }}" hx-swap="innerHTML" hx-indicator="this" aria-label="Starred, click to unstar">{{ m.icon('star-filled') }}<span class="btn-label">Starred</span></button>
 {% else %}
-<button type="button" class="btn btn-sm" data-action="star" hx-post="/items/{{ item.id }}/star" hx-target="#toolbar-{{ item.id }}" hx-swap="innerHTML">{{ m.icon('star') }} Star</button>
+<button type="button" class="btn btn-sm btn-iconic" data-action="star" title="Star (s)" hx-post="/items/{{ item.id }}/star" hx-target="#toolbar-{{ item.id }}" hx-swap="innerHTML" hx-indicator="this" aria-label="Star">{{ m.icon('star') }}<span class="btn-label">Star</span></button>
 {% endif %}
 {% if is_read %}
-<button type="button" class="btn btn-sm" data-action="read" hx-post="/items/{{ item.id }}/unread" hx-target="#toolbar-{{ item.id }}" hx-swap="innerHTML">{{ m.icon('circle') }} Mark unread</button>
+<button type="button" class="btn btn-sm btn-iconic" data-action="read" title="Mark unread (m)" hx-post="/items/{{ item.id }}/unread" hx-target="#toolbar-{{ item.id }}" hx-swap="innerHTML" hx-indicator="this" aria-label="Mark unread">{{ m.icon('mail') }}<span class="btn-label">Mark unread</span></button>
 {% else %}
-<button type="button" class="btn btn-sm" data-action="read" hx-post="/items/{{ item.id }}/read" hx-target="#toolbar-{{ item.id }}" hx-swap="innerHTML">{{ m.icon('check-circle') }} Mark read</button>
+<button type="button" class="btn btn-sm btn-iconic" data-action="read" title="Mark read (m)" hx-post="/items/{{ item.id }}/read" hx-target="#toolbar-{{ item.id }}" hx-swap="innerHTML" hx-indicator="this" aria-label="Mark read">{{ m.icon('check-circle') }}<span class="btn-label">Mark read</span></button>
 {% endif %}
-<button type="button" class="btn btn-sm" data-action="note" data-toggle="#note-form-{{ item.id }}">{{ m.icon('note') }} Note</button>
-<button type="button" class="btn btn-sm btn-ai" data-action="summarize" hx-post="/items/{{ item.id }}/summarize" hx-target="#summary-{{ item.id }}" hx-swap="innerHTML">{{ m.icon('sparkle') }} Summarize</button>
-<button type="button" class="btn btn-sm" data-action="reader" hx-post="/items/{{ item.id }}/reader-mode" hx-target="#body-{{ item.id }}" hx-swap="innerHTML">{{ m.icon('reader') }} Reader view</button>
-{% if item.url %}<a class="btn btn-sm" data-action="open" href="{{ item.url }}" target="_blank" rel="noopener noreferrer" hx-boost="false">{{ m.icon('external') }} Open original</a>
-<button type="button" class="btn btn-sm" data-action="share" data-share-url="{{ item.url }}" data-share-title="{{ item.title or '' }}" title="Share or copy the link">{{ m.icon('share') }} Share</button>{% endif %}
+{% if item.url %}<button type="button" class="btn btn-sm btn-iconic" data-action="share" title="Share" data-share-url="{{ item.url }}" data-share-title="{{ item.title or '' }}" aria-label="Share or copy the link">{{ m.icon('share') }}<span class="btn-label">Share</span></button>{% endif %}
+<button type="button" class="btn btn-sm btn-iconic toolbar-secondary" data-action="note" title="Add a note" data-toggle="#note-form-{{ item.id }}" aria-label="Add a note">{{ m.icon('note') }}<span class="btn-label">Note</span></button>
+<button type="button" class="btn btn-sm btn-ai toolbar-secondary" data-action="summarize" hx-post="/items/{{ item.id }}/summarize" hx-target="#summary-{{ item.id }}" hx-swap="innerHTML" hx-indicator="this" aria-label="Summarize with the local model">{{ m.icon('sparkle') }}<span class="btn-label">Summarize</span></button>
+<span class="toolbar-spacer"></span>
+<button type="button" class="btn btn-sm toolbar-secondary" data-action="reader" hx-post="/items/{{ item.id }}/reader-mode" hx-target="#body-{{ item.id }}" hx-swap="innerHTML" hx-indicator="this" aria-label="Reader view">{{ m.icon('reader') }}<span class="btn-label">Reader view</span></button>
+{% if item.url %}<a class="btn btn-sm toolbar-secondary" data-action="open" href="{{ item.url }}" target="_blank" rel="noopener noreferrer" hx-boost="false" aria-label="Open original in a new tab">{{ m.icon('external') }}<span class="btn-label">Open original</span></a>{% endif %}
 {% if cluster and cluster.source_count > 1 %}
-<button type="button" class="btn btn-sm" data-action="unmerge" hx-post="/items/{{ item.id }}/unmerge" hx-target="#toolbar-{{ item.id }}" hx-swap="innerHTML" hx-confirm="Split this item out of its story group? Pensieve won't merge it again.">{{ m.icon('split') }} Unmerge</button>
+<button type="button" class="btn btn-sm toolbar-secondary" data-action="unmerge" hx-post="/items/{{ item.id }}/unmerge" hx-target="#toolbar-{{ item.id }}" hx-swap="innerHTML" hx-confirm="Split this item out of its story group? Pensieve won't merge it again." data-confirm-title="Unmerge this item?" data-confirm-label="Unmerge" aria-label="Unmerge from its story group">{{ m.icon('split') }}<span class="btn-label">Unmerge</span></button>
 {% endif %}
+<details class="menu toolbar-more">
+  <summary class="btn btn-icon btn-sm" aria-label="More actions" aria-haspopup="menu">{{ m.icon('more', 20) }}</summary>
+  <div class="menu-body" role="menu" aria-label="More actions">
+    <button type="button" class="menu-item" role="menuitem" data-toggle="#note-form-{{ item.id }}">{{ m.icon('note', 14) }} Add a note</button>
+    <button type="button" class="menu-item" role="menuitem" hx-post="/items/{{ item.id }}/summarize" hx-target="#summary-{{ item.id }}" hx-swap="innerHTML">{{ m.icon('sparkle', 14) }} Summarize</button>
+    <button type="button" class="menu-item" role="menuitem" hx-post="/items/{{ item.id }}/reader-mode" hx-target="#body-{{ item.id }}" hx-swap="innerHTML">{{ m.icon('reader', 14) }} Reader view</button>
+    {% if item.url %}<a class="menu-item" role="menuitem" href="{{ item.url }}" target="_blank" rel="noopener noreferrer" hx-boost="false">{{ m.icon('external', 14) }} Open original</a>{% endif %}
+    {% if cluster and cluster.source_count > 1 %}<button type="button" class="menu-item" role="menuitem" hx-post="/items/{{ item.id }}/unmerge" hx-target="#toolbar-{{ item.id }}" hx-swap="innerHTML" hx-confirm="Split this item out of its story group? Pensieve won't merge it again." data-confirm-title="Unmerge this item?" data-confirm-label="Unmerge">{{ m.icon('split', 14) }} Unmerge</button>{% endif %}
+  </div>
+</details>
 {% if error is defined and error %}<span class="toolbar-error" role="alert">{{ error }}</span>{% endif %}

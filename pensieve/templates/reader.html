@@ -2,37 +2,36 @@
 {% import "_macros.html" as m %}
 {% import "_shell.html" as shell with context %}
 {% block title %}{{ view.title }} · Pensieve{% endblock %}
-{% block head %}
-<link rel="stylesheet" href="/static/web.css">
-<link rel="icon" href="/static/icon.svg" type="image/svg+xml">
-<meta name="csrf-token" content="{{ csrf_token }}">
-{% endblock %}
 {% block body %}
 <div class="app" id="app" data-pane="{{ pane or 'list' }}" data-view="{{ view.name }}" hx-headers='{"X-CSRF-Token": "{{ csrf_token }}"}'>
-  {{ shell.topbar(user, 'reader') }}
+  {{ shell.topbar(user, 'reader', search=True) }}
   <div class="panes">
-    <nav class="pane-nav" id="nav" aria-label="Feeds" hx-get="/reader/nav?view={{ view.name }}" hx-trigger="counts-changed from:body delay:200ms" hx-swap="innerHTML">
+    <nav class="pane-nav" id="nav" aria-label="Feeds and folders" hx-get="/reader/nav?view={{ view.name }}" hx-trigger="counts-changed from:body delay:200ms" hx-swap="innerHTML">
       {% include "partials/nav.html" %}
     </nav>
-    <section class="pane-list" id="list" aria-label="Items" hx-get="{{ list_url }}?{{ opts.query }}" hx-trigger="list-changed from:body, refresh-list from:body" hx-swap="innerHTML">
+    <button type="button" class="nav-backdrop" data-pane-switch="list" aria-label="Close folders" tabindex="-1"></button>
+    <section class="pane-list" id="list" aria-label="Items" hx-get="{{ list_url }}?{{ opts.query }}" hx-trigger="list-changed from:body, refresh-list from:body" hx-swap="innerHTML" hx-indicator="#progress">
       {% include "partials/list.html" %}
     </section>
     <section class="pane-article" id="article-pane" aria-label="Article">
-      <div class="pane-head mobile-only">
-        <button type="button" class="btn btn-sm" data-pane-switch="list">{{ m.icon('back') }} Back</button>
+      <div class="pane-head article-head">
+        <button type="button" class="btn btn-icon btn-ghost mobile-only" data-pane-switch="list" aria-label="Back to list">{{ m.icon('back', 22) }}</button>
+        <div id="article-toolbar" class="grow"></div>
       </div>
-      <div class="pane-body" id="article">
+      <main class="pane-body" id="article" tabindex="-1">
         {% if article_html %}{{ article_html|safe }}{% else %}
-        <div class="empty-article">
-          <div class="eyebrow">Nothing open</div>
-          <p class="muted">Pick an item, or press <kbd>j</kbd> to start reading.</p>
-        </div>
+        {{ m.empty_state('Nothing open', 'Pick an item from the list, or press j to start reading.', 'reader') }}
         {% endif %}
+      </main>
+      <div class="article-foot" aria-label="Article actions">
+        <button type="button" class="btn btn-icon" data-article-nav="prev" aria-label="Previous item">{{ m.icon('back', 18) }}</button>
+        <button type="button" class="btn btn-primary grow" data-article-nav="read-next">Mark read, next</button>
+        <button type="button" class="btn btn-icon" data-article-nav="note" aria-label="Add a note">{{ m.icon('note', 18) }}</button>
       </div>
     </section>
   </div>
-  <footer class="keybar">
-    <span><kbd>j</kbd>/<kbd>k</kbd> next / previous</span>
+  <footer class="keybar" aria-label="Keyboard hints">
+    <span><kbd>j</kbd> <kbd>k</kbd> next / previous</span>
     <span><kbd>s</kbd> star</span>
     <span><kbd>A</kbd> mark all read</span>
     <span><kbd>x</kbd> expand sources</span>
@@ -40,12 +39,8 @@
     <span><kbd>?</kbd> all shortcuts</span>
   </footer>
   {{ shell.tabbar('reader') }}
+  {{ shell.overlays() }}
 </div>
 {% include "partials/shortcuts.html" %}
 {% endblock %}
-{% block scripts %}
-<script src="/static/reader.js" defer></script>
-<script>
-if ('serviceWorker' in navigator) { navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(function () {}); }
-</script>
-{% endblock %}
+{% block scripts %}<script src="{{ static('reader.js') }}" defer></script>{% endblock %}

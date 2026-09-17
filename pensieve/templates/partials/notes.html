@@ -6,7 +6,7 @@
   <div class="note-body">{{ note.body }}</div>
   <form hx-post="/items/{{ item.id }}/note" hx-target="#notes-{{ item.id }}" hx-swap="innerHTML" class="row" style="gap:6px">
     <input type="hidden" name="note_id" value="{{ note.id }}"><input type="hidden" name="delete" value="1">
-    <button class="btn btn-sm btn-danger" type="submit" hx-confirm="Delete this note?">{{ m.icon('trash', 14) }} Delete</button>
+    <button class="btn btn-sm btn-danger" type="submit" hx-confirm="Delete this note? It can't be recovered." data-confirm-title="Delete this note?" data-confirm-label="Delete" data-confirm-danger>{{ m.icon('trash', 14) }} Delete</button>
   </form>
 </div>
 {% endfor %}

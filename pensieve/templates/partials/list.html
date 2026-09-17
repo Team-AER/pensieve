@@ -1,44 +1,72 @@
 {% import "_macros.html" as m %}
 <div class="pane-head list-head">
-  <div class="row grow" style="flex-basis:100%">
-    <button type="button" class="btn btn-icon btn-sm mobile-only" data-pane-switch="nav" aria-label="Folders">{{ m.icon('menu') }}</button>
-    <div class="grow col" style="gap:0">
-      <div class="list-title">{{ view.title }}</div>
+  <div class="row list-head-main">
+    <button type="button" class="btn btn-icon btn-ghost nav-toggle" data-pane-switch="nav" aria-label="Folders and feeds" aria-controls="nav">{{ m.icon('menu', 22) }}</button>
+    <div class="list-title-wrap grow">
+      <h1 class="list-title">{{ view.title }}</h1>
       <div class="list-counts faint">{{ unread }} unread · {{ total }} total</div>
     </div>
-    <button type="button" class="btn btn-icon btn-sm desktop-only" title="Refresh (r)" hx-get="{{ list_url }}?{{ opts.query }}" hx-target="#list" hx-swap="innerHTML">{{ m.icon('refresh') }}</button>
-  </div>
-  <div class="seg" role="group" aria-label="Grouping">
-    <a class="seg-btn{% if opts.grouped %} on{% endif %}" href="{{ view.path }}?grouped=1&sort={{ opts.sort }}" hx-get="{{ list_url }}?grouped=1&sort={{ opts.sort }}" hx-target="#list" hx-swap="innerHTML" hx-push-url="{{ view.path }}?grouped=1&sort={{ opts.sort }}">Grouped</a>
-    <a class="seg-btn{% if not opts.grouped %} on{% endif %}" href="{{ view.path }}?grouped=0&sort={{ opts.sort }}" hx-get="{{ list_url }}?grouped=0&sort={{ opts.sort }}" hx-target="#list" hx-swap="innerHTML" hx-push-url="{{ view.path }}?grouped=0&sort={{ opts.sort }}">Flat</a>
-  </div>
-  <div class="seg" role="group" aria-label="Sort">
-    <a class="seg-btn{% if opts.sort == 'newest' %} on{% endif %}" href="{{ view.path }}?grouped={{ 1 if opts.grouped else 0 }}&sort=newest" hx-get="{{ list_url }}?grouped={{ 1 if opts.grouped else 0 }}&sort=newest" hx-target="#list" hx-swap="innerHTML" hx-push-url="{{ view.path }}?grouped={{ 1 if opts.grouped else 0 }}&sort=newest">Newest</a>
-    <a class="seg-btn{% if opts.sort == 'oldest' %} on{% endif %}" href="{{ view.path }}?grouped={{ 1 if opts.grouped else 0 }}&sort=oldest" hx-get="{{ list_url }}?grouped={{ 1 if opts.grouped else 0 }}&sort=oldest" hx-target="#list" hx-swap="innerHTML" hx-push-url="{{ view.path }}?grouped={{ 1 if opts.grouped else 0 }}&sort=oldest">Oldest</a>
-  </div>
-  <details class="menu">
-    <summary class="btn btn-sm" title="Mark all as read">{{ m.icon('check-circle') }}<span class="desktop-only">Mark read</span></summary>
-    <div class="menu-body">
-      <form method="post" action="{{ view.path }}/mark-read" hx-post="{{ view.path }}/mark-read?{{ opts.query }}" hx-target="#list" hx-swap="innerHTML">
-        {{ m.csrf_field(csrf_token) }}
-        <button class="menu-item" type="submit" name="older_than" value="">Everything in {{ view.title }}</button>
-        <button class="menu-item" type="submit" name="older_than" value="1d">Older than a day</button>
-        <button class="menu-item" type="submit" name="older_than" value="1w">Older than a week</button>
-      </form>
+    <a class="mobile-only" href="/manage/account" aria-label="Account and settings" style="justify-self:end">{{ m.avatar(user, 'sm') }}</a>
+    <div class="list-controls">
+      <a class="btn btn-sm{% if opts.grouped %}" aria-pressed="true{% endif %}" href="{{ view.path }}?grouped={{ 0 if opts.grouped else 1 }}&sort={{ opts.sort }}" hx-get="{{ list_url }}?grouped={{ 0 if opts.grouped else 1 }}&sort={{ opts.sort }}" hx-target="#list" hx-swap="innerHTML" hx-push-url="{{ view.path }}?grouped={{ 0 if opts.grouped else 1 }}&sort={{ opts.sort }}" title="{{ 'Grouped by story: click for a flat list' if opts.grouped else 'Flat list: click to group by story' }}">{{ 'Grouped' if opts.grouped else 'Flat' }}</a>
+      <a class="btn btn-sm" href="{{ view.path }}?grouped={{ 1 if opts.grouped else 0 }}&sort={{ 'oldest' if opts.sort == 'newest' else 'newest' }}" hx-get="{{ list_url }}?grouped={{ 1 if opts.grouped else 0 }}&sort={{ 'oldest' if opts.sort == 'newest' else 'newest' }}" hx-target="#list" hx-swap="innerHTML" hx-push-url="{{ view.path }}?grouped={{ 1 if opts.grouped else 0 }}&sort={{ 'oldest' if opts.sort == 'newest' else 'newest' }}" title="Sorted {{ opts.sort }} first: click to flip">{{ 'Newest' if opts.sort == 'newest' else 'Oldest' }}</a>
+      <details class="menu" id="list-menu">
+        <summary class="btn btn-icon btn-sm" aria-label="List actions: sort, mark as read, refresh" aria-haspopup="menu" title="Mark all as read, sort, refresh">{{ m.icon('more') }}</summary>
+        <div class="menu-body" role="menu" aria-label="List actions">
+          <div class="menu-label">Mark as read</div>
+          <form method="post" action="{{ view.path }}/mark-read" hx-post="{{ view.path }}/mark-read?{{ opts.query }}" hx-target="#list" hx-swap="innerHTML">
+            {{ m.csrf_field(csrf_token) }}
+            <button class="menu-item" role="menuitem" type="submit" name="older_than" value="">{{ m.icon('check-circle', 14) }} Everything in {{ view.title }}</button>
+            <button class="menu-item" role="menuitem" type="submit" name="older_than" value="1d">{{ m.icon('check-circle', 14) }} Older than a day</button>
+            <button class="menu-item" role="menuitem" type="submit" name="older_than" value="1w">{{ m.icon('check-circle', 14) }} Older than a week</button>
+          </form>
+          <div class="menu-sep"></div>
+          <div class="menu-label">Sort</div>
+          <a class="menu-item{% if opts.sort == 'newest' %} on{% endif %}" role="menuitemradio" aria-checked="{{ 'true' if opts.sort == 'newest' else 'false' }}" href="{{ view.path }}?grouped={{ 1 if opts.grouped else 0 }}&sort=newest" hx-get="{{ list_url }}?grouped={{ 1 if opts.grouped else 0 }}&sort=newest" hx-target="#list" hx-swap="innerHTML" hx-push-url="{{ view.path }}?grouped={{ 1 if opts.grouped else 0 }}&sort=newest">{{ m.icon('check', 14) }} Newest first</a>
+          <a class="menu-item{% if opts.sort == 'oldest' %} on{% endif %}" role="menuitemradio" aria-checked="{{ 'true' if opts.sort == 'oldest' else 'false' }}" href="{{ view.path }}?grouped={{ 1 if opts.grouped else 0 }}&sort=oldest" hx-get="{{ list_url }}?grouped={{ 1 if opts.grouped else 0 }}&sort=oldest" hx-target="#list" hx-swap="innerHTML" hx-push-url="{{ view.path }}?grouped={{ 1 if opts.grouped else 0 }}&sort=oldest">{{ m.icon('check', 14) }} Oldest first</a>
+          <div class="menu-sep"></div>
+          <button type="button" class="menu-item" role="menuitem" hx-get="{{ list_url }}?{{ opts.query }}" hx-target="#list" hx-swap="innerHTML">{{ m.icon('refresh', 14) }} Refresh <kbd>r</kbd></button>
+        </div>
+      </details>
     </div>
-  </details>
+  </div>
+  <div class="chip-row mobile-only" role="group" aria-label="Filters">
+    <a class="{% if opts.grouped %}on{% endif %}" href="{{ view.path }}?grouped={{ 0 if opts.grouped else 1 }}&sort={{ opts.sort }}" hx-get="{{ list_url }}?grouped={{ 0 if opts.grouped else 1 }}&sort={{ opts.sort }}" hx-target="#list" hx-swap="innerHTML" hx-push-url="{{ view.path }}?grouped={{ 0 if opts.grouped else 1 }}&sort={{ opts.sort }}">Grouped</a>
+    <a class="{% if view.kind == 'unread' %}on{% endif %}" href="/reader/unread">Unread</a>
+    <a class="{% if view.kind == 'starred' %}on{% endif %}" href="/reader/starred">Starred</a>
+    <a class="{% if view.kind == 'all' %}on{% endif %}" href="/reader/all">All items</a>
+    {% if view.kind in ('folder', 'feed', 'tag') %}<a class="on" href="{{ view.path }}">{{ view.title }}</a>{% endif %}
+    <details class="menu">
+      <summary aria-label="Sort and mark as read" aria-haspopup="menu">{{ m.icon('more', 16) }} More</summary>
+      <div class="menu-body menu-left" role="menu" aria-label="List actions">
+        <a class="menu-item{% if opts.sort == 'newest' %} on{% endif %}" role="menuitemradio" aria-checked="{{ 'true' if opts.sort == 'newest' else 'false' }}" href="{{ view.path }}?grouped={{ 1 if opts.grouped else 0 }}&sort=newest">Newest first</a>
+        <a class="menu-item{% if opts.sort == 'oldest' %} on{% endif %}" role="menuitemradio" aria-checked="{{ 'true' if opts.sort == 'oldest' else 'false' }}" href="{{ view.path }}?grouped={{ 1 if opts.grouped else 0 }}&sort=oldest">Oldest first</a>
+        <div class="menu-sep"></div>
+        <form method="post" action="{{ view.path }}/mark-read" hx-post="{{ view.path }}/mark-read?{{ opts.query }}" hx-target="#list" hx-swap="innerHTML">
+          {{ m.csrf_field(csrf_token) }}
+          <button class="menu-item" role="menuitem" type="submit" name="older_than" value="">{{ m.icon('check-circle', 14) }} Mark everything read</button>
+          <button class="menu-item" role="menuitem" type="submit" name="older_than" value="1d">{{ m.icon('check-circle', 14) }} Mark older than a day</button>
+        </form>
+      </div>
+    </details>
+  </div>
 </div>
 {% if undo_marked is defined and undo_token %}
-<form class="undo-bar" method="post" action="/items/undo-read" hx-post="/items/undo-read?{{ opts.query }}" hx-target="#list" hx-swap="innerHTML">
-  {{ m.csrf_field(csrf_token) }}
-  <input type="hidden" name="token" value="{{ undo_token }}">
-  <input type="hidden" name="view" value="{{ view.name }}">
-  <span>Marked {{ undo_count }} item{{ 's' if undo_count != 1 }} as read.</span>
-  <button class="btn btn-sm" type="submit">Undo{% if undo_count > settings.undo_batch_max_ids %} last {{ settings.undo_batch_max_ids }}{% endif %}</button>
-</form>
+<div class="toast-seed" hidden data-toast="Marked {{ undo_count }} item{{ 's' if undo_count != 1 }} as read.">
+  <form class="undo-form" method="post" action="/items/undo-read" hx-post="/items/undo-read?{{ opts.query }}" hx-target="#list" hx-swap="innerHTML">
+    {{ m.csrf_field(csrf_token) }}
+    <input type="hidden" name="token" value="{{ undo_token }}">
+    <input type="hidden" name="view" value="{{ view.name }}">
+    <button class="btn btn-sm" type="submit">Undo{% if undo_count > settings.undo_batch_max_ids %} last {{ settings.undo_batch_max_ids }}{% endif %}</button>
+  </form>
+</div>
 {% elif undo_marked is defined %}
-<div class="undo-bar"><span class="muted">Nothing left to mark read.</span></div>
+<div class="toast-seed" hidden data-toast="Nothing left to mark read."></div>
 {% endif %}
-<div class="pane-body list-body" id="list-body" data-list-url="{{ list_url }}?{{ opts.query }}">
+<a class="digest-banner mobile-only" href="/insights">
+  {{ m.icon('sparkle', 20) }}
+  <span><strong>Today's digest</strong><p>Top stories ranked for you, rising topics, and what is safe to skip.</p></span>
+</a>
+<div class="pane-body list-body" id="list-body" role="listbox" aria-label="{{ view.title }}" data-list-url="{{ list_url }}?{{ opts.query }}">
   {% include "partials/rows.html" %}
 </div>

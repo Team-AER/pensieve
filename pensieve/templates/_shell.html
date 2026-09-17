@@ -1,29 +1,63 @@
-{# Application shell shared by reader, search, insights and manage: topbar + mobile tab bar. #}
+{# Application shell shared by reader, search, insights and manage: topbar, mobile tab bar, overlays. #}
 {% import "_macros.html" as m %}
-{% macro topbar(user, active, q='') %}
+
+{% macro account_menu(user) %}
+<details class="menu avatar-menu">
+  <summary class="btn-plain" aria-label="Account menu for {{ user.display_name or user.email }}" aria-haspopup="menu">{{ m.avatar(user) }}</summary>
+  <div class="menu-body" role="menu" aria-label="Account">
+    <div class="menu-user"><strong>{{ user.display_name or user.email }}</strong><span>{{ user.email }}</span></div>
+    <div class="menu-sep"></div>
+    <a class="menu-item" role="menuitem" href="/manage/account">{{ m.icon('user', 14) }} Profile and password</a>
+    <a class="menu-item" role="menuitem" href="/manage/tokens">{{ m.icon('key', 14) }} API tokens</a>
+    <a class="menu-item" role="menuitem" href="/manage/feeds">{{ m.icon('gear', 14) }} Manage</a>
+    <div class="menu-sep"></div>
+    <form method="post" action="/logout" hx-boost="false">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button class="menu-item danger" role="menuitem" type="submit">{{ m.icon('logout', 14) }} Sign out</button>
+    </form>
+  </div>
+</details>
+{% endmacro %}
+
+{% macro topbar(user, active, q='', search=False) %}
 <header class="topbar">
-  <a class="brand" href="/">{{ m.icon('layers', 20) }} Pensieve</a>
+  <a class="brand" href="/">{{ m.icon('mark', 24) }} Pensieve</a>
+  <nav class="topnav" aria-label="Primary">
+    <a href="/" {% if active == 'reader' %}class="active" aria-current="page"{% endif %}>Reader</a>
+    <a href="/insights" {% if active == 'insights' %}class="active" aria-current="page"{% endif %}>Insights</a>
+    <a href="/manage/feeds" {% if active == 'manage' %}class="active" aria-current="page"{% endif %}>Manage</a>
+  </nav>
+  {% if search %}
   <form class="search grow topbar-search" action="/search" method="get" role="search">
     {{ m.icon('search') }}
-    <input type="search" name="q" id="global-search" placeholder="Search your reading  /" value="{{ q }}" autocomplete="off">
+    <input type="search" name="q" id="global-search" placeholder="Search, or ask your reading" aria-label="Search your reading" value="{{ q }}" autocomplete="off">
+    <kbd class="touch-hidden" aria-hidden="true">/</kbd>
   </form>
-  <nav class="topnav desktop-only" aria-label="Sections">
-    <a href="/" class="{% if active == 'reader' %}active{% endif %}">Reader</a>
-    <a href="/insights" class="{% if active == 'insights' %}active{% endif %}">Insights</a>
-    <a href="/manage/feeds" class="{% if active == 'manage' %}active{% endif %}">Manage</a>
-  </nav>
-  <form method="post" action="/logout" class="desktop-only">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <button class="btn btn-sm" type="submit" title="Sign out {{ user.email }}">Sign out</button>
-  </form>
+  {% endif %}
+  <div class="topbar-spacer"></div>
+  <div class="topbar-actions">
+    {{ account_menu(user) }}
+  </div>
 </header>
 {% endmacro %}
 
 {% macro tabbar(active) %}
-<nav class="tabbar" aria-label="Sections">
-  <a href="/" class="{% if active == 'reader' %}active{% endif %}" data-pane-switch="list">{{ m.icon('inbox', 20) }}Reader</a>
-  <a href="/search" class="{% if active == 'search' %}active{% endif %}">{{ m.icon('search', 20) }}Search</a>
-  <a href="/insights" class="{% if active == 'insights' %}active{% endif %}">{{ m.icon('digest', 20) }}Insights</a>
-  <a href="/manage/feeds" class="{% if active == 'manage' %}active{% endif %}">{{ m.icon('settings', 20) }}Manage</a>
+<nav class="tabbar" aria-label="Tabs">
+  <a href="/" {% if active == 'reader' %}class="active" aria-current="page"{% endif %} data-pane-switch="list">{{ m.icon('list', 22) }}Reader</a>
+  <a href="/search" {% if active == 'search' %}class="active" aria-current="page"{% endif %}>{{ m.icon('search', 22) }}Search</a>
+  <a href="/insights" {% if active == 'insights' %}class="active" aria-current="page"{% endif %}>{{ m.icon('chart', 22) }}Insights</a>
+  <a href="/manage/feeds" {% if active == 'manage' %}class="active" aria-current="page"{% endif %}>{{ m.icon('gear', 22) }}Manage</a>
 </nav>
+{% endmacro %}
+
+{# Progress bar, toast stack, live region and the shared confirm dialog. Rendered once per app page. #}
+{% macro overlays() %}
+<div class="progress" id="progress" aria-hidden="true"></div>
+<div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+<div class="sr-only" id="live" aria-live="polite" aria-atomic="true"></div>
+<dialog id="confirm" class="dialog" aria-labelledby="confirm-title" aria-describedby="confirm-body">
+  <div class="dialog-head"><h2 id="confirm-title">Are you sure?</h2><button type="button" class="btn btn-icon btn-sm btn-ghost" data-dialog-close aria-label="Close">{{ m.icon('close') }}</button></div>
+  <div class="dialog-body" id="confirm-body"></div>
+  <div class="dialog-foot"><button type="button" class="btn" data-dialog-cancel>Cancel</button><button type="button" class="btn btn-primary" data-dialog-confirm>Confirm</button></div>
+</dialog>
 {% endmacro %}

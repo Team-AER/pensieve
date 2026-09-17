@@ -1,9 +1,13 @@
 {% import "_macros.html" as m %}
 {% for row in rows %}
-{{ m.item_row(row) }}
+{{ m.item_row(row, q=q) }}
 {% else %}
-{% if q and page == 1 %}<div class="list-empty"><div class="eyebrow">No matches</div><p class="muted">Try fewer words, or search a phrase in quotes.</p></div>{% endif %}
+{% if q and page == 1 %}
+{{ m.empty_state('No matches', 'Nothing in your library matches “' ~ q ~ '”. Try fewer words, or put a phrase in quotes.', 'search') }}
+{% elif not q %}
+{{ m.empty_state('Search your reading', 'Every item you have ever received is indexed, read or not.', 'search', compact=True) }}
+{% endif %}
 {% endfor %}
 {% if has_more %}
-<div class="sentinel" hx-get="/search?q={{ q|urlencode }}&feed={{ params.feed }}&folder={{ params.folder }}&state={{ params.state }}&since={{ params.since }}&until={{ params.until }}&page={{ page + 1 }}" hx-trigger="revealed" hx-swap="outerHTML" hx-target="this"><span class="faint">Loading more…</span></div>
+<div class="sentinel" hx-get="/search?q={{ q|urlencode }}&feed={{ params.feed }}&folder={{ params.folder }}&state={{ params.state }}&since={{ params.since }}&until={{ params.until }}&page={{ page + 1 }}" hx-trigger="revealed" hx-swap="outerHTML" hx-target="this" hx-indicator="this"><span class="faint htmx-indicator"><span class="spinner"></span></span><span class="faint"> Loading more…</span></div>
 {% endif %}

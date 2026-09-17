@@ -3,14 +3,17 @@
 {{ m.item_row(row) }}
 {% else %}
 {% if opts.first_page %}
-<div class="list-empty">
-  <div class="eyebrow">All caught up</div>
-  <p class="muted">Nothing here right now.{% if view.kind == 'unread' %} Try <a href="/reader/all">all items</a> or <a href="/manage/feeds">add a feed</a>.{% endif %}</p>
-</div>
+{% if view.kind == 'unread' %}
+{{ m.empty_state('All caught up', 'Nothing unread in ' ~ view.title ~ '. New items appear here as feeds are polled.', 'check-circle', action='<a class="btn btn-sm" href="/reader/all">Browse all items</a> <a class="btn btn-sm" href="/manage/feeds">Add a feed</a>'|safe) }}
+{% elif view.kind == 'starred' %}
+{{ m.empty_state('All caught up', 'Nothing starred yet. Press s on any item to keep it here.', 'star') }}
+{% else %}
+{{ m.empty_state('All caught up', 'Nothing in ' ~ view.title ~ ' right now.', 'inbox', action='<a class="btn btn-sm" href="/manage/feeds">Add a feed</a>'|safe) }}
+{% endif %}
 {% endif %}
 {% endfor %}
 {% if has_more %}
-<div class="sentinel" hx-get="{{ list_url }}?{{ opts.query }}&after={{ next_cursor }}" hx-trigger="revealed" hx-swap="outerHTML" hx-target="this">
-  <span class="faint">Loading more…</span>
+<div class="sentinel" hx-get="{{ list_url }}?{{ opts.query }}&after={{ next_cursor }}" hx-trigger="revealed" hx-swap="outerHTML" hx-target="this" hx-indicator="this">
+  <span class="faint htmx-indicator"><span class="spinner"></span></span><span class="faint"> Loading more…</span>
 </div>
 {% endif %}

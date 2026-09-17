@@ -1,14 +1,15 @@
 {% import "_macros.html" as m %}
 <div class="pane-head list-head">
-  <div class="row grow" style="flex-basis:100%">
-    <button type="button" class="btn btn-icon btn-sm mobile-only" data-pane-switch="nav" aria-label="Folders">{{ m.icon('menu') }}</button>
-    <div class="grow col" style="gap:0">
-      <div class="list-title">Search</div>
-      <div class="list-counts faint">{% if q %}{{ total }} result{{ 's' if total != 1 }} for “{{ q }}”{% else %}Search titles and text{% endif %}</div>
+  <div class="row list-head-main">
+    <button type="button" class="btn btn-icon btn-ghost nav-toggle" data-pane-switch="nav" aria-label="Folders and feeds" aria-controls="nav">{{ m.icon('menu', 22) }}</button>
+    <div class="list-title-wrap grow">
+      <h1 class="list-title">Search</h1>
+      <div class="list-counts faint">{% if q %}{{ total }} result{{ 's' if total != 1 }} for “{{ q }}”{% else %}Titles, text and your notes{% endif %}</div>
     </div>
+    <a class="mobile-only" href="/manage/account" aria-label="Account and settings" style="justify-self:end">{{ m.avatar(user, 'sm') }}</a>
   </div>
 </div>
-<form class="search-filters" method="get" action="/search" hx-get="/search" hx-target="#list" hx-swap="innerHTML" hx-push-url="true">
+<form class="search-filters" method="get" action="/search" hx-get="/search" hx-target="#list" hx-swap="innerHTML" hx-push-url="true" hx-indicator="#progress">
   <div class="search"><span>{{ m.icon('search') }}</span><input type="search" name="q" value="{{ q }}" placeholder="Search" aria-label="Search query" autocomplete="off"></div>
   <div class="filters-row">
     <select class="input input-sm" name="feed" aria-label="Feed"><option value="">Any feed</option>{% for f in feeds %}<option value="{{ f.id }}"{% if params.feed == f.id|string %} selected{% endif %}>{{ f.title or f.url }}</option>{% endfor %}</select>
@@ -22,13 +23,14 @@
   </div>
 </form>
 <form class="ask-form" hx-post="/ask" hx-target="#ask-result" hx-swap="innerHTML" hx-indicator="#ask-spinner">
-  <label class="ask-toggle"><input type="checkbox" data-toggle="#ask-body" {% if q %}{% endif %}> <span class="chip chip-ai">{{ m.icon('sparkle', 12) }} Ask my reading</span></label>
+  <label class="ask-toggle"><input type="checkbox" class="checkbox" data-toggle="#ask-body"> <span class="chip chip-ai">{{ m.icon('sparkle', 12) }} Ask my reading</span></label>
   <div id="ask-body" class="hidden col">
-    <textarea class="input textarea" name="question" rows="2" placeholder="What did I read about Postgres upgrades last month?">{{ q }}</textarea>
-    <div class="row"><button class="btn btn-ai btn-sm" type="submit">Ask</button><span id="ask-spinner" class="htmx-indicator faint">Thinking…</span></div>
+    <label class="sr-only" for="ask-question">Question</label>
+    <textarea class="input textarea input-sm" id="ask-question" name="question" rows="2" placeholder="What did I read about Postgres upgrades last month?">{{ q }}</textarea>
+    <div class="row"><button class="btn btn-ai btn-sm" type="submit">{{ m.icon('sparkle', 14) }} Ask</button><span id="ask-spinner" class="htmx-indicator faint row"><span class="spinner"></span> Thinking…</span></div>
   </div>
 </form>
 <div id="ask-result"></div>
-<div class="pane-body list-body" id="list-body">
+<div class="pane-body list-body" id="list-body" role="listbox" aria-label="Search results">
   {% include "partials/search_rows.html" %}
 </div>

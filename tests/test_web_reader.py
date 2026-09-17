@@ -91,7 +91,7 @@ async def test_mark_all_read_with_undo(client, session, user):
     assert r.status_code == 200
     assert "Marked 1 item as read" in r.text
     token = re.search(r'name="token" value="([^"]*)"', r.text).group(1)
-    assert token and str(old.id) not in r.text.split("undo-bar")[1].split("</form>")[0]  # only the token travels
+    assert token and str(old.id) not in r.text.split("undo-form")[1].split("</form>")[0]  # only the token travels
     state = await session.get(models.ItemState, (user.id, old.id))
     assert state is not None and state.is_read
     assert await session.get(models.ItemState, (user.id, new.id)) is None
@@ -142,7 +142,7 @@ async def test_hidden_items_excluded(client, session, user):
 
 async def test_search_finds_by_title(client, session, user):
     feed = await seed_feed(session, user, "Feed")
-    hit = await seed_item(session, feed, "Postgres upgrade notes", text="Moving to Postgres 17 with pgvector.")
+    await seed_item(session, feed, "Postgres upgrade notes", text="Moving to Postgres 17 with pgvector.")
     await seed_item(session, feed, "Cooking with cast iron")
     other = await make_user(session)
     ofeed = await seed_feed(session, other, "Other")
@@ -150,7 +150,8 @@ async def test_search_finds_by_title(client, session, user):
     await login(client, user)
     r = await client.get("/search?q=postgres")
     assert r.status_code == 200
-    assert hit.title in r.text and "Cooking" not in r.text and "another user" not in r.text
+    # Matched terms are wrapped in <mark> (search highlighting).
+    assert "<mark>Postgres</mark> upgrade notes" in r.text and "Cooking" not in r.text and "another user" not in r.text
     assert "1 result for" in r.text
     r = await client.get("/search?q=postgres&state=starred", headers=HX)
     assert "No matches" in r.text

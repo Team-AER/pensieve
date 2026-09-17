@@ -2,33 +2,38 @@
 {% import "_macros.html" as m %}
 {% block mtitle %}Household users{% endblock %}
 {% block content %}
-<div class="page-head"><h1>Household users</h1><span class="muted">Each person has their own feeds, state and memory</span></div>
+<div class="page-head">
+  <div class="page-head-text">
+    <h1>Household users</h1>
+    <p class="page-summary">{{ users|length }} {{ 'person' if users|length == 1 else 'people' }} · each has their own feeds, state and memory</p>
+  </div>
+</div>
 {% if invited %}
-<div class="card section token-reveal">
+<div class="card section token-reveal" role="status">
   <div class="card-head"><h2>Invited {{ invited.email }}</h2></div>
-  <p class="muted">Share this temporary password once; they should change it after signing in.</p>
+  <p class="muted small">Share this temporary password once; they should change it after signing in.</p>
   <code class="token-plain">{{ invited.password }}</code>
 </div>
 {% endif %}
 <form class="card section" method="post" action="/manage/users">{{ m.csrf_field(csrf_token) }}
   <div class="card-head"><h2>Invite</h2></div>
-  <div class="row wrap">
-    <input class="input input-sm grow" name="email" type="email" placeholder="email" aria-label="Email" required>
-    <input class="input input-sm" name="display_name" placeholder="Name" aria-label="Name">
-    <select class="input input-sm" name="role" aria-label="Role"><option value="reader">reader</option><option value="admin">admin</option></select>
-    <button class="btn btn-primary btn-sm" type="submit">{{ m.icon('plus', 14) }} Invite</button>
+  <div class="field-row">
+    <div class="field grow"><label for="invite-email">Email</label><input class="input input-sm" id="invite-email" name="email" type="email" placeholder="them@example.com" required></div>
+    <div class="field"><label for="invite-name">Name</label><input class="input input-sm" id="invite-name" name="display_name" placeholder="Optional"></div>
+    <div class="field fixed"><label for="invite-role">Role</label><select class="input input-sm" id="invite-role" name="role"><option value="reader">reader</option><option value="admin">admin</option></select></div>
+    <div class="field fixed"><button class="btn btn-primary" type="submit">{{ m.icon('plus', 14) }} Invite</button></div>
   </div>
 </form>
-<div class="card table-wrap"><table class="table">
-  <thead><tr><th>User</th><th>Role</th><th>AI</th><th>Joined</th><th></th></tr></thead>
+<div class="card table-wrap"><table class="table table--stack">
+  <thead><tr><th>User</th><th>Role</th><th>AI</th><th>Joined</th><th><span class="sr-only">Actions</span></th></tr></thead>
   <tbody>
   {% for u in users %}
   <tr>
-    <td><strong>{{ u.display_name }}</strong> <span class="muted">{{ u.email }}</span>{% if u.id == user.id %} <span class="chip">you</span>{% endif %}</td>
-    <td><form method="post" action="/manage/users/{{ u.id }}/role" class="row">{{ m.csrf_field(csrf_token) }}<span class="chip{% if u.role.value == 'admin' %} chip-accent{% endif %}">{{ u.role.value }}</span>{% if u.id != user.id %}<button class="btn btn-sm" type="submit">Make {{ 'reader' if u.role.value == 'admin' else 'admin' }}</button>{% endif %}</form></td>
-    <td><form method="post" action="/manage/users/{{ u.id }}/ai" class="row">{{ m.csrf_field(csrf_token) }}<span class="chip{% if u.ai_enabled %} chip-ai{% endif %}">{{ 'on' if u.ai_enabled else 'off' }}</span><button class="btn btn-sm" type="submit">{{ 'Disable' if u.ai_enabled else 'Enable' }}</button></form></td>
-    <td>{{ u.created_at|timeago }}</td>
-    <td class="actions">{% if u.id != user.id %}<form method="post" action="/manage/users/{{ u.id }}/delete" hx-confirm="Delete {{ u.email }} and everything they have read, starred and noted?">{{ m.csrf_field(csrf_token) }}<button class="btn btn-sm btn-danger" type="submit">{{ m.icon('trash', 14) }} Delete</button></form>{% endif %}</td>
+    <td class="cell-full"><div class="cell-primary">{{ m.avatar(u, 'sm') }}<div class="cell-text"><span class="cell-title">{{ u.display_name or u.email }}{% if u.id == user.id %} <span class="chip chip-sm">you</span>{% endif %}</span><span class="cell-sub">{{ u.email }}</span></div></div></td>
+    <td data-th="Role"><form method="post" action="/manage/users/{{ u.id }}/role" class="row">{{ m.csrf_field(csrf_token) }}<span class="chip chip-sm{% if u.role.value == 'admin' %} chip-accent{% endif %}">{{ u.role.value }}</span>{% if u.id != user.id %}<button class="btn btn-sm" type="submit">Make {{ 'reader' if u.role.value == 'admin' else 'admin' }}</button>{% endif %}</form></td>
+    <td data-th="AI"><form method="post" action="/manage/users/{{ u.id }}/ai" class="row">{{ m.csrf_field(csrf_token) }}<span class="chip chip-sm{% if u.ai_enabled %} chip-ai{% endif %}">{{ 'on' if u.ai_enabled else 'off' }}</span><button class="btn btn-sm" type="submit">{{ 'Disable' if u.ai_enabled else 'Enable' }}</button></form></td>
+    <td data-th="Joined">{{ u.created_at|timeago }}</td>
+    <td class="actions">{% if u.id != user.id %}<form method="post" action="/manage/users/{{ u.id }}/delete" hx-confirm="Delete {{ u.email }} and everything they have read, starred and noted?" data-confirm-title="Delete this user?" data-confirm-label="Delete" data-confirm-danger>{{ m.csrf_field(csrf_token) }}<button class="btn btn-sm btn-danger" type="submit">{{ m.icon('trash', 14) }} Delete</button></form>{% endif %}</td>
   </tr>
   {% endfor %}
   </tbody></table></div>

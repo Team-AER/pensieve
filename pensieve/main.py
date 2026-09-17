@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -71,13 +71,34 @@ def create_app() -> FastAPI:
     async def healthz() -> dict:
         return {"ok": True}
 
+    def _html_client(request: Request) -> bool:
+        """A browser navigation (not the sync APIs, not an HTMX partial request)."""
+        path = request.url.path
+        if path.startswith(("/api", "/reader/api")) or request.headers.get("hx-request") == "true":
+            return False
+        return "text/html" in request.headers.get("accept", "")
+
     @app.exception_handler(StarletteHTTPException)
     async def _auth_redirect(request: Request, exc: StarletteHTTPException):
         # Browser requests without a session go to the login page; API clients get JSON.
-        wants_html = "text/html" in request.headers.get("accept", "")
-        if exc.status_code == 401 and wants_html and not request.url.path.startswith("/api"):
-            return RedirectResponse(url=f"/login?next={request.url.path}", status_code=303)
+        if _html_client(request):
+            if exc.status_code == 401:
+                return RedirectResponse(url=f"/login?next={request.url.path}", status_code=303)
+            if exc.status_code in (403, 404, 500):
+                return _error_page(request, exc.status_code, exc.headers)
         return JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers)
+
+    @app.exception_handler(Exception)
+    async def _server_error(request: Request, exc: Exception):
+        if _html_client(request):
+            return _error_page(request, 500)
+        return JSONResponse({"detail": "Internal server error"}, status_code=500)
+
+    def _error_page(request: Request, status_code: int, headers: dict | None = None) -> Response:
+        # Rendered by the web package's Jinja environment; anonymous so a broken session can't break the page.
+        from pensieve.web.templating import render
+
+        return render(request, "error.html", {"status_code": status_code}, status_code=status_code, headers=headers)
 
     return app
 

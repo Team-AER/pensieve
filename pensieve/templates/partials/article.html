@@ -1,25 +1,27 @@
 {% import "_macros.html" as m %}
-<article class="article" id="article-{{ item.id }}" data-id="{{ item.id }}" data-url="{{ item.url or '' }}" data-cluster="{{ cluster.id if cluster else '' }}" data-read="{{ 1 if is_read else 0 }}" data-starred="{{ 1 if is_starred else 0 }}">
-  <div class="toolbar" id="toolbar-{{ item.id }}">
+<div id="article-toolbar" hx-swap-oob="innerHTML" class="grow">
+  <div class="toolbar" id="toolbar-{{ item.id }}" role="toolbar" aria-label="Article actions">
     {% include "partials/toolbar.html" %}
   </div>
+</div>
+<article class="article" id="article-{{ item.id }}" data-id="{{ item.id }}" data-url="{{ item.url or '' }}" data-cluster="{{ cluster.id if cluster else '' }}" data-read="{{ 1 if is_read else 0 }}" data-starred="{{ 1 if is_starred else 0 }}" aria-labelledby="article-title-{{ item.id }}">
   {% if auto_open is defined and auto_open %}<span hidden hx-post="/items/{{ item.id }}/open" hx-trigger="load" hx-target="#toolbar-{{ item.id }}" hx-swap="innerHTML"></span>{% endif %}
-  <header class="col" style="gap:10px">
-    <h1 class="article-title">{% if item.url %}<a class="plain" href="{{ item.url }}" target="_blank" rel="noopener noreferrer">{{ item.title or '(untitled)' }}</a>{% else %}{{ item.title or '(untitled)' }}{% endif %}</h1>
+  <header class="article-header">
     <div class="article-meta">
-      <span class="row">{% if feed.icon_url %}<img class="favicon" src="/favicons/{{ feed.id }}" alt="" width="14" height="14" loading="lazy">{% endif %}<a href="/reader/feed/{{ feed.id }}">{{ feed.title or feed.url }}</a></span>
+      <span class="row">{% if feed.icon_url %}<img class="favicon" src="/favicons/{{ feed.id }}" alt="" width="14" height="14" loading="lazy">{% endif %}<a class="item-source plain" href="/reader/feed/{{ feed.id }}">{{ feed.title or feed.url }}</a></span>
       {% if item.author %}<span>by {{ item.author }}</span>{% endif %}
       <time datetime="{{ item.published_at.isoformat() }}" title="{{ item.published_at.strftime('%-d %b %Y, %H:%M') }}">{{ item.published_at|timeago }}</time>
       <span>{{ item.content_text|reading_time }}</span>
-      {% if ai and ai.content_type %}<span class="chip chip-ai" title="Content type, detected by AI">{{ ai.content_type|replace('_', ' ') }}</span>{% endif %}
-      {% if cluster and cluster.source_count > 1 %}<button type="button" class="sources" hx-get="/clusters/{{ cluster.id }}" hx-target="#article-cluster" hx-swap="innerHTML">{{ cluster.source_count }} sources</button>{% endif %}
+      {% if ai and ai.content_type %}<span class="chip chip-sm" title="Content type, detected by AI">{{ ai.content_type|replace('_', ' ') }}</span>{% endif %}
+      {% if cluster and cluster.source_count > 1 %}<button type="button" class="sources" hx-get="/clusters/{{ cluster.id }}" hx-target="#article-cluster" hx-swap="innerHTML" aria-label="{{ cluster.source_count }} sources, show them">{{ cluster.source_count }} sources</button>{% endif %}
     </div>
+    <h2 class="article-title" id="article-title-{{ item.id }}">{% if item.url %}<a class="plain" href="{{ item.url }}" target="_blank" rel="noopener noreferrer">{{ item.title or '(untitled)' }}</a>{% else %}{{ item.title or '(untitled)' }}{% endif %}</h2>
     <div id="tags-{{ item.id }}" class="tags-row">{% include "partials/tags.html" %}</div>
     <div id="article-cluster" class="article-cluster"></div>
   </header>
   {% if related %}
   <aside class="memory" aria-label="From your memory">
-    <div class="memory-icon">{{ m.icon('sparkle', 18) }}</div>
+    <div class="memory-icon">{{ m.icon('mark', 20) }}</div>
     <div class="col" style="gap:6px">
       <div class="eyebrow eyebrow-ai">From your memory</div>
       {% for r in related %}
@@ -36,5 +38,5 @@
   {% endif %}
   <div id="summary-{{ item.id }}" class="summary-slot">{% if ai and ai.summary %}{% with pending=False, error=None %}{% include "partials/summary.html" %}{% endwith %}{% endif %}</div>
   <div id="body-{{ item.id }}">{% include "partials/body.html" %}</div>
-  <section id="notes-{{ item.id }}" class="notes">{% include "partials/notes.html" %}</section>
+  <section id="notes-{{ item.id }}" class="notes" aria-label="Notes">{% include "partials/notes.html" %}</section>
 </article>

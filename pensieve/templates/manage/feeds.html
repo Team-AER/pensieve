@@ -2,81 +2,103 @@
 {% import "_macros.html" as m %}
 {% block mtitle %}Feeds{% endblock %}
 {% block content %}
-<div class="page-head"><h1>Feeds</h1><span class="muted">{{ rows|length }} subscription{{ 's' if rows|length != 1 }}</span>
-  {% if paused_count %}<form method="post" action="/manage/feeds/resume-all" class="row">{{ m.csrf_field(csrf_token) }}<button class="btn btn-sm" type="submit">{{ m.icon('play', 14) }} Resume all paused ({{ paused_count }})</button></form>{% endif %}
+{% set waiting = rows|selectattr('folder_name', 'none')|list|length %}
+{% set failing = rows|selectattr('dot', 'equalto', 'dot-bad')|list|length %}
+<div class="page-head">
+  <div class="page-head-text">
+    <h1>Feeds</h1>
+    <p class="page-summary">{{ rows|length }} subscription{{ 's' if rows|length != 1 }}{% if q or folder %} shown{% endif %}{% if waiting %} · {{ waiting }} waiting for a folder{% endif %}{% if failing %} · {{ failing }} failing{% endif %}{% if paused_count %} · {{ paused_count }} paused{% endif %}</p>
+  </div>
+  <div class="page-head-actions">
+    <form class="filters-row" method="get" action="/manage/feeds" role="search">
+      <div class="search"><span>{{ m.icon('search', 14) }}</span><input type="search" name="q" value="{{ q }}" placeholder="Filter feeds" aria-label="Filter feeds"></div>
+      <select class="input input-sm" name="folder" aria-label="Folder" onchange="this.form.requestSubmit()">
+        <option value="">All folders</option><option value="inbox"{% if folder == 'inbox' %} selected{% endif %}>Inbox (unfiled)</option>
+        {% for f in folders %}<option value="{{ f.id }}"{% if folder == f.id|string %} selected{% endif %}>{{ f.name }}</option>{% endfor %}
+      </select>
+      <button class="btn" type="submit">Filter</button>
+    </form>
+    {% if paused_count %}<form method="post" action="/manage/feeds/resume-all">{{ m.csrf_field(csrf_token) }}<button class="btn" type="submit">{{ m.icon('play', 14) }} Resume all paused ({{ paused_count }})</button></form>{% endif %}
+    <a class="btn" href="/manage/import">{{ m.icon('upload', 14) }} Import OPML</a>
+  </div>
 </div>
 <form class="card add-feed" method="post" action="/manage/feeds">
   {{ m.csrf_field(csrf_token) }}
-  <div class="field grow"><label for="url">Add a feed or site</label><input class="input input-sm" id="url" name="url" type="url" placeholder="https://example.com/feed.xml or https://example.com" required></div>
-  <div class="field"><label for="folder_id">Folder</label><select class="input input-sm" id="folder_id" name="folder_id"><option value="">Let AI file it</option>{% for f in folders %}<option value="{{ f.id }}">{{ f.name }}</option>{% endfor %}</select></div>
-  <button class="btn btn-primary" type="submit">{{ m.icon('plus') }} Subscribe</button>
-</form>
-<form class="filters-row table-filters" method="get" action="/manage/feeds">
-  <div class="search"><span>{{ m.icon('search') }}</span><input type="search" name="q" value="{{ q }}" placeholder="Filter feeds" aria-label="Filter feeds"></div>
-  <select class="input input-sm" name="folder" aria-label="Folder" onchange="this.form.requestSubmit()">
-    <option value="">All folders</option><option value="inbox"{% if folder == 'inbox' %} selected{% endif %}>Inbox (unfiled)</option>
-    {% for f in folders %}<option value="{{ f.id }}"{% if folder == f.id|string %} selected{% endif %}>{{ f.name }}</option>{% endfor %}
-  </select>
-  <button class="btn btn-sm" type="submit">Filter</button>
+  <div class="field-row">
+    <div class="field grow"><label for="url">Add a feed or site</label><input class="input input-sm" id="url" name="url" type="url" placeholder="https://example.com/feed.xml or https://example.com" required></div>
+    <div class="field"><label for="folder_id">Folder</label><select class="input input-sm" id="folder_id" name="folder_id"><option value="">Let AI file it</option>{% for f in folders %}<option value="{{ f.id }}">{{ f.name }}</option>{% endfor %}</select></div>
+    <div class="field fixed"><button class="btn btn-primary" type="submit">{{ m.icon('plus') }} Subscribe</button></div>
+  </div>
 </form>
 <div class="card table-wrap">
-<table class="table">
-  <thead><tr><th>Feed</th><th>Folder</th><th>Health</th><th class="num">Open rate</th><th class="num">Poll</th><th></th></tr></thead>
+<table class="table table--stack">
+  <thead><tr><th>Feed</th><th>Folder</th><th>Health</th><th class="num">You open</th><th class="num">Poll</th><th><span class="sr-only">Actions</span></th></tr></thead>
   <tbody>
   {% for r in rows %}
   <tr id="feed-{{ r.feed.id }}">
-    <td>
-      <div class="row"><img class="favicon" src="/favicons/{{ r.feed.id }}" alt="" width="14" height="14" loading="lazy"><a href="/reader/feed/{{ r.feed.id }}">{{ r.feed.title or r.feed.url }}</a>{% if r.feed.paused %}<span class="chip">paused</span>{% endif %}</div>
-      <div class="faint ellipsis feed-url">{{ r.feed.url }}</div>
+    <td class="cell-full">
+      <div class="cell-primary">
+        <img class="favicon favicon-lg" src="/favicons/{{ r.feed.id }}" alt="" width="18" height="18" loading="lazy">
+        <div class="cell-text">
+          <span class="cell-title"><a href="/reader/feed/{{ r.feed.id }}">{{ r.feed.title or r.feed.url }}</a>{% if r.feed.paused %} <span class="chip chip-sm">paused</span>{% endif %}</span>
+          <span class="cell-sub feed-url">{{ r.feed.url|replace('https://', '')|replace('http://', '') }}</span>
+        </div>
+      </div>
     </td>
-    <td>
+    <td data-th="Folder">
       {% if r.folder_name %}{{ r.folder_name }}
       {% elif r.suggested_name %}
-        <div class="row">
-          <form class="row" method="post" action="/manage/feeds/{{ r.feed.id }}/accept-suggestion">{{ m.csrf_field(csrf_token) }}
-            <span class="chip chip-ai" title="AI suggestion{% if r.feed.suggested_folder_confidence %}, {{ (r.feed.suggested_folder_confidence * 100)|round|int }}% confident{% endif %}">{{ m.icon('sparkle', 12) }}{{ r.suggested_name }} · suggested</span>
-            <button class="btn btn-sm btn-accent" type="submit">Accept</button>
-          </form>
-          <form method="post" action="/manage/feeds/{{ r.feed.id }}/dismiss-suggestion">{{ m.csrf_field(csrf_token) }}<button class="btn btn-sm" type="submit" title="Keep in Inbox and drop this suggestion">Dismiss</button></form>
+        <div class="suggest-row">
+          <span class="chip chip-ai" title="AI suggestion{% if r.feed.suggested_folder_confidence %}, {{ (r.feed.suggested_folder_confidence * 100)|round|int }}% confident{% endif %}">{{ m.icon('sparkle', 12) }}{{ r.suggested_name }} · suggested</span>
+          <form method="post" action="/manage/feeds/{{ r.feed.id }}/accept-suggestion">{{ m.csrf_field(csrf_token) }}<button class="btn btn-sm btn-accent" type="submit">Accept</button></form>
+          <form method="post" action="/manage/feeds/{{ r.feed.id }}/dismiss-suggestion">{{ m.csrf_field(csrf_token) }}<button class="btn btn-sm btn-ghost" type="submit" title="Keep in Inbox and drop this suggestion">Dismiss</button></form>
         </div>
       {% else %}<span class="muted">Inbox</span>{% endif %}
     </td>
-    <td>
-      <div><span class="dot {{ r.dot }}" title="{{ r.health }}"></span> <span class="muted">{{ r.health|truncate(40) }}</span>{% if r.feed.paused %} <span class="chip">paused</span>{% endif %}</div>
-      <div class="faint feed-health-detail">
-        {% if r.feed.last_fetch_at %}last {{ r.feed.last_fetch_at|timeago }}{% else %}never fetched{% endif %}
-        · {% if r.feed.paused %}not scheduled{% elif r.feed.next_fetch_at %}next <time datetime="{{ r.feed.next_fetch_at.isoformat() }}">{{ r.feed.next_fetch_at.strftime('%-d %b %H:%M') }}</time>{% else %}not scheduled{% endif %}
-        {% if r.feed.error_count %}· {{ r.feed.error_count }} consecutive error{{ 's' if r.feed.error_count != 1 }}{% endif %}
+    <td data-th="Health">
+      <div class="cell-stack">
+        <div class="cell-health"><span class="dot {{ r.dot }}" title="{{ r.health }}"></span> <span class="{% if r.dot == 'dot-bad' %}danger-text{% elif r.dot == 'dot-ok' %}{% else %}muted{% endif %}">{{ r.health|truncate(40) }}</span></div>
+        <div class="faint feed-health-detail">
+          {% if r.feed.last_fetch_at %}last {{ r.feed.last_fetch_at|timeago }}{% else %}never fetched{% endif %}
+          · {% if r.feed.paused %}not scheduled{% elif r.feed.next_fetch_at %}next <time datetime="{{ r.feed.next_fetch_at.isoformat() }}">{{ r.feed.next_fetch_at.strftime('%-d %b %H:%M') }}</time>{% else %}not scheduled{% endif %}
+          {% if r.feed.error_count %}· {{ r.feed.error_count }} consecutive error{{ 's' if r.feed.error_count != 1 }}{% endif %}
+        </div>
       </div>
     </td>
-    <td class="num">{% if r.open_rate is not none %}{{ (r.open_rate * 100)|round|int }}%{% else %}<span class="faint">–</span>{% endif %}</td>
-    <td class="num">
+    <td class="num" data-th="You open">{% if r.open_rate is not none %}{{ (r.open_rate * 100)|round|int }}%{% else %}<span class="faint">new</span>{% endif %}</td>
+    <td class="num" data-th="Poll">
       <form method="post" action="/manage/feeds/{{ r.feed.id }}/interval" class="row feed-interval">{{ m.csrf_field(csrf_token) }}
-        <input class="input input-sm" type="number" name="fetch_interval_min" value="{{ r.feed.fetch_interval_min }}" min="{{ interval_bounds[0] }}" max="{{ interval_bounds[1] }}" step="1" aria-label="Poll interval in minutes" style="width:5.5em">
-        <span class="faint">min</span><button class="btn btn-sm" type="submit" title="Save poll interval">Set</button>
+        <label class="sr-only" for="interval-{{ r.feed.id }}">Poll interval in minutes</label>
+        <input class="input input-sm" id="interval-{{ r.feed.id }}" type="number" name="fetch_interval_min" value="{{ r.feed.fetch_interval_min }}" min="{{ interval_bounds[0] }}" max="{{ interval_bounds[1] }}" step="1">
+        <span class="faint">min</span><button class="btn btn-sm" type="submit" aria-label="Save poll interval for {{ r.feed.title or r.feed.url }}">Set</button>
       </form>
     </td>
     <td class="actions">
       <details class="menu menu-right">
-        <summary class="btn btn-sm btn-icon" aria-label="Feed actions">…</summary>
-        <div class="menu-body">
-          <form method="post" action="/manage/feeds/{{ r.feed.id }}/rename" class="menu-form">{{ m.csrf_field(csrf_token) }}<input class="input input-sm" name="title" value="{{ r.feed.title }}" aria-label="Title"><button class="btn btn-sm" type="submit">Rename</button></form>
+        <summary class="btn btn-sm btn-icon" aria-label="Actions for {{ r.feed.title or r.feed.url }}" aria-haspopup="menu">{{ m.icon('more') }}</summary>
+        <div class="menu-body" role="menu" aria-label="Feed actions">
+          <form method="post" action="/manage/feeds/{{ r.feed.id }}/rename" class="menu-form">{{ m.csrf_field(csrf_token) }}<label class="sr-only" for="title-{{ r.feed.id }}">Title</label><input class="input input-sm" id="title-{{ r.feed.id }}" name="title" value="{{ r.feed.title }}"><button class="btn btn-sm" type="submit">Rename</button></form>
           <form method="post" action="/manage/feeds/{{ r.feed.id }}/move" class="menu-form">{{ m.csrf_field(csrf_token) }}
-            <select class="input input-sm" name="folder_id" aria-label="Move to folder"><option value="">Inbox</option>{% for f in folders %}<option value="{{ f.id }}"{% if r.feed.folder_id == f.id %} selected{% endif %}>{{ f.name }}</option>{% endfor %}</select>
+            <label class="sr-only" for="move-{{ r.feed.id }}">Move to folder</label>
+            <select class="input input-sm" id="move-{{ r.feed.id }}" name="folder_id"><option value="">Inbox</option>{% for f in folders %}<option value="{{ f.id }}"{% if r.feed.folder_id == f.id %} selected{% endif %}>{{ f.name }}</option>{% endfor %}</select>
             <button class="btn btn-sm" type="submit">Move</button>
           </form>
+          <div class="menu-sep"></div>
           {% if r.feed.paused %}
-          <form method="post" action="/manage/feeds/{{ r.feed.id }}/resume">{{ m.csrf_field(csrf_token) }}<button class="menu-item" type="submit">{{ m.icon('play', 14) }} Resume</button></form>
+          <form method="post" action="/manage/feeds/{{ r.feed.id }}/resume">{{ m.csrf_field(csrf_token) }}<button class="menu-item" role="menuitem" type="submit">{{ m.icon('play', 14) }} Resume</button></form>
           {% else %}
-          <form method="post" action="/manage/feeds/{{ r.feed.id }}/pause">{{ m.csrf_field(csrf_token) }}<button class="menu-item" type="submit">{{ m.icon('pause', 14) }} Pause</button></form>
+          <form method="post" action="/manage/feeds/{{ r.feed.id }}/pause">{{ m.csrf_field(csrf_token) }}<button class="menu-item" role="menuitem" type="submit">{{ m.icon('pause', 14) }} Pause</button></form>
           {% endif %}
-          <form method="post" action="/manage/feeds/{{ r.feed.id }}/unsubscribe" hx-confirm="Unsubscribe from {{ r.feed.title or r.feed.url }}? Its items and your notes on them will be deleted." onsubmit="return this.hasAttribute('hx-confirm') && window.htmx ? true : confirm('Unsubscribe?')">{{ m.csrf_field(csrf_token) }}<button class="menu-item danger" type="submit">{{ m.icon('trash', 14) }} Unsubscribe</button></form>
+          <form method="post" action="/manage/feeds/{{ r.feed.id }}/unsubscribe" hx-confirm="Unsubscribe from {{ r.feed.title or r.feed.url }}? Its items and your notes on them will be deleted." data-confirm-title="Unsubscribe?" data-confirm-label="Unsubscribe" data-confirm-danger>{{ m.csrf_field(csrf_token) }}<button class="menu-item danger" role="menuitem" type="submit">{{ m.icon('trash', 14) }} Unsubscribe</button></form>
         </div>
       </details>
     </td>
   </tr>
   {% else %}
-  <tr><td colspan="6" class="muted">No feeds yet. Add one above or <a href="/manage/import">import an OPML file</a>.</td></tr>
+  <tr><td colspan="6" class="empty-row">
+    {% set add_actions %}<a class="btn btn-sm" href="#url">Add a feed above</a> <a class="btn btn-sm" href="/manage/import">Import OPML</a>{% endset %}
+    {{ m.empty_state('No feeds yet' if not (q or folder) else 'No matching feeds', 'Subscribe to a site or feed URL, or bring an OPML file from your old reader.' if not (q or folder) else 'Nothing matches that filter.', 'inbox', compact=True, action=add_actions if not (q or folder) else '') }}
+  </td></tr>
   {% endfor %}
   </tbody>
 </table>

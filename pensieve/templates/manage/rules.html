@@ -2,30 +2,37 @@
 {% import "_macros.html" as m %}
 {% block mtitle %}Rules and filters{% endblock %}
 {% block content %}
-<div class="page-head"><h1>Rules and filters</h1><span class="muted">Applied to new items as they arrive</span></div>
-{% macro rule_fields(rule) %}
-  <select class="input input-sm" name="feed_id" aria-label="Feed"><option value="">Any feed</option>{% for f in feeds %}<option value="{{ f.id }}"{% if rule and rule.feed_id == f.id %} selected{% endif %}>{{ f.title or f.url }}</option>{% endfor %}</select>
-  <select class="input input-sm" name="field" aria-label="Field">{% for fld in ['title','body','author','url'] %}<option value="{{ fld }}"{% if rule and rule.field == fld %} selected{% endif %}>{{ fld }}</option>{% endfor %}</select>
-  <input class="input input-sm grow" name="pattern" value="{{ rule.pattern if rule else '' }}" placeholder="keyword or /regex/" required aria-label="Pattern">
-  <label class="check"><input type="checkbox" name="is_regex" value="1"{% if rule and rule.is_regex %} checked{% endif %}> regex</label>
-  <select class="input input-sm" name="action" aria-label="Action">{% for a in ['hide','star','tag','mark_read'] %}<option value="{{ a }}"{% if rule and rule.action == a %} selected{% endif %}>{{ a|replace('_',' ') }}</option>{% endfor %}</select>
-  <input class="input input-sm" name="action_value" value="{{ rule.action_value or '' if rule else '' }}" placeholder="tag name" aria-label="Tag name (for tag action)">
+<div class="page-head">
+  <div class="page-head-text">
+    <h1>Rules and filters</h1>
+    <p class="page-summary">{{ rules|length }} rule{{ 's' if rules|length != 1 }} · applied to new items as they arrive</p>
+  </div>
+</div>
+{% macro rule_fields(rule, prefix) %}
+  <div class="field"><label for="{{ prefix }}-feed">Feed</label><select class="input input-sm" id="{{ prefix }}-feed" name="feed_id"><option value="">Any feed</option>{% for f in feeds %}<option value="{{ f.id }}"{% if rule and rule.feed_id == f.id %} selected{% endif %}>{{ f.title or f.url }}</option>{% endfor %}</select></div>
+  <div class="field"><label for="{{ prefix }}-field">Field</label><select class="input input-sm" id="{{ prefix }}-field" name="field">{% for fld in ['title','body','author','url'] %}<option value="{{ fld }}"{% if rule and rule.field == fld %} selected{% endif %}>{{ fld }}</option>{% endfor %}</select></div>
+  <div class="field grow"><label for="{{ prefix }}-pattern">Pattern</label><input class="input input-sm" id="{{ prefix }}-pattern" name="pattern" value="{{ rule.pattern if rule else '' }}" placeholder="keyword or /regex/" required></div>
+  <label class="check"><input type="checkbox" class="checkbox" name="is_regex" value="1"{% if rule and rule.is_regex %} checked{% endif %}> regex</label>
+  <div class="field"><label for="{{ prefix }}-action">Action</label><select class="input input-sm" id="{{ prefix }}-action" name="action">{% for a in ['hide','star','tag','mark_read'] %}<option value="{{ a }}"{% if rule and rule.action == a %} selected{% endif %}>{{ a|replace('_',' ') }}</option>{% endfor %}</select></div>
+  <div class="field"><label for="{{ prefix }}-value">Tag name</label><input class="input input-sm" id="{{ prefix }}-value" name="action_value" value="{{ rule.action_value or '' if rule else '' }}" placeholder="for the tag action"></div>
 {% endmacro %}
 <form class="card section rule-form" method="post" action="/manage/rules">{{ m.csrf_field(csrf_token) }}
   <div class="card-head"><h2>New rule</h2></div>
-  <div class="rule-grid">{{ rule_fields(None) }}<button class="btn btn-sm btn-primary" type="submit">{{ m.icon('plus', 14) }} Add rule</button></div>
+  <div class="rule-grid">{{ rule_fields(None, 'new') }}<div class="field"><button class="btn btn-primary" type="submit">{{ m.icon('plus', 14) }} Add rule</button></div></div>
 </form>
-<div class="col">
+<div class="stack" style="margin-top:16px">
 {% for r in rules %}
 <div class="card section rule{% if not r.enabled %} disabled{% endif %}">
-  <form method="post" action="/manage/rules/{{ r.id }}/update" class="rule-grid">{{ m.csrf_field(csrf_token) }}{{ rule_fields(r) }}<button class="btn btn-sm" type="submit">Save</button></form>
+  <form method="post" action="/manage/rules/{{ r.id }}/update" class="rule-grid">{{ m.csrf_field(csrf_token) }}{{ rule_fields(r, 'rule-' ~ r.id) }}<div class="field"><button class="btn" type="submit">Save</button></div></form>
   <div class="row rule-actions">
-    <span class="faint">{{ 'Global' if not r.feed_id else feed_names.get(r.feed_id, 'feed') }} · {{ 'enabled' if r.enabled else 'disabled' }}</span>
+    <span class="faint tiny">{{ 'Global' if not r.feed_id else feed_names.get(r.feed_id, 'feed') }} · {{ 'enabled' if r.enabled else 'disabled' }}</span>
     <form method="post" action="/manage/rules/{{ r.id }}/toggle">{{ m.csrf_field(csrf_token) }}<button class="btn btn-sm" type="submit">{{ 'Disable' if r.enabled else 'Enable' }}</button></form>
-    <form method="post" action="/manage/rules/{{ r.id }}/apply" hx-confirm="Apply this rule to items already stored? Hidden, starred, tagged or read marks it adds can't be undone in bulk.">{{ m.csrf_field(csrf_token) }}<button class="btn btn-sm" type="submit" title="Run this rule over existing items">Apply to existing items</button></form>
-    <form method="post" action="/manage/rules/{{ r.id }}/delete" hx-confirm="Delete this rule?">{{ m.csrf_field(csrf_token) }}<button class="btn btn-sm btn-danger" type="submit">{{ m.icon('trash', 14) }} Delete</button></form>
+    <form method="post" action="/manage/rules/{{ r.id }}/apply" hx-confirm="Apply this rule to items already stored? Hidden, starred, tagged or read marks it adds can't be undone in bulk." data-confirm-title="Apply to existing items?" data-confirm-label="Apply">{{ m.csrf_field(csrf_token) }}<button class="btn btn-sm" type="submit" title="Run this rule over existing items">Apply to existing items</button></form>
+    <form method="post" action="/manage/rules/{{ r.id }}/delete" hx-confirm="Delete this rule?" data-confirm-title="Delete this rule?" data-confirm-label="Delete" data-confirm-danger>{{ m.csrf_field(csrf_token) }}<button class="btn btn-sm btn-danger" type="submit">{{ m.icon('trash', 14) }} Delete</button></form>
   </div>
 </div>
-{% else %}<p class="muted">No rules yet. Rules can hide, star, tag or mark read items whose title, body, author or URL match.</p>{% endfor %}
+{% else %}
+<div class="card">{{ m.empty_state('No rules yet', 'Rules hide, star, tag or mark read items whose title, body, author or URL match.', 'split', compact=True) }}</div>
+{% endfor %}
 </div>
 {% endblock %}

@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% set copy = {
+  403: ("Not yours to see", "This page belongs to another account, or your session lost the right to it."),
+  404: ("Nothing here", "That page or item doesn't exist, or it was removed from your library."),
+  500: ("Something broke", "Pensieve hit an error it couldn't recover from. The reader still works; try again in a moment.")
+} %}
+{% set title, line = copy.get(status_code, copy[500]) %}
+{% block title %}{{ status_code }} · {{ title }} · Pensieve{% endblock %}
+{% block body %}
+<main class="error-page" id="main">
+  <a class="brand" href="/">{{ m.icon('mark', 24) }} Pensieve</a>
+  <div class="error-code" aria-hidden="true">{{ status_code }}</div>
+  <h1>{{ title }}</h1>
+  <p>{{ line }}</p>
+  <div class="row wrap" style="justify-content:center">
+    <a class="btn btn-primary" href="/">Back to the reader</a>
+    <a class="btn" href="/manage/feeds">Manage feeds</a>
+  </div>
+</main>
+{% endblock %}

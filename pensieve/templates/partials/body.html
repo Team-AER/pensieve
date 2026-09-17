@@ -1,8 +1,8 @@
 {% import "_macros.html" as m %}
-{% if error is defined and error %}<div class="flash flash-error" role="alert">{{ error }}</div>{% endif %}
+{% if error is defined and error %}<div class="flash flash-error" role="alert">{{ m.icon('warning', 14) }} {{ error }}</div>{% endif %}
 {% if use_reader and item.reader_html %}
 <div class="body-mode">
-  <span class="chip">Reader view</span>
+  <span class="chip">{{ m.icon('reader', 12) }} Reader view</span>
   <form hx-post="/items/{{ item.id }}/reader-mode" hx-target="#body-{{ item.id }}" hx-swap="innerHTML"><input type="hidden" name="off" value="1"><button class="btn btn-sm" type="submit">Show feed version</button></form>
 </div>
 <div class="prose">{{ item.reader_html|safe }}</div>

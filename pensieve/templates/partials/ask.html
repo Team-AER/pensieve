@@ -1,5 +1,5 @@
 {% import "_macros.html" as m %}
-<section class="ai-card ask-answer" aria-live="polite">
+<section class="ai-card ask-answer" aria-live="polite" aria-label="Answer from your reading">
   <div class="ai-card-head"><span class="eyebrow eyebrow-ai">{{ m.icon('sparkle', 14) }} Ask my reading</span></div>
   <div class="ask-q muted">{{ question }}</div>
   {% if error %}<p class="muted">{{ error }}</p>{% endif %}

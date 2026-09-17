@@ -2,31 +2,38 @@
 {% import "_macros.html" as m %}
 {% block mtitle %}API tokens{% endblock %}
 {% block content %}
-<div class="page-head"><h1>API tokens</h1><span class="muted">For Reeder, NetNewsWire, Unread and other sync clients</span></div>
+{% set active = tokens|rejectattr('revoked_at')|list %}
+<div class="page-head">
+  <div class="page-head-text">
+    <h1>API tokens</h1>
+    <p class="page-summary">{{ active|length }} active client{{ 's' if active|length != 1 }} · for Reeder, NetNewsWire, Unread and other sync apps</p>
+  </div>
+</div>
 {% if new_token %}
-<div class="card section token-reveal">
+<div class="card section token-reveal" role="status">
   <div class="card-head"><h2>Token created</h2><span class="chip">{{ new_token.kind }}</span></div>
-  <p class="muted">Copy it now; it won't be shown again.</p>
+  <p class="muted small">Copy it now; it won't be shown again.</p>
   <code class="token-plain" id="new-token">{{ new_token.plaintext }}</code>
-  <p class="muted">{% if new_token.kind == 'fever' %}In your client choose Fever, endpoint <code>{{ settings.base_url }}/api/fever/</code>, email <code>{{ user.email }}</code> and this token as the password.{% else %}In your client choose Google Reader API (or FreshRSS), endpoint <code>{{ settings.base_url }}</code>, email <code>{{ user.email }}</code> and this token as the password.{% endif %}</p>
+  <p class="muted small">{% if new_token.kind == 'fever' %}In your client choose Fever, endpoint <code>{{ settings.base_url }}/api/fever/</code>, email <code>{{ user.email }}</code> and this token as the password.{% else %}In your client choose Google Reader API (or FreshRSS), endpoint <code>{{ settings.base_url }}</code>, email <code>{{ user.email }}</code> and this token as the password.{% endif %}</p>
 </div>
 {% endif %}
 <form class="card section" method="post" action="/manage/tokens">{{ m.csrf_field(csrf_token) }}
   <div class="card-head"><h2>New token</h2></div>
-  <div class="row wrap">
-    <input class="input input-sm grow" name="label" placeholder="Label, e.g. Reeder on iPhone" aria-label="Label" required>
-    <select class="input input-sm" name="kind" aria-label="Protocol"><option value="greader">Google Reader API</option><option value="fever">Fever API</option></select>
-    <button class="btn btn-primary btn-sm" type="submit">{{ m.icon('plus', 14) }} Create</button>
+  <div class="field-row">
+    <div class="field grow"><label for="token-label">Label</label><input class="input input-sm" id="token-label" name="label" placeholder="e.g. Reeder on iPhone" required></div>
+    <div class="field fixed"><label for="token-kind">Protocol</label><select class="input input-sm" id="token-kind" name="kind"><option value="greader">Google Reader API</option><option value="fever">Fever API</option></select></div>
+    <div class="field fixed"><button class="btn btn-primary" type="submit">{{ m.icon('plus', 14) }} Create</button></div>
   </div>
 </form>
-<div class="card table-wrap"><table class="table">
-  <thead><tr><th>Label</th><th>Protocol</th><th>Created</th><th>Last used</th><th></th></tr></thead>
+<div class="card table-wrap"><table class="table table--stack">
+  <thead><tr><th>Label</th><th>Protocol</th><th>Created</th><th>Last used</th><th><span class="sr-only">Actions</span></th></tr></thead>
   <tbody>
   {% for t in tokens %}
-  <tr class="{% if t.revoked_at %}muted{% endif %}">
-    <td>{{ t.label }}</td><td><span class="chip">{{ t.kind }}</span></td><td>{{ t.created_at|timeago }}</td><td>{{ t.last_used_at|timeago if t.last_used_at else 'never' }}</td>
-    <td class="actions">{% if t.revoked_at %}<span class="faint">revoked {{ t.revoked_at|timeago }}</span>{% else %}<form method="post" action="/manage/tokens/{{ t.id }}/revoke" hx-confirm="Revoke {{ t.label }}? Clients using it stop syncing.">{{ m.csrf_field(csrf_token) }}<button class="btn btn-sm btn-danger" type="submit">Revoke</button></form>{% endif %}</td>
+  <tr class="{% if t.revoked_at %}is-muted{% endif %}">
+    <td class="cell-full"><div class="cell-primary"><span class="avatar avatar-sm" aria-hidden="true" style="background:var(--chip);color:var(--muted)">{{ m.icon('key', 12) }}</span><div class="cell-text"><span class="cell-title">{{ t.label }}</span><span class="cell-sub">{{ 'Google Reader API' if t.kind == 'greader' else 'Fever API' }} · {% if t.last_used_at %}used {{ t.last_used_at|timeago }}{% else %}never used{% endif %}</span></div></div></td>
+    <td data-th="Protocol"><span class="chip chip-sm">{{ t.kind }}</span></td><td data-th="Created">{{ t.created_at|timeago }}</td><td data-th="Last used">{{ t.last_used_at|timeago if t.last_used_at else 'never' }}</td>
+    <td class="actions">{% if t.revoked_at %}<span class="faint tiny">revoked {{ t.revoked_at|timeago }}</span>{% else %}<form method="post" action="/manage/tokens/{{ t.id }}/revoke" hx-confirm="Revoke {{ t.label }}? Clients using it stop syncing." data-confirm-title="Revoke token?" data-confirm-label="Revoke" data-confirm-danger>{{ m.csrf_field(csrf_token) }}<button class="btn btn-sm btn-danger" type="submit">Revoke</button></form>{% endif %}</td>
   </tr>
-  {% else %}<tr><td colspan="5" class="muted">No tokens yet.</td></tr>{% endfor %}
+  {% else %}<tr><td colspan="5" class="empty-row">{{ m.empty_state('No tokens yet', 'Create one per app so you can revoke a lost phone without touching the others.', 'key', compact=True) }}</td></tr>{% endfor %}
   </tbody></table></div>
 {% endblock %}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -14,6 +15,7 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse
 from itsdangerous import BadSignature, URLSafeTimedSerializer
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from markupsafe import Markup, escape
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pensieve.auth import current_user
@@ -22,7 +24,27 @@ from pensieve.db import get_session
 from pensieve.models import User
 
 TEMPLATES_DIR = Path(__file__).resolve().parent.parent / "templates"
+STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 CSRF_MAX_AGE_S = 60 * 60 * 24 * 7
+
+
+def _static_stamp() -> str:
+    """Build stamp for cache busting: a short digest of the shell assets, computed once per process."""
+    h = hashlib.sha1()
+    for name in ("app.css", "web.css", "fonts.css", "app.js", "reader.js", "sw.js", "manifest.webmanifest"):
+        try:
+            h.update((STATIC_DIR / name).read_bytes())
+        except OSError:
+            h.update(name.encode())
+    return h.hexdigest()[:10]
+
+
+STATIC_VERSION = _static_stamp()
+
+
+def static_url(path: str) -> str:
+    """``/static/<path>?v=<STATIC_VERSION>`` so the browser and the service worker pick up new builds."""
+    return f"/static/{path.lstrip('/')}?v={STATIC_VERSION}"
 
 # ---------------------------------------------------------------------------
 # Filters and helpers
@@ -102,6 +124,28 @@ def theme_for(user: User | None) -> str:
     return str(settings.get("theme") or "auto")
 
 
+_QUERY_NOISE = {"or", "and", "not"}
+
+
+def highlight(text: str | None, query: str | None) -> Markup:
+    """Escape ``text`` and wrap case-insensitive matches of the query's words in ``<mark>``.
+
+    Quotes, ``-exclusions`` and websearch operators are dropped so only real terms light up.
+    """
+    escaped = escape(text or "")
+    tokens: list[str] = []
+    for raw in re.findall(r'"([^"]+)"|(\S+)', query or ""):
+        term = (raw[0] or raw[1]).strip('"\'')
+        if not term or term.startswith("-") or term.lower() in _QUERY_NOISE:
+            continue
+        tokens.extend(t for t in term.split() if len(t) > 1)
+    if not tokens:
+        return Markup(escaped)
+    pattern = re.compile("|".join(re.escape(t) for t in sorted(set(tokens), key=len, reverse=True)), re.IGNORECASE)
+    marked = pattern.sub(lambda m: f"<mark>{m.group(0)}</mark>", str(escaped))
+    return Markup(marked)
+
+
 FONT_SIZES = ("s", "m", "l", "xl")
 MEASURES = ("narrow", "normal", "wide")
 
@@ -173,9 +217,12 @@ def _build_env() -> Environment:
     env.filters["reading_time"] = reading_time
     env.filters["date_long"] = date_long
     env.filters["snippet"] = snippet
+    env.filters["highlight"] = highlight
     env.filters["tojson_attr"] = lambda v: json.dumps(v)
     env.globals["sparkline_points"] = sparkline_points
     env.globals["now"] = lambda: datetime.now(UTC)
+    env.globals["static"] = static_url
+    env.globals["static_version"] = STATIC_VERSION
     return env
 
 
@@ -206,6 +253,7 @@ def render(
         "csrf_token": make_csrf(user.id if user else None),
         "settings": get_settings(),
         "htmx": is_htmx(request),
+        "uid": str(user.id) if user else "",
     }
     if context:
         ctx.update(context)

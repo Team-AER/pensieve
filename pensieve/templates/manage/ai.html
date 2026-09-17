@@ -2,35 +2,43 @@
 {% import "_macros.html" as m %}
 {% block mtitle %}AI and memory{% endblock %}
 {% block content %}
-<div class="page-head"><h1>AI and memory</h1><span class="chip chip-ai">{{ m.icon('sparkle', 12) }} local gateway only</span></div>
-<div class="two-col">
+<div class="page-head">
+  <div class="page-head-text">
+    <h1>AI and memory</h1>
+    <p class="page-summary">{{ stats.queued }} queued · {{ stats.running }} running · {{ stats.failed }} failed{% if profile %} · profile v{{ profile.version }}{% endif %}</p>
+  </div>
+  <div class="page-head-actions"><span class="chip chip-ai">{{ m.icon('sparkle', 12) }} local gateway only</span></div>
+</div>
+<div class="grid-8-4">
 <div class="col">
 <form class="card section" method="post" action="/manage/ai/settings">{{ m.csrf_field(csrf_token) }}
   <div class="card-head"><h2>What the model may do</h2></div>
+  <div>
   {% for key, label, help in [('auto_file','File new feeds into folders','Suggests a folder for feeds landing in Inbox; you accept in one click.'),('tag_items','Tag items','Applies your AI tag vocabulary with a confidence you can see.'),('group_stories','Group the same story across sources','One row per story; unmerge any mistake and it stays split.'),('memory','Keep a reader memory','A plain-text profile of what you read and care about, editable below.'),('digest','Write a daily digest','Top stories, rising topics and what is safe to skip.')] %}
   <label class="toggle-row"><span><strong>{{ label }}</strong><span class="muted">{{ help }}</span></span><input type="checkbox" name="{{ key }}" value="1"{% if ai[key] %} checked{% endif %} class="switch"></label>
   {% endfor %}
-  <div class="field"><label for="digest_time">Digest time</label><input class="input input-sm" id="digest_time" type="time" name="digest_time" value="{{ ai.digest_time }}" style="max-width:160px"></div>
-  <div class="row"><button class="btn btn-primary btn-sm" type="submit">Save</button></div>
+  </div>
+  <div class="field" style="max-width:200px"><label for="digest_time">Digest time</label><input class="input input-sm" id="digest_time" type="time" name="digest_time" value="{{ ai.digest_time }}"><span class="field-hint">Local time, {{ settings.timezone if settings.timezone is defined else 'server timezone' }}.</span></div>
+  <div class="card-foot"><button class="btn btn-primary" type="submit">Save</button></div>
 </form>
 <form class="card section" method="post" action="/manage/ai/profile">{{ m.csrf_field(csrf_token) }}
   <div class="card-head"><h2>Reader profile</h2>{% if profile %}<span class="faint">v{{ profile.version }} · {{ profile.generated_at|timeago }}{% if profile.edited_by_user %} · edited by you{% endif %}</span>{% endif %}</div>
-  <p class="muted">This is the memory the model reads before ranking and answering. Edit it freely; saving creates a new version.</p>
-  <textarea class="input textarea" name="body_text" rows="12" placeholder="No profile yet. The model writes one after a week of reading, or you can start it here.">{{ profile.body_text if profile else '' }}</textarea>
-  {% if profile and profile.diff_from_previous %}<details><summary class="muted">What changed last time</summary><pre class="diff">{{ profile.diff_from_previous }}</pre></details>{% endif %}
-  <div class="row"><button class="btn btn-primary btn-sm" type="submit">Save new version</button></div>
+  <p class="muted small">This is the memory the model reads before ranking and answering. Edit it freely; saving creates a new version.</p>
+  <div class="field"><label class="sr-only" for="body_text">Profile text</label><textarea class="input textarea" id="body_text" name="body_text" rows="12" placeholder="No profile yet. The model writes one after a week of reading, or you can start it here.">{{ profile.body_text if profile else '' }}</textarea></div>
+  {% if profile and profile.diff_from_previous %}<details><summary class="muted small">What changed last time</summary><pre class="diff">{{ profile.diff_from_previous }}</pre></details>{% endif %}
+  <div class="card-foot"><button class="btn btn-primary" type="submit">Save new version</button></div>
 </form>
 </div>
 <div class="col">
-<section class="card section" id="gateway" hx-get="/manage/ai/gateway" hx-trigger="load" hx-swap="innerHTML">
-  <div class="card-head"><h2>Gateway</h2></div><p class="muted">Checking {{ settings.llm_base_url }}…</p>
+<section class="card section" id="gateway" hx-get="/manage/ai/gateway" hx-trigger="load" hx-swap="innerHTML" aria-busy="true">
+  <div class="card-head"><h2>Gateway</h2><span class="row faint"><span class="spinner"></span> checking</span></div><p class="muted small">{{ settings.llm_base_url }}</p>
 </section>
 <section class="card section">
   <div class="card-head"><h2>Queue</h2></div>
   <div class="stats">
     {% for k in ['queued','running','done','failed'] %}<div class="stat"><div class="stat-n">{{ stats[k] }}</div><div class="eyebrow">{{ k }}</div></div>{% endfor %}
   </div>
-  {% if recent_failed %}<ul class="plain-list">{% for j in recent_failed %}<li><span class="chip">{{ j.kind }}</span> <span class="muted">{{ j.last_error|truncate(90) }}</span> <span class="faint">{{ j.created_at|timeago }}</span></li>{% endfor %}</ul>{% endif %}
+  {% if recent_failed %}<ul class="plain-list small">{% for j in recent_failed %}<li><span class="chip chip-sm">{{ j.kind }}</span> <span class="muted">{{ j.last_error|truncate(90) }}</span> <span class="faint">{{ j.created_at|timeago }}</span></li>{% endfor %}</ul>{% endif %}
 </section>
 </div>
 </div>

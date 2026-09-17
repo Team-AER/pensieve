@@ -1,19 +1,35 @@
 <!doctype html>
-<html lang="en" data-theme="{{ theme|default('auto') }}" data-font="{{ font_size|default('m') }}" data-measure="{{ measure|default('normal') }}">
+<html lang="en"{% if theme and theme != 'auto' %} data-theme="{{ theme }}"{% endif %} data-theme-src="{{ theme|default('auto') }}" data-uid="{{ uid|default('') }}" data-font="{{ font_size|default('m') }}" data-measure="{{ measure|default('normal') }}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#F3F1EA">
+<meta name="description" content="{% block description %}Pensieve: a self-hosted RSS reader with a local model that files, groups and remembers what you read.{% endblock %}">
+<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F3F1EA">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#171614">
+<meta name="csrf-token" content="{{ csrf_token }}">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Pensieve">
 <title>{% block title %}Pensieve{% endblock %}</title>
-<link rel="manifest" href="/static/manifest.webmanifest">
-<link rel="stylesheet" href="/static/fonts.css">
-<link rel="stylesheet" href="/static/app.css">
-<script src="/static/vendor/htmx.min.js" defer></script>
+<script>
+/* Theme bootstrap before paint. The server value (data-theme-src) is the source of truth and is mirrored to
+   localStorage per user; anonymous pages fall back to the last stored theme so login and error pages match. */
+(function(){var h=document.documentElement;try{var uid=h.getAttribute('data-uid')||'',src=h.getAttribute('data-theme-src')||'auto',st=window.localStorage;if(uid){st.setItem('pensieve.theme:'+uid,src);st.setItem('pensieve.theme:',src);}else{var t=st.getItem('pensieve.theme:');if(t&&t!=='auto'){h.setAttribute('data-theme',t);}}}catch(e){}})();
+</script>
+<link rel="manifest" href="{{ static('manifest.webmanifest') }}">
+<link rel="icon" href="{{ static('icon.svg') }}" type="image/svg+xml">
+<link rel="icon" href="{{ static('icon-192.png') }}" type="image/png" sizes="192x192">
+<link rel="apple-touch-icon" href="{{ static('apple-touch-icon.png') }}">
+<link rel="stylesheet" href="{{ static('fonts.css') }}">
+<link rel="stylesheet" href="{{ static('app.css') }}">
+<link rel="stylesheet" href="{{ static('web.css') }}">
+<script src="{{ static('vendor/htmx.min.js') }}" defer></script>
 {% block head %}{% endblock %}
 </head>
 <body hx-boost="true">
+<a class="skip-link" href="#main">Skip to content</a>
 {% block body %}{% endblock %}
-<script src="/static/app.js" defer></script>
+<script src="{{ static('app.js') }}" defer data-sw="{% if user %}/sw.js?v={{ static_version }}{% endif %}"></script>
 {% block scripts %}{% endblock %}
 </body>
 </html>

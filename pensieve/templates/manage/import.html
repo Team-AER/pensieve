@@ -2,21 +2,35 @@
 {% import "_macros.html" as m %}
 {% block mtitle %}Import and export{% endblock %}
 {% block content %}
-<div class="page-head"><h1>Import and export</h1></div>
+<div class="page-head">
+  <div class="page-head-text">
+    <h1>Import and export</h1>
+    <p class="page-summary">Bring subscriptions in as OPML; take everything out as OPML or JSON</p>
+  </div>
+</div>
 <div class="two-col">
 <form class="card section" method="post" action="/manage/import/opml" enctype="multipart/form-data" hx-boost="false">{{ m.csrf_field(csrf_token) }}
   <div class="card-head"><h2>Import OPML</h2></div>
-  <p class="muted">From Google Reader, Feedly, NetNewsWire, Reeder or any other reader. Folders become folders; existing feeds are skipped.</p>
-  {% if result %}<div class="flash flash-ok">Added {{ result.added|length }} feed{{ "s" if result.added|length != 1 }}, skipped {{ result.skipped|length }}, created {{ result.folders_created|length }} folder{{ "s" if result.folders_created|length != 1 }}.</div>{% endif %}
-  <div class="field"><label for="file">OPML file</label><input class="input input-sm" id="file" type="file" name="file" accept=".opml,.xml,text/xml,text/x-opml" required></div>
-  <div class="row"><button class="btn btn-primary btn-sm" type="submit">Import</button></div>
+  <p class="muted small">From Google Reader, Feedly, NetNewsWire, Reeder or any other reader. Folders become folders; existing feeds are skipped.</p>
+  {% if result %}<div class="flash flash-ok" role="status">{{ m.icon('check', 14) }} Added {{ result.added|length }} feed{{ "s" if result.added|length != 1 }}, skipped {{ result.skipped|length }}, created {{ result.folders_created|length }} folder{{ "s" if result.folders_created|length != 1 }}.</div>{% endif %}
+  <div class="field">
+    <label for="file">OPML file</label>
+    <label class="file" data-file-drop>
+      <input id="file" type="file" name="file" accept=".opml,.xml,text/xml,text/x-opml" required aria-describedby="file-hint">
+      {{ m.icon('upload', 20) }}
+      <span><strong>Choose a file</strong> or drop it here</span>
+      <span class="file-name" data-file-name></span>
+    </label>
+    <span class="field-hint" id="file-hint">.opml or .xml, exported from your previous reader.</span>
+  </div>
+  <div class="card-foot"><button class="btn btn-primary" type="submit">{{ m.icon('upload', 14) }} Import</button></div>
 </form>
 <section class="card section">
   <div class="card-head"><h2>Export</h2></div>
-  <p class="muted">Your subscriptions as OPML, or everything (items, read/star state, notes and your reader profile) as JSON.</p>
+  <p class="muted small">Your subscriptions as OPML, or everything (items, read/star state, notes and your reader profile) as JSON.</p>
   <div class="row wrap">
-    <a class="btn btn-sm" href="/manage/export/opml" hx-boost="false" download>{{ m.icon('external', 14) }} Download OPML</a>
-    <a class="btn btn-sm" href="/manage/export/json" hx-boost="false" download>{{ m.icon('external', 14) }} Download JSON</a>
+    <a class="btn" href="/manage/export/opml" hx-boost="false" download>{{ m.icon('download', 14) }} Download OPML</a>
+    <a class="btn" href="/manage/export/json" hx-boost="false" download>{{ m.icon('download', 14) }} Download JSON</a>
   </div>
 </section>
 </div>

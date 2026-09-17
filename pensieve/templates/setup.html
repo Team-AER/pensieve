@@ -1,24 +1,40 @@
 {% extends "base.html" %}
 {% import "_macros.html" as m %}
 {% block title %}Set up · Pensieve{% endblock %}
-{% block head %}<link rel="stylesheet" href="/static/web.css">{% endblock %}
 {% block body %}
-<main class="split">
-  <section class="split-brand">
-    <a class="brand brand-light" href="/">{{ m.icon('layers', 22) }} Pensieve</a>
-    <h1 class="split-headline">Your feeds, sorted, grouped and remembered.</h1>
-    <p class="split-sub">This is a fresh install. Create the first account; it becomes the administrator.</p>
+<div class="split">
+  <section class="split-brand" aria-label="About Pensieve">
+    <svg class="split-art" viewBox="0 0 720 900" preserveAspectRatio="xMidYMid slice" aria-hidden="true">
+      <g fill="none" stroke="currentColor" stroke-width="1.5">
+        <ellipse cx="360" cy="560" rx="420" ry="260"/>
+        <ellipse cx="360" cy="560" rx="340" ry="205" transform="rotate(-8 360 560)"/>
+        <ellipse cx="360" cy="560" rx="260" ry="150" transform="rotate(-16 360 560)"/>
+        <ellipse cx="360" cy="560" rx="180" ry="95" transform="rotate(-24 360 560)"/>
+        <ellipse cx="360" cy="560" rx="100" ry="45" transform="rotate(-32 360 560)"/>
+      </g>
+    </svg>
+    <a class="brand brand-light" href="/">{{ m.icon('mark', 36) }} Pensieve</a>
+    <div class="split-copy">
+      <p class="split-headline" role="heading" aria-level="2">Your feeds, sorted, grouped and remembered.</p>
+      <p class="split-sub">This is a fresh install. Create the first account; it becomes the administrator.</p>
+    </div>
+    <ul class="split-points">
+      <li>Self-hosted</li><li>Reeder compatible</li><li>LAN-only inference</li>
+    </ul>
   </section>
-  <section class="split-form">
+  <main class="split-form" id="main">
     <form method="post" action="/setup" class="auth-form" hx-boost="false">
-      <h2>Create your account</h2>
-      {% if error %}<div class="flash flash-error" role="alert">{{ error }}</div>{% endif %}
+      <div class="auth-intro">
+        <h1>Create your account</h1>
+        <p class="muted">The first account administers this Pensieve.</p>
+      </div>
+      {% if error %}<div class="flash flash-error" role="alert">{{ m.icon('warning', 14) }} {{ error }}</div>{% endif %}
       <div class="field"><label for="display_name">Name</label><input class="input" id="display_name" name="display_name" value="{{ display_name }}" autocomplete="name"></div>
       <div class="field"><label for="email">Email</label><input class="input" id="email" name="email" type="email" required value="{{ email }}" autocomplete="username"></div>
-      <div class="field"><label for="password">Password</label><input class="input" id="password" name="password" type="password" required minlength="8" autocomplete="new-password"></div>
+      <div class="field"><label for="password">Password</label><input class="input" id="password" name="password" type="password" required minlength="8" autocomplete="new-password"><span class="field-hint">At least 8 characters.</span></div>
       <div class="field"><label for="password_confirm">Confirm password</label><input class="input" id="password_confirm" name="password_confirm" type="password" required minlength="8" autocomplete="new-password"></div>
       <button class="btn btn-primary btn-lg" type="submit">Create account</button>
     </form>
-  </section>
-</main>
+  </main>
+</div>
 {% endblock %}

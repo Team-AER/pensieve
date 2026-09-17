@@ -1,12 +1,12 @@
 {% import "_macros.html" as m %}
 {% for name, conf in ai_tags %}
 <span class="chip chip-ai" title="AI tag, confidence {{ (conf * 100)|round|int }}%">{{ m.icon('sparkle', 12) }}{{ name }}<span class="conf">{{ (conf * 100)|round|int }}%</span>
-  <form hx-post="/items/{{ item.id }}/tag" hx-target="#tags-{{ item.id }}" hx-swap="innerHTML"><input type="hidden" name="name" value="{{ name }}"><input type="hidden" name="op" value="remove"><button type="submit" class="chip-x" aria-label="Remove tag {{ name }}">×</button></form>
+  <form hx-post="/items/{{ item.id }}/tag" hx-target="#tags-{{ item.id }}" hx-swap="innerHTML"><input type="hidden" name="name" value="{{ name }}"><input type="hidden" name="op" value="remove"><button type="submit" class="chip-remove" aria-label="Remove tag {{ name }}">{{ m.icon('close', 12) }}</button></form>
 </span>
 {% endfor %}
 {% for name in user_tags %}
 <span class="chip">{{ m.icon('tag', 12) }}{{ name }}
-  <form hx-post="/items/{{ item.id }}/tag" hx-target="#tags-{{ item.id }}" hx-swap="innerHTML"><input type="hidden" name="name" value="{{ name }}"><input type="hidden" name="op" value="remove"><button type="submit" class="chip-x" aria-label="Remove tag {{ name }}">×</button></form>
+  <form hx-post="/items/{{ item.id }}/tag" hx-target="#tags-{{ item.id }}" hx-swap="innerHTML"><input type="hidden" name="name" value="{{ name }}"><input type="hidden" name="op" value="remove"><button type="submit" class="chip-remove" aria-label="Remove tag {{ name }}">{{ m.icon('close', 12) }}</button></form>
 </span>
 {% endfor %}
 <form class="tag-add" hx-post="/items/{{ item.id }}/tag" hx-target="#tags-{{ item.id }}" hx-swap="innerHTML">
