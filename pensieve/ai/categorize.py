@@ -6,6 +6,7 @@ import logging
 import uuid
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pensieve import models
@@ -79,14 +80,32 @@ async def ensure_vocabulary(session: AsyncSession, user: models.User) -> list[mo
     if any(t.kind == "ai" for t in rows):
         return [t for t in rows if t.kind == "ai"]
     existing = {t.name for t in rows}
-    seeded = [
-        models.Tag(user_id=user.id, name=name, kind="ai", description=desc, position=i)
+    values = [
+        {
+            "id": uuid.uuid4(),
+            "user_id": user.id,
+            "name": name,
+            "kind": "ai",
+            "description": desc,
+            "position": i,
+        }
         for i, (name, desc) in enumerate(DEFAULT_TAGS)
         if name not in existing
     ]
-    session.add_all(seeded)
-    await session.flush()
-    return seeded
+    if values:
+        # Concurrent jobs for the same user may seed at once: ON CONFLICT makes this a no-op race.
+        await session.execute(
+            pg_insert(models.Tag).values(values).on_conflict_do_nothing(constraint="uq_tag_user_name")
+        )
+    return list(
+        (
+            await session.scalars(
+                select(models.Tag)
+                .where(models.Tag.user_id == user.id, models.Tag.kind == "ai")
+                .order_by(models.Tag.position, models.Tag.name)
+            )
+        ).all()
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -20,6 +20,7 @@ TEST_DB_URL = os.environ.get(
 )
 os.environ["PENSIEVE_DATABASE_URL"] = TEST_DB_URL
 os.environ.setdefault("PENSIEVE_SECRET_KEY", "test-secret-key-not-for-prod")
+os.environ["PENSIEVE_DEBUG"] = "false"  # a developer .env with debug=true must not relax the SSRF guard in tests
 os.environ.setdefault("PENSIEVE_REDIS_URL", "redis://localhost:6379/9")
 
 from pensieve import models

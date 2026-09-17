@@ -65,7 +65,7 @@ async def test_tag_items_writes_item_ai(session, user, gateway):
     assert r0.model == settings.llm_fast_model and r0.prompt_version == prompts.PROMPT_VERSION
     assert by_item[items[1].id].tags == ["security"]
     body = gateway.chat_calls[0]
-    assert body["model"] == settings.llm_fast_model and "reasoning_effort" not in body
+    assert body["model"] == settings.llm_fast_model and body["reasoning_effort"] == "none"
     assert gateway.chat_requests[0].headers["X-Workflow"] == "tag_items"
     assert "Postgres" in body["messages"][1]["content"]
 
