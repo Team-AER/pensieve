@@ -60,10 +60,11 @@ def test_function_registry_matches_queue_contract():
     assert set(names) == {"ai_dispatch_daily", "ai_dispatch_weekly"}
     assert names["ai_dispatch_weekly"].weekday == 6 and names["ai_dispatch_weekly"].hour == 8
     assert names["ai_dispatch_daily"].minute == {0, 15, 30, 45} and names["ai_dispatch_daily"].hour is None
-    from pensieve.worker import WorkerSettings
+    from pensieve.worker import AIWorkerSettings, WorkerSettings
 
     assert WorkerSettings.timezone == ZoneInfo(settings.timezone)
-    assert WorkerSettings.job_timeout == jobs.JOB_TIMEOUT_S
+    assert AIWorkerSettings.job_timeout == jobs.JOB_TIMEOUT_S
+    assert AIWorkerSettings.queue_name == "pensieve:ai" and WorkerSettings.queue_name == "arq:queue"
 
 
 async def test_process_new_items_runs_all_steps_and_mirrors_done(session, user, gateway):

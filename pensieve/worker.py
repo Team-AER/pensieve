@@ -1,6 +1,10 @@
-"""arq worker. Job functions live in their packages; this file only assembles them.
+"""arq workers. Job functions live in their packages; this file only assembles them.
 
-Run: `arq pensieve.worker.WorkerSettings`
+Two processes, two queues:
+  `arq pensieve.worker.WorkerSettings`    fetch worker  (feed polling, reader mode, retention; default queue)
+  `arq pensieve.worker.AIWorkerSettings`  AI worker     (tagging, clustering, digests; queue ``pensieve:ai``)
+A single pool used to run both, and four half-hour tagging jobs would hold every slot while the
+per-minute fetch cron waited behind them for over an hour.
 """
 
 from __future__ import annotations
@@ -10,6 +14,7 @@ from zoneinfo import ZoneInfo
 
 from arq.connections import RedisSettings
 
+from pensieve import queue
 from pensieve.ai.jobs import CRON_JOBS as AI_CRON_JOBS
 from pensieve.ai.jobs import FUNCTIONS as AI_FUNCTIONS
 from pensieve.ai.jobs import JOB_TIMEOUT_S, reap_stale_jobs
@@ -32,6 +37,10 @@ def _timezone() -> ZoneInfo:
 
 async def startup(ctx: dict) -> None:
     get_engine()
+
+
+async def ai_startup(ctx: dict) -> None:
+    get_engine()
     try:
         # jobs that were running when the previous worker died never reach their own status update
         await reap_stale_jobs(older_than_s=JOB_TIMEOUT_S)
@@ -44,12 +53,30 @@ async def shutdown(ctx: dict) -> None:
 
 
 class WorkerSettings:
-    functions = [*FETCH_FUNCTIONS, *AI_FUNCTIONS]
-    cron_jobs = [*FETCH_CRON_JOBS, *AI_CRON_JOBS]
+    """Fetch worker: many short network jobs on arq's default queue."""
+
+    queue_name = queue.FETCH_QUEUE
+    functions = [*FETCH_FUNCTIONS]
+    cron_jobs = [*FETCH_CRON_JOBS]
     on_startup = startup
     on_shutdown = shutdown
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
     timezone = _timezone()
-    max_jobs = 4  # AI jobs serialise on one GPU anyway; fewer slots means fewer half-done jobs on restart
+    max_jobs = 8
+    job_timeout = 300
+    keep_result = 60
+
+
+class AIWorkerSettings:
+    """AI worker: few long gateway-bound jobs; concurrency per model is capped inside ``LLMClient``."""
+
+    queue_name = queue.AI_QUEUE
+    functions = [*AI_FUNCTIONS]
+    cron_jobs = [*AI_CRON_JOBS]
+    on_startup = ai_startup
+    on_shutdown = shutdown
+    redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
+    timezone = _timezone()
+    max_jobs = 4
     job_timeout = JOB_TIMEOUT_S
     keep_result = 60

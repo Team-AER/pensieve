@@ -20,9 +20,18 @@ async def get_pool() -> ArqRedis:
     return _pool
 
 
+# Two queues so a burst of long AI jobs can never hold every worker slot and starve feed polling.
+FETCH_QUEUE = "arq:queue"  # arq's default; fetch/reader-mode/prune jobs and their crons
+AI_QUEUE = "pensieve:ai"  # everything named ai_*; served by pensieve.worker.AIWorkerSettings
+
+
+def queue_for(function: str) -> str:
+    return AI_QUEUE if function.startswith("ai_") else FETCH_QUEUE
+
+
 async def enqueue(function: str, *args: Any, _job_id: str | None = None, **kwargs: Any) -> None:
     pool = await get_pool()
-    await pool.enqueue_job(function, *args, _job_id=_job_id, **kwargs)
+    await pool.enqueue_job(function, *args, _job_id=_job_id, _queue_name=queue_for(function), **kwargs)
 
 
 # Job names (contract between packages). Implementations live in fetch/jobs.py and ai/jobs.py.

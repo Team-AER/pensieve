@@ -30,7 +30,7 @@ make lint          # ruff
 | `pensieve/syncapi/` | syncapi | Google Reader API + Fever API under `/api/...` and `/reader/api/0/...`, token auth |
 | `pensieve/ai/` | ai | Gateway client, embeddings, tagging, clustering, profile/memory, digests, `jobs.py` |
 | `tests/test_<package>_*.py` | each package | Use your own test DB (below) |
-| `alembic/versions/` | foundation | Only the initial migration. Need a column? Say so in your report. |
+| `alembic/versions/` | foundation | One revision per change set (`842eb4e75246` initial, `b3f1c9a7d2e4` hardening). Need a column? Add it to `models.py` and a new revision in the same change, or say so in your report. |
 
 ## Cross-package interfaces (implement exactly these signatures; callers import lazily inside functions)
 
@@ -73,4 +73,6 @@ web package exposes nothing; it consumes the above. syncapi exposes nothing.
 - SSRF guard on every outbound fetch: refuse non-http(s), loopback, link-local, and RFC1918 targets unless `settings.debug`.
 - Tests: `PENSIEVE_TEST_DATABASE_URL=postgresql+asyncpg://pensieve:pensieve@localhost:5432/pensieve_test_<package> .venv/bin/pytest tests/test_<package>_*.py`. Never hit the network in tests (use respx for httpx).
 - Lint clean: `.venv/bin/ruff check pensieve tests`.
+- Gateway: send `reasoning_effort: none` (never `off`) when a job must not think; LiteLLM validates the value before the model. Keep `LLMClient` per-model concurrency (`llm_fast_concurrency`/`llm_long_concurrency`); the deployment points both routes at the vLLM model because the Ollama 27B on the 16 GB card takes minutes per request.
+- Static assets are versioned through `templating.static()`; bump nothing by hand. Every feed fetch goes through `fetch.http.get` (SSRF guard, DNS pinning, size/time caps).
 - Design: use the CSS tokens and classes in `static/app.css`; teal (`--ai`) marks anything AI-generated; no emoji icons, inline stroke SVG only; touch targets ≥ 44px on mobile.

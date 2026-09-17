@@ -7,5 +7,6 @@ the engineering contract and the PRD link.
 ```bash
 cp .env.example .env
 make dev-db && make migrate && make dev   # http://localhost:8000
-make worker                                # in a second shell
+make worker                                # fetch worker, in a second shell
+make worker-ai                             # AI worker, in a third shell
 ```
