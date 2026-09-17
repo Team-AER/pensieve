@@ -285,9 +285,15 @@ async def _read_capped(response: httpx.Response, max_bytes: int) -> httpx.Respon
             chunks.append(chunk)
     finally:
         await response.aclose()
+    # The chunks above are already decoded, so the rebuilt response must not carry the transfer headers:
+    # a copied ``content-encoding: gzip`` would make httpx inflate the plain bytes a second time.
+    headers = httpx.Headers(response.headers)
+    for name in ("content-encoding", "content-length", "transfer-encoding"):
+        if name in headers:
+            del headers[name]
     return httpx.Response(
         status_code=response.status_code,
-        headers=response.headers,
+        headers=headers,
         content=b"".join(chunks),
         request=response.request,
         history=list(response.history),

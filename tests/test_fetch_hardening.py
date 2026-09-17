@@ -441,3 +441,19 @@ async def test_opml_import_enqueues_filing_for_unfiled_feeds(session, user, fake
     result = await import_opml(session, user, opml)
     loose = next(f for f in result.added if f.folder_id is None)
     assert fake_queue == [(queue.AI_FILE_FEED, (str(loose.id),), queue.job_id_for(queue.AI_FILE_FEED, loose.id))]
+
+
+# ---------------------------------------------------------------------------------------------- gzip
+
+
+async def test_gzip_body_is_decoded_exactly_once(no_dns):
+    """The capped reader returns decoded bytes; copying content-encoding onto the rebuilt response would
+    make httpx inflate them a second time ("Error -3 ... incorrect header check" on every gzip feed)."""
+    import gzip
+
+    with _router() as router:
+        router.get(FEED_URL).respond(200, content=gzip.compress(RSS), headers={"Content-Encoding": "gzip"})
+        resp = await fetch_http.get(FEED_URL)
+    assert resp.status_code == 200
+    assert resp.content == RSS
+    assert "content-encoding" not in resp.headers
