@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     llm_fast_reasoning_effort: str | None = "none"  # Qwen routes think by default; short structured jobs must not
     llm_embedding_model: str = "nomic-embed-text"
     llm_embedding_dims: int = 768  # fixed by the pgvector column; changing it needs a migration
-    llm_timeout_s: float = 120.0
+    llm_timeout_s: float = 240.0  # per request; a 27B on Ollama needs well over a minute for a 5-item batch
     llm_max_input_tokens_short: int = 8_000
     llm_max_input_tokens_long: int = 32_000
 
@@ -60,7 +60,13 @@ class Settings(BaseSettings):
     timezone: str = "Asia/Kolkata"
 
     # AI package (reasoning, output limits, embeddings probe, title-Jaccard clustering)
-    llm_long_reasoning_off_value: str = "off"  # Flash-Next spells "no thinking" as `off`; Ollama Qwen as `none`
+    # The LiteLLM proxy validates reasoning_effort against none/minimal/low/medium/high/xhigh/max before it
+    # reaches the model, so "off" (Flash-Next's own spelling) is rejected with a 400. `none` passes through.
+    llm_long_reasoning_off_value: str = "none"
+    # One GPU per route: the Ollama 27B serialises requests, so more than one in flight only stacks latency
+    # until every call times out. The vLLM route batches, so it can take a few.
+    llm_fast_concurrency: int = 1
+    llm_long_concurrency: int = 4
     llm_max_output_tokens: int = 8192  # ceiling when a truncated (finish_reason=length) JSON call is retried
     llm_embeddings_reprobe_min: int = 30  # after a 400/404 on /embeddings, do not retry for this many minutes
     llm_digest_reasoning: str = "low"  # reasoning_effort for the digest / weekly review / profile (long model)

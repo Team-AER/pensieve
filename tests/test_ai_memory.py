@@ -191,7 +191,7 @@ async def test_ask_reading_fulltext_only_when_embeddings_unavailable(session, us
     assert len(answer.citations) == 1
     # no history at all: the whole subscription pool is searched and the answer says so
     assert answer.from_history is False and answer.text.startswith(memory.NO_HISTORY_PREAMBLE)
-    assert gateway.chat_calls[0]["reasoning_effort"] == "off"  # ask is extraction: reasoning off on Flash-Next
+    assert gateway.chat_calls[0]["reasoning_effort"] == "none"  # ask is extraction: reasoning off
     assert len(gateway.embed_calls) == 1
 
 

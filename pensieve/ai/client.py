@@ -6,6 +6,7 @@ cost per feature. Node addresses are never hardcoded: everything comes from ``se
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import time
@@ -48,6 +49,7 @@ class Usage:
 
 
 _EMBED_PROBE: dict[str, Any] = {"available": None, "checked_at": 0.0}
+_SLOTS: dict[str, asyncio.Semaphore] = {}  # per-model in-flight limits, shared by every client in the process
 """Process-wide embeddings availability: None = unknown, False after a 400/404 (re-probed after a cool-down).
 
 Shared by every ``LLMClient`` so a web request and a worker job in the same process do not each re-pay the
@@ -248,10 +250,25 @@ class LLMClient:
         body.update(extra)
         return body
 
+    def _slot(self, model: str | None) -> asyncio.Semaphore:
+        """Process-wide in-flight limit per model, so four worker jobs do not queue behind one GPU and all time out."""
+        s = self.settings
+        if model == s.llm_fast_model:
+            key, limit = "fast", s.llm_fast_concurrency
+        elif model == s.llm_long_model:
+            key, limit = "long", s.llm_long_concurrency
+        else:
+            key, limit = "other", 4
+        sem = _SLOTS.get(key)
+        if sem is None:
+            sem = _SLOTS[key] = asyncio.Semaphore(max(1, limit))
+        return sem
+
     async def _post(self, path: str, body: dict, workflow: str) -> dict:
         url = f"{self.settings.llm_base_url.rstrip('/')}{path}"
         try:
-            resp = await self.http.post(url, json=body, headers=self._headers(workflow))
+            async with self._slot(body.get("model")):
+                resp = await self.http.post(url, json=body, headers=self._headers(workflow))
         except httpx.HTTPError as exc:
             raise LLMError(f"gateway request failed: {exc!r}") from exc
         if resp.status_code >= 400:

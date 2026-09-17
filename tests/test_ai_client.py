@@ -61,7 +61,7 @@ async def test_reasoning_off_is_spelled_per_model(gateway):
     await client.chat_json(settings.llm_fast_model, "s", "u", SCHEMA, workflow="x", reasoning="low")
     efforts = [c["reasoning_effort"] for c in gateway.chat_calls]
     assert efforts == [settings.llm_long_reasoning_off_value, settings.llm_fast_reasoning_effort, "low"]
-    assert efforts[:2] == ["off", "none"]
+    assert efforts[:2] == ["none", "none"]  # both routes: LiteLLM validates against none|low|medium|high
     assert client.reasoning_value("some-other-model", None) is None
     await client.aclose()
 
