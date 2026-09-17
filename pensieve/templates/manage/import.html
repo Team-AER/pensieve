@@ -7,7 +7,7 @@
 <form class="card section" method="post" action="/manage/import/opml" enctype="multipart/form-data" hx-boost="false">{{ m.csrf_field(csrf_token) }}
   <div class="card-head"><h2>Import OPML</h2></div>
   <p class="muted">From Google Reader, Feedly, NetNewsWire, Reeder or any other reader. Folders become folders; existing feeds are skipped.</p>
-  {% if result %}<div class="flash flash-ok">Added {{ result.added }} feed{{ 's' if result.added != 1 }}, skipped {{ result.skipped }}, created {{ result.folders_created }} folder{{ 's' if result.folders_created != 1 }}.</div>{% endif %}
+  {% if result %}<div class="flash flash-ok">Added {{ result.added|length }} feed{{ "s" if result.added|length != 1 }}, skipped {{ result.skipped|length }}, created {{ result.folders_created|length }} folder{{ "s" if result.folders_created|length != 1 }}.</div>{% endif %}
   <div class="field"><label for="file">OPML file</label><input class="input input-sm" id="file" type="file" name="file" accept=".opml,.xml,text/xml,text/x-opml" required></div>
   <div class="row"><button class="btn btn-primary btn-sm" type="submit">Import</button></div>
 </form>
