@@ -184,6 +184,13 @@ async def ai_process_new_items(ctx: dict, feed_id: str, item_ids: list[str]) -> 
         if not items:
             return "no items"
         notes: list[str] = []
+        cap = get_settings().ai_max_items_per_job
+        if len(items) > cap:
+            items.sort(key=lambda i: i.published_at, reverse=True)
+            notes.append(
+                f"capped to newest {cap} of {len(items)}; run `python -m pensieve.ai backfill` for the rest"
+            )
+            items = items[:cap]
         errors: list[LLMError] = []
         try:
             if await embeddings.embed_items(session, items, client) is None:

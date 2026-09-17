@@ -29,6 +29,6 @@ class WorkerSettings:
     on_startup = startup
     on_shutdown = shutdown
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
-    max_jobs = 8
-    job_timeout = 600
+    max_jobs = 4  # AI jobs serialise on one GPU anyway; fewer slots means fewer half-done jobs on restart
+    job_timeout = 1800
     keep_result = 60

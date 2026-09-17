@@ -233,9 +233,9 @@ async def test_account_profile_and_password(client, session, user):
 
 async def test_opml_import_and_export(client, session, user, monkeypatch):
     class ImportResult:
-        added = 3
-        skipped = 1
-        folders_created = 2
+        added = [object(), object(), object()]
+        skipped = ["https://example.com/dup"]
+        folders_created = [object(), object()]
 
     received = []
 

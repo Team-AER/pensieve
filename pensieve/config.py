@@ -42,6 +42,7 @@ class Settings(BaseSettings):
 
     # AI behaviour
     ai_enabled: bool = True
+    ai_max_items_per_job: int = 40  # newest N per feed job; a first fetch of an archive feed must not flood the gateway
     cluster_window_hours: int = 72
     cluster_similarity_threshold: float = 0.82
     digest_hour_local: int = 7

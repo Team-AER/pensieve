@@ -1,4 +1,4 @@
-"""Manual runs: ``python -m pensieve.ai digest <email> | profile <email> | tag <item_uuid> | health``."""
+"""Manual runs: ``python -m pensieve.ai digest <email> | profile <email> | tag <item_uuid> | backfill <email> | health``."""
 
 from __future__ import annotations
 
@@ -14,6 +14,7 @@ from sqlalchemy import select
 from pensieve import models
 from pensieve.ai import categorize, insights, memory
 from pensieve.ai.client import LLMClient
+from pensieve.config import get_settings
 from pensieve.db import dispose_engine, session_scope
 
 
@@ -82,6 +83,43 @@ async def cmd_tag(args: argparse.Namespace) -> int:
     return 0
 
 
+async def cmd_backfill(args: argparse.Namespace) -> int:
+    """Enqueue process jobs for every item of the user that has no item_ai row yet, newest first, in capped chunks."""
+    from pensieve import queue
+
+    cap = get_settings().ai_max_items_per_job
+    async with session_scope() as session:
+        user = await _user_by_email(session, args.email)
+        feeds = list((await session.scalars(select(models.Feed).where(models.Feed.user_id == user.id))).all())
+        total = 0
+        for feed in feeds:
+            untagged = (
+                select(models.Item.id)
+                .where(
+                    models.Item.feed_id == feed.id,
+                    ~select(models.ItemAI.item_id)
+                    .where(models.ItemAI.item_id == models.Item.id, models.ItemAI.user_id == user.id)
+                    .exists(),
+                )
+                .order_by(models.Item.published_at.desc())
+            )
+            if args.limit:
+                untagged = untagged.limit(args.limit)
+            ids = [str(i) for i in (await session.scalars(untagged)).all()]
+            for n, start in enumerate(range(0, len(ids), cap)):
+                chunk = ids[start : start + cap]
+                await queue.enqueue(
+                    queue.AI_PROCESS_NEW_ITEMS,
+                    str(feed.id),
+                    chunk,
+                    _job_id=f"{queue.job_id_for('backfill', feed.id)}:{n}",
+                )
+                total += len(chunk)
+            print(f"{feed.title}: {len(ids)} untagged -> {(len(ids) + cap - 1) // cap} job(s)")
+        print(f"enqueued {total} items in chunks of {cap}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m pensieve.ai")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -95,6 +133,10 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("tag", help="tag one item")
     p.add_argument("item_uuid")
     p.set_defaults(fn=cmd_tag)
+    p = sub.add_parser("backfill", help="enqueue AI processing for items that were never tagged")
+    p.add_argument("email")
+    p.add_argument("--limit", type=int, default=0, help="newest N per feed (default: all untagged)")
+    p.set_defaults(fn=cmd_backfill)
     p = sub.add_parser("health", help="gateway health")
     p.set_defaults(fn=cmd_health)
     args = parser.parse_args(argv)
