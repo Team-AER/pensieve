@@ -14,7 +14,7 @@
         <summary class="btn btn-icon btn-sm" aria-label="List actions: sort, mark as read, refresh" aria-haspopup="menu" title="Mark all as read, sort, refresh">{{ m.icon('more') }}</summary>
         <div class="menu-body" role="menu" aria-label="List actions">
           <div class="menu-label">Mark as read</div>
-          <form method="post" action="{{ view.path }}/mark-read" hx-post="{{ view.path }}/mark-read?{{ opts.query }}" hx-target="#list" hx-swap="innerHTML">
+          <form method="post" action="{{ view.path }}/mark-read" hx-post="{{ view.path }}/mark-read?{{ opts.query }}" hx-target="#list" hx-swap="innerHTML" hx-confirm="Everything you pick in {{ view.title }} will be marked read. You can undo it right after." data-confirm-title="Mark as read?" data-confirm-label="Mark read">
             {{ m.csrf_field(csrf_token) }}
             <button class="menu-item" role="menuitem" type="submit" name="older_than" value="">{{ m.icon('check-circle', 14) }} Everything in {{ view.title }}</button>
             <button class="menu-item" role="menuitem" type="submit" name="older_than" value="1d">{{ m.icon('check-circle', 14) }} Older than a day</button>
@@ -42,7 +42,7 @@
         <a class="menu-item{% if opts.sort == 'newest' %} on{% endif %}" role="menuitemradio" aria-checked="{{ 'true' if opts.sort == 'newest' else 'false' }}" href="{{ view.path }}?grouped={{ 1 if opts.grouped else 0 }}&sort=newest">Newest first</a>
         <a class="menu-item{% if opts.sort == 'oldest' %} on{% endif %}" role="menuitemradio" aria-checked="{{ 'true' if opts.sort == 'oldest' else 'false' }}" href="{{ view.path }}?grouped={{ 1 if opts.grouped else 0 }}&sort=oldest">Oldest first</a>
         <div class="menu-sep"></div>
-        <form method="post" action="{{ view.path }}/mark-read" hx-post="{{ view.path }}/mark-read?{{ opts.query }}" hx-target="#list" hx-swap="innerHTML">
+        <form method="post" action="{{ view.path }}/mark-read" hx-post="{{ view.path }}/mark-read?{{ opts.query }}" hx-target="#list" hx-swap="innerHTML" hx-confirm="Everything you pick in {{ view.title }} will be marked read. You can undo it right after." data-confirm-title="Mark as read?" data-confirm-label="Mark read">
           {{ m.csrf_field(csrf_token) }}
           <button class="menu-item" role="menuitem" type="submit" name="older_than" value="">{{ m.icon('check-circle', 14) }} Mark everything read</button>
           <button class="menu-item" role="menuitem" type="submit" name="older_than" value="1d">{{ m.icon('check-circle', 14) }} Mark older than a day</button>

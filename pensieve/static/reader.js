@@ -51,8 +51,18 @@
       if (el) { el.classList.toggle('hidden'); const f = el.querySelector('textarea, input'); if (f && !el.classList.contains('hidden')) f.focus(); }
     }
     // Close any open <details class="menu"> when clicking outside it.
-    $$('details.menu[open]').forEach((d) => { if (!d.contains(e.target)) d.removeAttribute('open'); });
+    $$('details.menu[open]').forEach((d) => { if (!d.contains(e.target) || e.target === d) d.removeAttribute('open'); });
   });
+  const THEME_COLORS = { light: '#F3F1EA', sepia: '#EFE6D2', dark: '#171614' };
+  function setThemeColor(theme) {
+    const metas = $$('meta[name="theme-color"]');
+    if (!metas.length) return;
+    if (THEME_COLORS[theme]) { metas.forEach((m, i) => { if (i === 0) { m.removeAttribute('media'); m.content = THEME_COLORS[theme]; } else m.remove(); }); return; }
+    // Auto: one meta per scheme, so the OS switch is honoured without a reload.
+    const first = metas[0]; first.setAttribute('media', '(prefers-color-scheme: light)'); first.content = THEME_COLORS.light;
+    if (metas.length < 2) { const m = document.createElement('meta'); m.name = 'theme-color'; m.setAttribute('media', '(prefers-color-scheme: dark)'); m.content = THEME_COLORS.dark; first.after(m); }
+    else { metas[1].setAttribute('media', '(prefers-color-scheme: dark)'); metas[1].content = THEME_COLORS.dark; }
+  }
   document.addEventListener('change', (e) => {
     const t = e.target;
     if (t.matches('[data-toggle]')) { const el = $(t.dataset.toggle); if (el) el.classList.toggle('hidden', !t.checked); if (el && t.checked) { const f = el.querySelector('textarea'); if (f) f.focus(); } }
@@ -60,6 +70,7 @@
       const html = document.documentElement;
       if (t.value === 'auto') html.removeAttribute('data-theme'); else html.dataset.theme = t.value;
       html.setAttribute('data-theme-src', t.value);
+      setThemeColor(t.value);
       try { const uid = html.dataset.uid || ''; localStorage.setItem('pensieve.theme:' + uid, t.value); localStorage.setItem('pensieve.theme:', t.value); } catch (_) {}
     }
     if (t.matches('[data-font-select]')) document.documentElement.dataset.font = t.value;
@@ -261,11 +272,18 @@
     const cur = selected() || all[0];
     all.forEach((r) => { const on = r === cur; r.tabIndex = on ? 0 : -1; r.setAttribute('aria-selected', r.classList.contains('selected') ? 'true' : 'false'); });
   }
+  function updatePos() {
+    const el = $('#article-pos'); if (!el) return;
+    const all = rows(); const cur = selected(); const art = currentArticle();
+    if (!art || !cur || !all.length || art.dataset.id !== cur.dataset.id) { el.textContent = ''; return; }
+    el.textContent = (all.indexOf(cur) + 1) + ' of ' + all.length + ($('#list-body .sentinel') ? '+' : '');
+  }
   function select(row, opts) {
     opts = opts || {};
     rows().forEach((r) => { r.classList.remove('selected'); r.setAttribute('aria-selected', 'false'); r.tabIndex = -1; });
-    if (!row) { syncTabindex(); return; }
+    if (!row) { syncTabindex(); updatePos(); return; }
     row.classList.add('selected'); row.setAttribute('aria-selected', 'true'); row.tabIndex = 0;
+    updatePos();
     row.scrollIntoView({ block: 'nearest' });
     if (opts.focus && document.activeElement && document.activeElement.classList && document.activeElement.classList.contains('item')) row.focus({ preventScroll: true });
     if (opts.open) open(row);
@@ -378,9 +396,10 @@
       relocateToolbar();
       const art = currentArticle();
       if (art) { const row = document.getElementById('item-' + art.dataset.id); if (row && !row.classList.contains('selected')) select(row); }
+      updatePos();
       if (isMobile()) setPane('article');
     }
-    if (t.id === 'list' || t.id === 'list-body' || t.closest('#list-body')) syncTabindex();
+    if (t.id === 'list' || t.id === 'list-body' || t.closest('#list-body')) { syncTabindex(); updatePos(); }
   });
   document.body.addEventListener('htmx:afterSettle', () => relocateToolbar());
   document.body.addEventListener('htmx:responseError', (e) => {
@@ -556,6 +575,10 @@
     $$('details.menu > summary').forEach((s) => { if (!s.hasAttribute('aria-haspopup')) s.setAttribute('aria-haspopup', 'menu'); s.setAttribute('aria-expanded', s.parentElement.open ? 'true' : 'false'); });
     const art = currentArticle();
     if (art) { const row = document.getElementById('item-' + art.dataset.id); if (row) select(row); }
+    updatePos();
+    // Manage section chips scroll horizontally on phones: bring the active one into view.
+    const mnav = $('.manage-nav'); const active = mnav && mnav.querySelector('.nav-item.active');
+    if (mnav && active && mnav.scrollWidth > mnav.clientWidth) mnav.scrollLeft = Math.max(0, active.offsetLeft - (mnav.clientWidth - active.offsetWidth) / 2);
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 })();
@@ -583,14 +606,17 @@
   };
   const nameOf = (el) => { const n = el.querySelector('.ellipsis, .btn-label'); return (n ? n.textContent : el.textContent).trim(); };
 
-  let menu = null, opener = null;
+  const phone = () => window.matchMedia('(max-width: 899.98px)').matches;
+  let menu = null, opener = null, backdrop = null, openedByTouch = 0;
   function close() {
     if (menu) { menu.remove(); menu = null; }
-    if (opener && opener.focus) { try { opener.focus({ preventScroll: true }); } catch (_) {} }
+    if (backdrop) { backdrop.remove(); backdrop = null; }
+    if (opener && opener.focus && !phone()) { try { opener.focus({ preventScroll: true }); } catch (_) {} }
     opener = null;
   }
   function build(items, x, y) {
     if (menu) { menu.remove(); menu = null; }
+    if (backdrop) { backdrop.remove(); backdrop = null; }
     menu = document.createElement('div');
     menu.className = 'menu-body ctxmenu'; menu.setAttribute('role', 'menu'); menu.tabIndex = -1;
     items.forEach((it) => {
@@ -603,6 +629,16 @@
       b.addEventListener('click', (e) => { e.preventDefault(); const run = it.run; close(); run(); });
       menu.appendChild(b);
     });
+    if (phone()) {
+      // Phones: a full-width bottom sheet with a backdrop; the touch point is irrelevant.
+      menu.classList.add('sheet');
+      backdrop = document.createElement('div'); backdrop.className = 'ctx-backdrop'; backdrop.setAttribute('aria-hidden', 'true');
+      backdrop.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); close(); });
+      document.body.appendChild(backdrop);
+      document.body.appendChild(menu);
+      menu.focus({ preventScroll: true });
+      return;
+    }
     document.body.appendChild(menu);
     const r = menu.getBoundingClientRect();
     menu.style.left = Math.max(4, Math.min(x, window.innerWidth - r.width - 4)) + 'px';
@@ -619,8 +655,8 @@
     else if (e.key === 'End') { e.preventDefault(); items[items.length - 1].focus(); }
     else if (e.key === 'Tab') close();
   }, true);
-  document.addEventListener('mousedown', (e) => { if (menu && !menu.contains(e.target)) close(); }, true);
-  window.addEventListener('scroll', () => close(), true);
+  document.addEventListener('mousedown', (e) => { if (menu && !menu.contains(e.target) && !(backdrop && backdrop.contains(e.target))) close(); }, true);
+  window.addEventListener('scroll', () => { if (!backdrop) close(); }, true);
   window.addEventListener('resize', () => close());
   window.addEventListener('blur', () => close());
 
@@ -727,26 +763,73 @@
     return items;
   }
 
-  document.addEventListener('contextmenu', (e) => {
-    if (e.shiftKey || e.ctrlKey) return;
-    const t = e.target; if (!t || !t.closest) return;
-    if (t.closest('input, textarea, select, [contenteditable="true"], a[href^="http"]:not(.nav-item):not(.plain), .prose')) return;
-    const summary = t.closest('details.menu > summary');
-    if (summary) { e.preventDefault(); summary.parentElement.open = true; return; }
+  // What a right-click or a long-press on `t` should open: null when the target has no menu of its own.
+  function resolve(t, longPress) {
+    if (!t || !t.closest) return null;
+    if (t.closest('input, textarea, select, [contenteditable="true"], a[href^="http"]:not(.nav-item):not(.plain), .prose')) return null;
     const row = t.closest('#list-body .item');
     const feed = t.closest('#nav .nav-feed[data-feed-id]');
     const folder = t.closest('#nav .nav-item[data-drop-folder]');
-    const article = t.closest('#article article.article, #article-pane .article-head');
-    let items = null;
-    if (row) { selectRow(row); items = rowItems(row); }
-    else if (feed) items = feedItems(feed);
-    else if (folder && folder.dataset.dropFolder) items = folderItems(folder);
-    else if (article) items = articleItems();
+    // Long-press only fires on the article header (title, meta, toolbar), never on the body text.
+    const article = t.closest(longPress ? '#article article.article > .article-header, #article-pane .article-head' : '#article article.article, #article-pane .article-head');
+    if (row) { selectRow(row); return rowItems(row); }
+    if (feed) return feedItems(feed);
+    if (folder && folder.dataset.dropFolder) return folderItems(folder);
+    if (article) return articleItems();
+    return null;
+  }
+  document.addEventListener('contextmenu', (e) => {
+    if (e.shiftKey || e.ctrlKey) return;
+    const t = e.target; if (!t || !t.closest) return;
+    // Android fires contextmenu after a long-press too; the touch handler already opened the sheet.
+    if (menu && Date.now() - openedByTouch < 1500) { e.preventDefault(); return; }
+    if (t.closest('input, textarea, select, [contenteditable="true"], a[href^="http"]:not(.nav-item):not(.plain), .prose')) return;
+    const summary = t.closest('details.menu > summary');
+    if (summary) { e.preventDefault(); summary.parentElement.open = true; return; }
+    const items = resolve(t, false);
     if (!items || !items.length) return;
     e.preventDefault();
     opener = t.closest('a, button, [tabindex]') || t;
     build(items, e.clientX, e.clientY);
   });
+
+  // ---- Long-press (500 ms, under 10 px of travel) opens the same menu on touch screens ----
+  let press = null, suppressClick = false;
+  function cancelPress() { if (press) { clearTimeout(press.timer); press = null; } }
+  function blockScroll(e) { e.preventDefault(); }
+  document.addEventListener('touchstart', (e) => {
+    cancelPress();
+    if (e.touches.length !== 1 || menu) return;
+    const touch = e.touches[0]; const t = e.target;
+    if (!t || !t.closest || !t.closest('#list-body .item, #nav .nav-feed[data-feed-id], #nav .nav-item[data-drop-folder], #article article.article > .article-header, #article-pane .article-head')) return;
+    if (t.closest('input, textarea, select, button, summary, details.menu, .chip, .sources, .tags-row')) return;
+    press = { x: touch.clientX, y: touch.clientY, target: t, timer: setTimeout(() => {
+      const p = press; press = null; if (!p) return;
+      const items = resolve(p.target, true);
+      if (!items || !items.length) return;
+      openedByTouch = Date.now(); suppressClick = true;
+      opener = p.target.closest('a, button, [tabindex]') || p.target;
+      if (window.navigator.vibrate) { try { window.navigator.vibrate(10); } catch (_) {} }
+      // Keep the finger's release from scrolling the list or following the row's link.
+      document.addEventListener('touchmove', blockScroll, { passive: false });
+      build(items, p.x, p.y);
+    }, 500) };
+  }, { passive: true });
+  document.addEventListener('touchmove', (e) => {
+    if (!press) return;
+    const touch = e.touches[0];
+    if (Math.abs(touch.clientX - press.x) > 10 || Math.abs(touch.clientY - press.y) > 10) cancelPress();
+  }, { passive: true });
+  document.addEventListener('touchend', () => { cancelPress(); document.removeEventListener('touchmove', blockScroll); setTimeout(() => { suppressClick = false; }, 400); }, { passive: true });
+  document.addEventListener('touchcancel', () => { cancelPress(); document.removeEventListener('touchmove', blockScroll); }, { passive: true });
+  // The click that follows a long-press would open the row or follow the link: swallow it.
+  document.addEventListener('click', (e) => {
+    if (!suppressClick) return;
+    if (menu && menu.contains(e.target)) return;
+    e.preventDefault(); e.stopPropagation(); suppressClick = false;
+  }, true);
+  // Same for the synthetic mousedown, which would otherwise close the sheet as an outside click.
+  document.addEventListener('mousedown', (e) => { if (suppressClick && !(menu && menu.contains(e.target))) { e.stopPropagation(); } }, true);
 })();
 
 // ---- Web-page fallback: embed the original page on demand (sandboxed, no referrer) ----

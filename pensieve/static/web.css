@@ -172,6 +172,8 @@
   .handle { cursor: grab; color: var(--faint); display: inline-flex; user-select: none; }
   .tags-manage { display: flex; flex-direction: column; gap: 10px; }
   .tag-row { display: flex; gap: 8px; align-items: flex-start; }
+  .tag-line { display: flex; align-items: center; gap: 8px; }
+  .tag-line .input { min-width: 0; }
   .rule-grid { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
   .rule-grid .field { flex: 0 1 auto; }
   .rule-grid .field.grow { flex: 1 1 200px; }
@@ -405,4 +407,229 @@
   .embed { border: 1px solid var(--line-3); border-radius: var(--radius-md); overflow: hidden; background: var(--card); }
   .embed iframe { display: block; width: 100%; height: min(78vh, 1100px); border: 0; background: #fff; }
   .embed p { margin: 0; padding: 8px 12px; border-bottom: 1px solid var(--line-2); }
+}
+
+/* =====================================================================
+   Phone audit (spec M-Login / M-Reader / M-Article / M-Settings): 44 px targets, bottom sheets for
+   every menu, scrollable drawer, no horizontal overflow, safe-area padding. Overrides live here in the
+   layout layer so app.css (foundation, frozen) stays untouched.
+   ===================================================================== */
+@layer layout {
+  /* Drawer header (partials/nav.html): only under the mobile breakpoint. */
+  .nav-head { display: none; }
+  /* Article position ("3 of 40") in the article head: phones only. */
+  .article-pos { display: none; }
+  /* Context menu extras used by reader.js on desktop too. */
+  .ctx-backdrop { display: none; }
+  .ctxmenu .menu-item kbd { flex: 0 0 auto; }
+
+  @media (max-width: 899.98px) {
+    /* ---- Touch targets: nothing tappable under 44 px ---- */
+    .btn-sm { min-height: 44px; }
+    .btn-icon.btn-sm { min-width: 44px; }
+    .btn-icon { width: 44px; }
+    .search { min-height: 44px; }
+    .search input { min-height: 42px; }
+    .check { min-height: 44px; white-space: normal; align-items: flex-start; padding-top: 12px; line-height: 1.35; }
+    .check .checkbox { margin-top: 1px; width: 22px; height: 22px; }
+    .topbar .brand { min-height: 44px; }
+    .avatar-menu > summary { width: 44px; height: 44px; align-items: center; justify-content: center; margin-right: -6px; }
+    .list-head-main > a.mobile-only { width: 44px; height: 44px; align-items: center; justify-content: center; border-radius: 50%; }
+    .nav-toggle, .article-head .btn-icon.mobile-only { width: 44px; height: 44px; margin-left: -4px; }
+    .nav-item, .nav-feed, .manage-nav .nav-item { min-height: 44px; }
+    .nav-feed { padding-left: 30px; font-size: var(--text-base); }
+    .toast .btn { min-height: 44px; }
+    .toast .btn-icon { min-width: 44px; }
+    /* Tag chips in the article header: 32 px chips, 44 px hit areas for the remove button and input. */
+    .tags-row { gap: 8px; }
+    .tags-row .chip { min-height: 32px; padding: 4px 12px; font-size: var(--text-md); }
+    .tags-row .chip-remove { width: 32px; height: 32px; margin: -4px -10px -4px 0; }
+    .tags-row .chip-remove::before { content: ""; position: absolute; inset: -6px; }
+    .tags-row .chip-remove { position: relative; }
+    .tag-input { height: 32px; width: 96px; border-radius: 16px; font-size: var(--text-md); }
+    .tag-input:focus { width: 160px; }
+    /* Chip rows (list filters, Manage sections): 36 px chips, extended 44 px hit area. */
+    .chip-row a, .chip-row button, .chip-row summary, .manage-nav .nav-item { position: relative; height: 36px; min-height: 36px; border-radius: 18px; }
+    .chip-row a::before, .chip-row button::before, .chip-row summary::before, .manage-nav .nav-item::before { content: ""; position: absolute; left: 0; right: 0; top: -4px; bottom: -4px; }
+    .chip-row { padding: 4px 0; margin: -4px 0; }
+    /* Menu items inside the chip row's sheet must not inherit the chip look. */
+    .chip-row .menu-body .menu-item { position: static; height: auto; min-height: 48px; border: 0; border-radius: var(--radius-md); background: transparent; color: var(--ink); font-size: var(--text-base); font-weight: 400; padding: 0 12px; justify-content: flex-start; }
+    .chip-row .menu-body .menu-item::before { content: none; }
+    .chip-row .menu-body .menu-item.on { color: var(--accent); font-weight: 600; }
+    .chip-row .menu-body .menu-item:hover, .chip-row .menu-body .menu-item:focus-visible { background: var(--line-2); }
+    .manage-nav { padding: 12px 16px; gap: 8px; }
+    .manage-nav .nav-item { display: inline-flex; align-items: center; justify-content: center; }
+    .manage-nav .nav-item.active { font-weight: 600; }
+    /* Keyboard-only affordances are noise on a phone. */
+    .touch-hidden, .keybar { display: none !important; }
+
+    /* ---- Drawer: scrollable, with a header and a close button ---- */
+    .app[data-pane="nav"] .pane-nav { overflow-y: auto; padding-top: calc(4px + env(safe-area-inset-top, 0px)); padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px)); gap: 16px; }
+    .nav-head { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; align-items: center; min-height: 52px; margin: 0 -4px; }
+    .nav-head-title { grid-column: 2; text-align: center; font-family: var(--font-display); font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+    .nav-head .btn { grid-column: 3; width: 44px; height: 44px; }
+    .nav-item .count { font-size: var(--text-md); }
+    .inbox-notice { font-size: var(--text-md); padding: 12px 14px; }
+    .inbox-notice a { display: inline-block; padding: 6px 0; }
+    .nav-empty { padding: 8px 10px; }
+    .nav-eyebrow { padding: 6px 10px; min-height: 32px; }
+
+    /* ---- List header ---- */
+    .list-head { padding-bottom: 10px; }
+    .list-title { max-width: 100%; }
+    .list-counts { font-size: var(--text-sm); }
+
+    /* ---- Article head: 44 px borderless icons, position indicator ---- */
+    .article-head { padding-left: 8px; padding-right: 8px; gap: 4px; }
+    .article-head .btn-icon.mobile-only { margin-left: 0; }
+    .article-pos { display: block; flex: 1; min-width: 0; text-align: center; font-size: var(--text-sm); color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .article-head #article-toolbar { flex: 0 0 auto; }
+    .article-head .toolbar > .btn, .article-head .toolbar-more > summary { border: 0; background: transparent; width: 44px; height: 44px; min-width: 44px; min-height: 44px; padding: 0; color: var(--ink); border-radius: 10px; }
+    .article-head .toolbar-more > summary:hover, .article-head .toolbar > .btn:hover { background: var(--line-2); }
+    .article-head .toolbar-more > summary .ic { width: 22px; height: 22px; }
+    .article-header { gap: 12px; }
+    .article-meta { gap: 6px 10px; }
+    .article-meta .sources { height: 24px; }
+    .item .sources { position: relative; height: 26px; padding: 1px 10px 1px 6px; }
+    .item .sources::before { content: ""; position: absolute; inset: -9px -6px; }
+    .body-mode { flex-wrap: wrap; gap: 8px 10px; }
+    .web-fallback .card-body { padding: 14px; }
+    .web-fallback .row.space-between { flex-direction: column; align-items: stretch; gap: 12px; }
+    .web-fallback .row.space-between > .row { flex-wrap: nowrap; width: 100%; }
+    .web-fallback .row.space-between > .col { width: 100%; }
+    .web-fallback .row.space-between > .row > .btn { flex: 1 1 0; min-width: 0; }
+    .embed iframe { height: min(70dvh, 900px); }
+    .memory { padding: 12px 14px; }
+    .ai-card { padding: 12px 14px; }
+    .ai-card-head .faint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .notes { padding-top: 16px; }
+    .article-foot .btn { min-height: 44px; }
+
+    /* ---- Menus become bottom sheets (details-based menus, avatar menu, context menu) ---- */
+    details.menu[open]::before { content: ""; position: fixed; inset: 0; z-index: 59; background: var(--backdrop); touch-action: none; }
+    details.menu .menu-body, .avatar-menu .menu-body { position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 60; min-width: 0; max-width: none; max-height: min(80dvh, 640px); overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; border-radius: 18px 18px 0 0; border-bottom: 0; padding: 6px 12px calc(12px + env(safe-area-inset-bottom, 0px)); box-shadow: var(--shadow-lg); gap: 2px; }
+    details.menu .menu-body::before, .ctxmenu.sheet::before { content: ""; display: block; width: 40px; height: 4px; margin: 6px auto 10px; border-radius: 2px; background: var(--line-3); }
+    .menu-item { min-height: 48px; height: auto; padding: 0 12px; font-size: var(--text-base); border-radius: var(--radius-md); white-space: normal; }
+    .menu-item .ic { width: 18px; height: 18px; }
+    .menu-label { padding: 10px 12px 4px; }
+    .menu-user { padding: 6px 12px 10px; }
+    .menu-form { padding: 6px 4px; gap: 8px; }
+    .menu-form .btn { min-height: 44px; }
+    .menu-sep { margin: 6px 4px; }
+    .ctx-backdrop { display: block; position: fixed; inset: 0; z-index: 59; background: var(--backdrop); touch-action: none; }
+    .ctxmenu.sheet { position: fixed; left: 0 !important; right: 0; top: auto !important; bottom: 0; min-width: 0; max-width: none; max-height: min(80dvh, 640px); overflow-y: auto; overscroll-behavior: contain; border-radius: 18px 18px 0 0; border-bottom: 0; padding: 6px 12px calc(12px + env(safe-area-inset-bottom, 0px)); box-shadow: var(--shadow-lg); }
+    .ctxmenu .menu-head { padding: 8px 12px 6px; font-size: var(--text-sm); }
+    .ctxmenu .menu-item kbd { display: none; }
+    .item, .nav-item, .article-head, .article-header { -webkit-touch-callout: none; }
+    .item, .nav-item, .article-head { -webkit-user-select: none; user-select: none; }
+
+    /* ---- Dialogs: fit the viewport, sit above the tab bar, full-width buttons ---- */
+    .dialog { max-height: calc(100dvh - 32px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)); margin-top: auto; margin-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; }
+    .dialog:not([open]) { display: none; }
+    .dialog-body { overflow-y: auto; flex: 1 1 auto; min-height: 0; }
+    .dialog-head { padding: 16px 20px 0; }
+    .dialog-body { padding: 10px 20px 16px; }
+    .dialog-foot { padding: 0 20px 20px; }
+    .dialog-foot .btn { flex: 1 1 0; min-height: 48px; }
+    .shortcuts-grid { gap: 10px 14px; }
+
+    /* ---- Search ---- */
+    .search-filters { gap: 10px; padding: 12px 16px; }
+    .search-filters .search { height: auto; }
+    .search-filters .filters-row .input { flex: 1 1 calc(50% - 4px); min-width: 0; }
+    .search-filters .filters-row .btn { flex: 1 1 100%; }
+    .search-filters input[type="date"].input { padding-right: 8px; padding-left: 10px; font-size: 15px; }
+    .ask-form { padding: 8px 16px; }
+    .ask-toggle { min-height: 44px; }
+    .ask-form .btn-ai { min-width: 96px; }
+    #ask-result { padding: 12px 16px; }
+
+    /* ---- Manage forms: full-width fields, nothing wider than the screen ---- */
+    .two-col, .grid-8-4, .insight-grid { grid-template-columns: minmax(0, 1fr); }
+    .two-col > .col { min-width: 0; }
+    .manage-body > * { min-width: 0; }
+    .card.section { padding: 16px; }
+    .card-head { flex-wrap: wrap; row-gap: 4px; }
+    .page-head-actions { width: 100%; }
+    .page-head-actions .filters-row { width: 100%; }
+    .page-head-actions .filters-row .search { flex: 1 1 100%; }
+    .page-head-actions .filters-row .input { flex: 1 1 auto; }
+    .page-head-actions > .btn, .page-head-actions > form > .btn { flex: 1 1 auto; justify-content: center; }
+    .add-feed { padding: 16px; }
+    /* Folder and tag rows: grid, because the .grow utility (utilities layer) would win over any flex-basis set here. */
+    .sortable-row { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto 44px; align-items: center; gap: 8px 10px; padding: 10px; }
+    .sortable-row > .handle { grid-column: 1; grid-row: 1; }
+    .sortable-row > .row.grow { grid-column: 2 / -1; grid-row: 1; }
+    .sortable-row > .row.grow .input { min-width: 0; }
+    .sortable-row > .faint.tiny { grid-column: 2; grid-row: 2; }
+    .sortable-row > .chip { grid-column: 3; grid-row: 2; }
+    .sortable-row > form:last-child { grid-column: 4; grid-row: 2; justify-self: end; }
+    .tag-row { display: grid; grid-template-columns: minmax(0, 1fr) 44px; gap: 10px; align-items: start; }
+    .tag-line { display: grid; grid-template-columns: minmax(0, 1fr) 104px; gap: 8px; }
+    .tag-line > .chip { grid-column: 1 / -1; justify-self: start; }
+    .tag-line:last-child { grid-template-columns: minmax(0, 1fr) auto; }
+    .tag-row > form:last-child { justify-self: end; margin-top: 30px; }
+    .rule-grid { gap: 12px; }
+    .rule-grid .field, .rule-grid .field.grow { flex: 1 1 100%; }
+    .rule-grid .input { width: 100%; }
+    .rule-grid .check { flex: 1 1 100%; height: auto; padding-top: 0; }
+    .rule-grid .field:last-child .btn { width: 100%; }
+    .rule-actions { gap: 8px; justify-content: flex-start; }
+    .rule-actions .faint.tiny { flex: 1 1 100%; }
+    .rule-actions form { flex: 1 1 auto; }
+    .rule-actions form .btn { width: 100%; }
+    .toggle-row { padding: 12px 0; gap: 14px; min-height: 56px; }
+    .toggle-row .switch { width: 48px; height: 28px; border-radius: 14px; }
+    .toggle-row .switch::after { width: 22px; height: 22px; }
+    .toggle-row .switch:checked::after { left: 23px; }
+    .field[style*="max-width"] { max-width: none !important; }
+    .stats { gap: 8px; }
+    .stat { padding: 10px 8px; }
+    .kv > div { flex-wrap: wrap; }
+    .kv strong { overflow-wrap: anywhere; }
+    .diff { overflow-x: auto; }
+    .textarea { min-height: 120px; }
+    #body_text { min-height: 40dvh; }
+    .file { min-height: 128px; }
+    .card-foot .btn { flex: 1 1 auto; justify-content: center; min-height: 48px; }
+    .token-plain { font-size: 15px; padding: 14px; line-height: 1.5; }
+    .token-reveal .card-head .chip { flex: 0 0 auto; }
+    .user-row { flex-wrap: wrap; }
+    .table--stack tr { padding: 14px 16px; gap: 10px 12px; }
+    .table--stack td.actions { top: 10px; right: 10px; }
+    .table--stack td .row { flex-wrap: wrap; row-gap: 6px; }
+    .feed-interval { justify-content: flex-start; }
+    .table--stack .feed-interval .input { width: 5.5em; }
+    .plain-list.small li { overflow-wrap: anywhere; }
+    /* Gateway model pickers and reasoning sliders: a thumb you can actually grab. */
+    .model-form { gap: 20px; }
+    .slider-field .row.space-between { min-height: 32px; }
+    input.slider { height: 44px; }
+    input.slider::-webkit-slider-thumb { width: 26px; height: 26px; margin-top: -11px; }
+    input.slider::-moz-range-thumb { width: 22px; height: 22px; }
+    .slider-ticks { padding: 0 8px; }
+    .model-form > .row:last-of-type { flex-direction: column; align-items: stretch; gap: 8px; }
+    .model-form > .row:last-of-type .btn { min-height: 48px; }
+    .model-form .kv { font-size: var(--text-md); }
+
+    /* ---- Insights ---- */
+    .insights { gap: 20px; }
+    .insights-head { flex-direction: column; align-items: stretch; gap: 14px; }
+    .insight-title { font-size: 28px; }
+    .insight-summary { font-size: 15px; }
+    .insight-actions .seg { flex: 1 1 auto; }
+    .insight-actions .seg-btn { flex: 1 1 0; justify-content: center; }
+    .insight-actions details.menu { flex: 1 1 auto; }
+    .insight-actions details.menu > summary { width: 100%; }
+    .story { padding: 14px 16px; gap: 12px; }
+    .story-title { display: block; padding: 2px 0; }
+    .insight-card { padding: 16px; }
+
+    /* ---- Error page ---- */
+    .error-page { padding: 40px 24px calc(40px + env(safe-area-inset-bottom, 0px)); }
+    .error-page .btn { min-height: 48px; }
+  }
+  @media (max-width: 899.98px) and (hover: none) {
+    .article-title a:hover, .item:hover, .nav-item:hover, .story-title:hover { text-decoration: none; }
+  }
 }

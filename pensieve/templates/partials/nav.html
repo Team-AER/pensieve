@@ -1,4 +1,8 @@
 {% import "_macros.html" as m %}
+<div class="nav-head" role="group" aria-label="Folders and feeds">
+  <span class="nav-head-title">Folders</span>
+  <button type="button" class="btn btn-icon btn-ghost" data-pane-switch="list" aria-label="Close folders">{{ m.icon('close', 20) }}</button>
+</div>
 <div class="nav-section">
   <a class="nav-item{% if view.kind == 'unread' %} active{% endif %}" href="/reader/unread" data-key="ga" {% if view.kind == 'unread' %}aria-current="page"{% endif %}><span class="row">{{ m.icon('inbox') }} All unread</span><span class="count">{{ nav.total_unread }}</span></a>
   <a class="nav-item{% if view.kind == 'all' %} active{% endif %}" href="/reader/all" {% if view.kind == 'all' %}aria-current="page"{% endif %}><span class="row">{{ m.icon('layers') }} All items</span></a>

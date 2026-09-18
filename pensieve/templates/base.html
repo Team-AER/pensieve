@@ -4,8 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="description" content="{% block description %}Pensieve: a self-hosted RSS reader with a local model that files, groups and remembers what you read.{% endblock %}">
-<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F3F1EA">
-<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#171614">
+{% if theme == 'dark' %}<meta name="theme-color" content="#171614">
+{% elif theme == 'sepia' %}<meta name="theme-color" content="#EFE6D2">
+{% elif theme == 'light' %}<meta name="theme-color" content="#F3F1EA">
+{% else %}<meta name="theme-color" media="(prefers-color-scheme: light)" content="#F3F1EA">
+<meta name="theme-color" media="(prefers-color-scheme: dark)" content="#171614">{% endif %}
 <meta name="csrf-token" content="{{ csrf_token }}">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -14,7 +17,7 @@
 <script>
 /* Theme bootstrap before paint. The server value (data-theme-src) is the source of truth and is mirrored to
    localStorage per user; anonymous pages fall back to the last stored theme so login and error pages match. */
-(function(){var h=document.documentElement;try{var uid=h.getAttribute('data-uid')||'',src=h.getAttribute('data-theme-src')||'auto',st=window.localStorage;if(uid){st.setItem('pensieve.theme:'+uid,src);st.setItem('pensieve.theme:',src);}else{var t=st.getItem('pensieve.theme:');if(t&&t!=='auto'){h.setAttribute('data-theme',t);}}}catch(e){}})();
+(function(){var h=document.documentElement;try{var uid=h.getAttribute('data-uid')||'',src=h.getAttribute('data-theme-src')||'auto',st=window.localStorage;if(uid){st.setItem('pensieve.theme:'+uid,src);st.setItem('pensieve.theme:',src);}else{var t=st.getItem('pensieve.theme:');if(t&&t!=='auto'){h.setAttribute('data-theme',t);var c={dark:'#171614',sepia:'#EFE6D2',light:'#F3F1EA'}[t];if(c){var ms=document.querySelectorAll('meta[name="theme-color"]');for(var i=0;i<ms.length;i++){ms[i].removeAttribute('media');ms[i].setAttribute('content',c);}}}}}catch(e){}})();
 </script>
 <link rel="manifest" href="{{ static('manifest.webmanifest') }}">
 <link rel="icon" href="{{ static('icon.svg') }}" type="image/svg+xml">
