@@ -229,10 +229,12 @@ class LLMClient:
         if reasoning:
             return reasoning
         s = self.settings
-        if model == s.llm_long_model:
-            return s.llm_long_reasoning_off_value or None
+        # Fast first: when one model serves both roles (the deployment points both at Flash-Next), a short
+        # structured job must still get the "fast" effort the admin chose on the AI page.
         if model == s.llm_fast_model:
             return s.llm_fast_reasoning_effort or None
+        if model == s.llm_long_model:
+            return s.llm_long_reasoning_off_value or None
         return None
 
     def _body(
@@ -253,18 +255,22 @@ class LLMClient:
     def _slot(self, model: str | None) -> asyncio.Semaphore:
         """Process-wide in-flight limit per model, so four worker jobs do not queue behind one GPU and all time out."""
         s = self.settings
-        if model == s.llm_fast_model:
-            key, limit = "fast", s.llm_fast_concurrency
-        elif model == s.llm_long_model:
+        # Long first: if one model serves both roles it is the batching vLLM route, so take the larger limit.
+        if model == s.llm_long_model:
             key, limit = "long", s.llm_long_concurrency
+        elif model == s.llm_fast_model:
+            key, limit = "fast", s.llm_fast_concurrency
         else:
             key, limit = "other", 4
-        sem = _SLOTS.get(key)
+        sem = _SLOTS.get(f"{key}:{limit}")
         if sem is None:
-            sem = _SLOTS[key] = asyncio.Semaphore(max(1, limit))
+            sem = _SLOTS[f"{key}:{limit}"] = asyncio.Semaphore(max(1, limit))
         return sem
 
     async def _post(self, path: str, body: dict, workflow: str) -> dict:
+        from pensieve.ai.model_choice import apply_overrides
+
+        await apply_overrides()  # admin-chosen models/effort, refreshed at most once a minute per process
         url = f"{self.settings.llm_base_url.rstrip('/')}{path}"
         try:
             async with self._slot(body.get("model")):

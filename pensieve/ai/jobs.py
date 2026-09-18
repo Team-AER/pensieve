@@ -116,6 +116,9 @@ async def _guarded(
 
     ``work`` returns a note (str/None, mirrored as ``done``) or an ``Outcome`` carrying its own terminal status.
     """
+    from pensieve.ai.model_choice import apply_overrides
+
+    await apply_overrides(force=True)  # pick up a model/effort change made on the AI page before this job
     attempt = int(ctx.get("job_try") or 1)
     row_id = mirror_id(ctx, kind, target_id)
     client = LLMClient()

@@ -30,7 +30,7 @@ from sqlalchemy import (
     func,
     text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, TSVECTOR, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from pensieve.db import Base
@@ -411,6 +411,21 @@ class Insight(Base):
     generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
+class AppSetting(Base):
+    """Install-wide key/value settings edited from the UI (e.g. which gateway models to use).
+
+    Values are JSON; ``pensieve.ai.model_choice`` owns the ``llm`` key.
+    """
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class AIJob(Base):
     """Mirror of queued AI work for observability and replay; the live queue is Redis/arq."""
 
@@ -438,6 +453,7 @@ __all__ = [
     "LONG_ID_INDEX_SQL",
     "AIJob",
     "ApiToken",
+    "AppSetting",
     "Cluster",
     "ClusterItem",
     "ClusterOverride",

@@ -814,10 +814,45 @@ async def gateway_status(request: Request, user: CurrentUser):
                     models.append(str(name))
             elif isinstance(entry, str):
                 models.append(entry)
-        status_.update(ok=True, models=models[:12])
+        status_.update(ok=True, models=models[:24])
     except Exception as exc:  # noqa: BLE001
         status_["error"] = exc.__class__.__name__
-    return render(request, "manage/gateway.html", {"gateway": status_}, user=user)
+    from pensieve.ai import model_choice
+
+    await model_choice.apply_overrides(force=True)
+    choice = {
+        "effective": model_choice.effective(),
+        "overrides": model_choice.overrides(),
+        "defaults": model_choice.env_defaults(),
+        "ladder": model_choice.REASONING_LADDER,
+        "fast_idx": model_choice.ladder_index(model_choice.effective()["fast_reasoning"]),
+        "long_idx": model_choice.ladder_index(model_choice.effective()["long_reasoning"]),
+        "can_edit": user.role == UserRole.admin,
+    }
+    # The pickers list every model the gateway knows plus whatever is chosen or configured, so a model the
+    # catalog is lagging on (or one typed by hand) is never silently dropped from the form.
+    options = list(status_["models"])
+    for v in (*choice["effective"].values(), *choice["defaults"].values()):
+        if isinstance(v, str) and v and v not in options and v not in model_choice.REASONING_LADDER:
+            options.append(v)
+    choice["options"] = options
+    return render(request, "manage/gateway.html", {"gateway": status_, "choice": choice}, user=user)
+
+
+@router.post("/ai/models")
+async def save_models(request: Request, user: CsrfUser, session: DB):
+    """Admin-only: choose which gateway models and reasoning efforts the whole install uses."""
+    if user.role != UserRole.admin:
+        raise HTTPException(status_code=403, detail="Only an admin can change the gateway models")
+    from pensieve.ai import model_choice
+
+    form = await request.form()
+    values = model_choice.clean({k: form.get(k) for k in model_choice.FIELDS})
+    await model_choice.save(session, values)
+    await session.commit()
+    if is_htmx(request):
+        return await gateway_status(request, user)
+    return back("/manage/ai", "models_saved")
 
 
 @router.post("/ai/settings")

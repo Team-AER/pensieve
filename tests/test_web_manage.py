@@ -259,3 +259,36 @@ async def test_opml_import_and_export(client, session, user, monkeypatch):
     assert r.status_code == 200
     data = r.json()
     assert data["feeds"][0]["title"] == "Exported" and data["items"] == [] and data["profile"] is None
+
+
+async def test_gateway_models_are_admin_editable(client, session, user, monkeypatch):
+    """The Gateway card lists the catalog models in pickers plus two reasoning sliders; only admins save."""
+    from pensieve.ai import model_choice
+
+    model_choice.reset_cache()
+    try:
+        headers = await login(client, user)  # `user` fixture is an admin
+        r = await client.get("/manage/ai/gateway", headers={"HX-Request": "true"})
+        assert r.status_code == 200
+        assert 'name="fast"' in r.text and 'name="long_reasoning"' in r.text and 'type="range"' in r.text
+        assert "Save models" in r.text
+
+        r = await client.post(
+            "/manage/ai/models",
+            data={"fast": "Qwen/Qwen3.8-Flash-Next", "long": "__default__", "fast_reasoning": "2", "long_reasoning": "3"},
+            headers=headers,
+        )
+        assert r.status_code in (200, 303)
+        row = await session.scalar(select(models.AppSetting).where(models.AppSetting.key == "llm"))
+        assert row is not None
+        assert row.value == {"fast": "Qwen/Qwen3.8-Flash-Next", "fast_reasoning": "low", "long_reasoning": "medium"}
+        assert model_choice.effective()["fast"] == "Qwen/Qwen3.8-Flash-Next"
+
+        reader = await make_user(session)
+        rh = await login(client, reader)
+        r = await client.get("/manage/ai/gateway", headers={"HX-Request": "true"})
+        assert "Only an admin can change" in r.text and 'name="fast"' in r.text
+        r = await client.post("/manage/ai/models", data={"fast": "x"}, headers=rh)
+        assert r.status_code == 403
+    finally:
+        model_choice.reset_cache()
