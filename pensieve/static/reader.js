@@ -180,12 +180,20 @@
       ok.textContent = opts.label || 'Confirm';
       ok.classList.toggle('btn-danger', !!opts.danger);
       ok.classList.toggle('btn-primary', !opts.danger);
+      // Prompt mode: `input` (a string, possibly empty) shows a text field; the promise resolves with its
+      // trimmed value, or false on cancel.
+      const inp = $('#confirm-input', d);
+      const prompt = typeof opts.input === 'string';
+      if (inp) { inp.classList.toggle('hidden', !prompt); inp.value = prompt ? opts.input : ''; inp.placeholder = opts.placeholder || ''; }
+      d.dataset.prompt = prompt ? '1' : '';
       d.showModal();
-      ok.focus();
+      if (prompt && inp) { inp.focus(); inp.select(); } else ok.focus();
     });
   }
   function settleConfirm(value) {
-    const d = $('#confirm'); if (d && d.open) d.close();
+    const d = $('#confirm');
+    if (value === true && d && d.dataset.prompt === '1') { const inp = $('#confirm-input', d); value = inp ? inp.value.trim() : ''; }
+    if (d && d.open) d.close();
     const r = confirmResolve; confirmResolve = null;
     const o = confirmOpener; confirmOpener = null;
     if (o && o.focus) try { o.focus({ preventScroll: true }); } catch (_) {}
@@ -198,6 +206,7 @@
     else { const d = e.target.closest('dialog#confirm'); if (d && e.target === d) settleConfirm(false); }
   });
   document.addEventListener('cancel', (e) => { if (e.target && e.target.id === 'confirm') { e.preventDefault(); settleConfirm(false); } }, true);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target && e.target.id === 'confirm-input') { e.preventDefault(); settleConfirm(true); } });
   document.body.addEventListener('htmx:confirm', (e) => {
     const elt = e.detail && e.detail.elt; if (!elt) return;
     const src = elt.hasAttribute('hx-confirm') ? elt : elt.closest('[hx-confirm]');
@@ -549,4 +558,193 @@
     if (art) { const row = document.getElementById('item-' + art.dataset.id); if (row) select(row); }
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+})();
+
+// ---- Context menu: right-click on a row, a feed, a folder or the open article ----
+// Shift+right-click keeps the browser's own menu. Items reuse the same endpoints the toolbar and
+// Manage pages use; mark-all-read goes through htmx so its Undo toast seed is consumed as usual.
+(function () {
+  const $ = (s, r) => (r || document).querySelector(s);
+  const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+  const toast = (t, o) => (window.pensieveToast ? window.pensieveToast(t, o) : null);
+  const ask = (o) => (window.pensieveConfirm ? window.pensieveConfirm(o) : Promise.resolve(window.confirm(o.body || o.title)));
+  const csrf = () => { const m = $('meta[name="csrf-token"]'); return m ? m.content : ''; };
+  const post = (path, body) => fetch(path, {
+    method: 'POST', credentials: 'same-origin', redirect: 'follow',
+    headers: { 'X-CSRF-Token': csrf(), 'HX-Request': 'true' },
+    body: body ? new URLSearchParams(Object.assign({ csrf_token: csrf() }, body)) : new URLSearchParams({ csrf_token: csrf() }),
+  });
+  const countsChanged = () => { if (window.htmx) window.htmx.trigger(document.body, 'counts-changed'); };
+  const refreshList = () => { if (window.htmx) window.htmx.trigger(document.body, 'refresh-list'); };
+  const copy = (text) => {
+    const done = () => toast('Link copied');
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, () => toast('Could not copy the link'));
+    else { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); done(); } catch (_) { toast('Could not copy the link'); } ta.remove(); }
+  };
+  const nameOf = (el) => { const n = el.querySelector('.ellipsis, .btn-label'); return (n ? n.textContent : el.textContent).trim(); };
+
+  let menu = null, opener = null;
+  function close() {
+    if (menu) { menu.remove(); menu = null; }
+    if (opener && opener.focus) { try { opener.focus({ preventScroll: true }); } catch (_) {} }
+    opener = null;
+  }
+  function build(items, x, y) {
+    if (menu) { menu.remove(); menu = null; }
+    menu = document.createElement('div');
+    menu.className = 'menu-body ctxmenu'; menu.setAttribute('role', 'menu'); menu.tabIndex = -1;
+    items.forEach((it) => {
+      if (it === '-') { const s = document.createElement('div'); s.className = 'menu-sep'; menu.appendChild(s); return; }
+      if (it.head) { const h = document.createElement('div'); h.className = 'menu-head'; h.textContent = it.head; menu.appendChild(h); return; }
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'menu-item' + (it.danger ? ' danger' : ''); b.setAttribute('role', 'menuitem');
+      const label = document.createElement('span'); label.textContent = it.label; b.appendChild(label);
+      if (it.hint) { const k = document.createElement('kbd'); k.textContent = it.hint; b.appendChild(k); }
+      b.addEventListener('click', (e) => { e.preventDefault(); const run = it.run; close(); run(); });
+      menu.appendChild(b);
+    });
+    document.body.appendChild(menu);
+    const r = menu.getBoundingClientRect();
+    menu.style.left = Math.max(4, Math.min(x, window.innerWidth - r.width - 4)) + 'px';
+    menu.style.top = Math.max(4, Math.min(y, window.innerHeight - r.height - 4)) + 'px';
+    const first = $('.menu-item', menu); if (first) first.focus();
+  }
+  document.addEventListener('keydown', (e) => {
+    if (!menu) return;
+    const items = $$('.menu-item', menu); const idx = items.indexOf(document.activeElement);
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); close(); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); items[(idx + 1) % items.length].focus(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); items[(idx - 1 + items.length) % items.length].focus(); }
+    else if (e.key === 'Home') { e.preventDefault(); items[0].focus(); }
+    else if (e.key === 'End') { e.preventDefault(); items[items.length - 1].focus(); }
+    else if (e.key === 'Tab') close();
+  }, true);
+  document.addEventListener('mousedown', (e) => { if (menu && !menu.contains(e.target)) close(); }, true);
+  window.addEventListener('scroll', () => close(), true);
+  window.addEventListener('resize', () => close());
+  window.addEventListener('blur', () => close());
+
+  function markView(path, label) {
+    // Same request the list's "Mark all as read" makes: the response carries the Undo toast seed.
+    if (!window.htmx) { post(path).then(() => { toast('Marked read'); countsChanged(); }); return; }
+    window.htmx.ajax('POST', path, { target: '#ctx-sink', swap: 'innerHTML', values: { csrf_token: csrf() }, headers: { 'X-CSRF-Token': csrf() } })
+      .then(() => { countsChanged(); refreshList(); const sink = $('#ctx-sink'); if (sink && !sink.querySelector('.toast-seed') && !sink.querySelector('.toast')) toast('Marked ' + label + ' as read'); if (sink) setTimeout(() => { sink.innerHTML = ''; }, 100); });
+  }
+  function selectRow(row) {
+    $$('#list-body .item.selected').forEach((r) => { r.classList.remove('selected'); r.setAttribute('aria-selected', 'false'); r.tabIndex = -1; });
+    row.classList.add('selected'); row.setAttribute('aria-selected', 'true'); row.tabIndex = 0;
+  }
+  function toggle(row, action) {
+    const id = row.dataset.id;
+    const on = row.classList.contains(action === 'star' ? 'starred' : 'read');
+    const path = '/items/' + id + '/' + (action === 'star' ? (on ? 'unstar' : 'star') : (on ? 'unread' : 'read'));
+    post(path).then((r) => {
+      if (!r.ok) { toast('That did not save'); return; }
+      row.classList.toggle(action === 'star' ? 'starred' : 'read', !on);
+      toast(action === 'star' ? (on ? 'Unstarred' : 'Starred') : (on ? 'Marked unread' : 'Marked read'));
+      countsChanged();
+    });
+  }
+  function markAbove(row) {
+    const rows = $$('#list-body .item'); const upto = rows.indexOf(row);
+    const targets = rows.slice(0, upto).filter((r) => !r.classList.contains('read')).slice(0, 200);
+    if (!targets.length) { toast('Nothing unread above this item'); return; }
+    Promise.all(targets.map((r) => post('/items/' + r.dataset.id + '/read').then((res) => { if (res.ok) r.classList.add('read'); return res.ok; })))
+      .then((oks) => { const n = oks.filter(Boolean).length; toast('Marked ' + n + (n === 1 ? ' item' : ' items') + ' above as read'); countsChanged(); });
+  }
+  function rowItems(row) {
+    const id = row.dataset.id, url = row.dataset.url;
+    const read = row.classList.contains('read'), starred = row.classList.contains('starred');
+    const items = [
+      { label: 'Open', hint: 'o', run: () => { if (window.htmx) window.htmx.trigger(row, 'open'); else row.click(); } },
+      '-',
+      { label: read ? 'Mark unread' : 'Mark read', hint: 'm', run: () => toggle(row, 'read') },
+      { label: starred ? 'Unstar' : 'Star', hint: 's', run: () => toggle(row, 'star') },
+      { label: 'Mark items above as read', run: () => markAbove(row) },
+      '-',
+      { label: 'Summarize with AI', run: () => { if (window.htmx) window.htmx.trigger(row, 'open'); setTimeout(() => { const b = $('#article-toolbar [data-action="summarize"]'); if (b && ($('#article article') || {}).dataset && $('#article article').dataset.id === id) b.click(); }, 700); } },
+    ];
+    if (url) {
+      items.push('-', { label: 'Open original in a new tab', hint: 'v', run: () => window.open(url, '_blank', 'noopener') }, { label: 'Copy link', run: () => copy(url) });
+      if (navigator.share) items.push({ label: 'Share…', run: () => navigator.share({ title: nameOf(row) || document.title, url }).catch(() => {}) });
+    }
+    return items;
+  }
+  function folderChoices() {
+    const out = [];
+    $$('#nav [data-drop-folder]').forEach((el) => {
+      const id = el.dataset.dropFolder; const label = id ? nameOf(el) : 'Inbox (unfiled)';
+      if (!out.some((o) => o.id === id)) out.push({ id, label });
+    });
+    return out;
+  }
+  function feedItems(a) {
+    const id = a.dataset.feedId, name = nameOf(a) || 'this feed';
+    const here = location.pathname.indexOf('/reader/feed/' + id) === 0;
+    return [
+      { head: name },
+      { label: 'Open', run: () => { a.click(); } },
+      { label: 'Mark all as read', run: () => markView('/reader/feed/' + id + '/mark-read', name) },
+      { label: 'Refresh now', run: () => post('/manage/feeds/' + id + '/refresh').then((r) => toast(r.ok ? 'Fetching ' + name : 'Could not queue a refresh')) },
+      '-',
+      { label: 'Rename…', run: () => ask({ title: 'Rename feed', body: 'Shown in the sidebar and lists.', input: name, label: 'Rename' }).then((v) => { if (typeof v === 'string' && v && v !== name) post('/manage/feeds/' + id + '/rename', { title: v }).then((r) => { if (r.ok) { toast('Renamed to ' + v); countsChanged(); } }); }) },
+      { label: 'Move to folder…', run: () => {
+        const choices = folderChoices().map((c) => ({ label: c.label, run: () => post('/manage/feeds/' + id + '/move', { folder_id: c.id }).then((r) => { if (r.ok) { toast('Moved to ' + c.label); countsChanged(); } else toast('Could not move the feed'); }) }));
+        if (!choices.length) { toast('No folders yet. Create one under Manage → Folders.'); return; }
+        const rect = a.getBoundingClientRect(); build([{ head: 'Move ' + name + ' to' }].concat(choices), rect.right, rect.top);
+      } },
+      { label: 'Pause fetching', run: () => post('/manage/feeds/' + id + '/pause').then((r) => toast(r.ok ? 'Paused ' + name : 'Could not pause')) },
+      { label: 'Resume fetching', run: () => post('/manage/feeds/' + id + '/resume').then((r) => toast(r.ok ? 'Resumed ' + name : 'Could not resume')) },
+      '-',
+      { label: 'Unsubscribe…', danger: true, run: () => ask({ title: 'Unsubscribe from ' + name + '?', body: 'Its items are removed from your library too, including starred ones.', label: 'Unsubscribe', danger: true }).then((ok) => { if (ok === true) post('/manage/feeds/' + id + '/unsubscribe').then((r) => { if (r.ok) { toast('Unsubscribed from ' + name); countsChanged(); if (here) location.href = '/reader/unread'; } else toast('Could not unsubscribe'); }); }) },
+    ];
+  }
+  function folderItems(a) {
+    const id = a.dataset.dropFolder, name = nameOf(a) || 'this folder';
+    const here = location.pathname.indexOf('/reader/folder/' + id) === 0;
+    return [
+      { head: name },
+      { label: 'Open', run: () => { a.click(); } },
+      { label: 'Mark all as read', run: () => markView('/reader/folder/' + id + '/mark-read', name) },
+      '-',
+      { label: 'Rename…', run: () => ask({ title: 'Rename folder', input: name, label: 'Rename' }).then((v) => { if (typeof v === 'string' && v && v !== name) post('/manage/folders/' + id + '/rename', { name: v }).then((r) => { if (r.ok) { toast('Renamed to ' + v); countsChanged(); } }); }) },
+      { label: 'Delete folder…', danger: true, run: () => ask({ title: 'Delete ' + name + '?', body: 'Its feeds stay subscribed and move to Inbox.', label: 'Delete folder', danger: true }).then((ok) => { if (ok === true) post('/manage/folders/' + id + '/delete').then((r) => { if (r.ok) { toast('Deleted ' + name); countsChanged(); if (here) location.href = '/reader/unread'; } else toast('Could not delete the folder'); }); }) },
+    ];
+  }
+  function articleItems() {
+    // Mirror the header toolbar so the two never disagree.
+    const buttons = $$('#article-toolbar .toolbar > [data-action]');
+    if (!buttons.length) return null;
+    const items = [];
+    buttons.forEach((b) => {
+      const label = (b.querySelector('.btn-label') || {}).textContent || b.getAttribute('aria-label') || b.title;
+      if (!label) return;
+      if (b.dataset.action === 'reader' || b.dataset.action === 'open' || b.dataset.action === 'summarize') { if (items.length && items[items.length - 1] !== '-') items.push('-'); }
+      items.push({ label: label.trim(), run: () => b.click() });
+    });
+    const url = ($('#article article.article') || {}).dataset ? $('#article article.article').dataset.url : '';
+    if (url) items.push({ label: 'Copy link', run: () => copy(url) });
+    return items;
+  }
+
+  document.addEventListener('contextmenu', (e) => {
+    if (e.shiftKey || e.ctrlKey) return;
+    const t = e.target; if (!t || !t.closest) return;
+    if (t.closest('input, textarea, select, [contenteditable="true"], a[href^="http"]:not(.nav-item):not(.plain), .prose')) return;
+    const summary = t.closest('details.menu > summary');
+    if (summary) { e.preventDefault(); summary.parentElement.open = true; return; }
+    const row = t.closest('#list-body .item');
+    const feed = t.closest('#nav .nav-feed[data-feed-id]');
+    const folder = t.closest('#nav .nav-item[data-drop-folder]');
+    const article = t.closest('#article article.article, #article-pane .article-head');
+    let items = null;
+    if (row) { selectRow(row); items = rowItems(row); }
+    else if (feed) items = feedItems(feed);
+    else if (folder && folder.dataset.dropFolder) items = folderItems(folder);
+    else if (article) items = articleItems();
+    if (!items || !items.length) return;
+    e.preventDefault();
+    opener = t.closest('a, button, [tabindex]') || t;
+    build(items, e.clientX, e.clientY);
+  });
 })();

@@ -292,3 +292,22 @@ async def test_gateway_models_are_admin_editable(client, session, user, monkeypa
         assert r.status_code == 403
     finally:
         model_choice.reset_cache()
+
+
+async def test_refresh_now_enqueues_a_fetch(client, session, user, monkeypatch):
+    """Context menu "Refresh now": queues one fetch_feed job with the deterministic id and returns 204 to HTMX."""
+    from pensieve import queue
+
+    calls = []
+
+    async def fake_enqueue(function, *args, _job_id=None, **kwargs):
+        calls.append((function, args, _job_id))
+
+    monkeypatch.setattr(queue, "enqueue", fake_enqueue)
+    feed = await seed_feed(session, user, "Refreshable")
+    headers = await login(client, user)
+    r = await client.post(f"/manage/feeds/{feed.id}/refresh", headers={**headers, "HX-Request": "true"})
+    assert r.status_code == 204
+    assert calls == [("fetch_feed", (str(feed.id),), f"fetch:{feed.id}")]
+    r = await client.post(f"/manage/feeds/{uuid.uuid4()}/refresh", headers={**headers, "HX-Request": "true"})
+    assert r.status_code == 404

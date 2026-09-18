@@ -57,7 +57,8 @@
 <div class="sr-only" id="live" aria-live="polite" aria-atomic="true"></div>
 <dialog id="confirm" class="dialog" aria-labelledby="confirm-title" aria-describedby="confirm-body">
   <div class="dialog-head"><h2 id="confirm-title">Are you sure?</h2><button type="button" class="btn btn-icon btn-sm btn-ghost" data-dialog-close aria-label="Close">{{ m.icon('close') }}</button></div>
-  <div class="dialog-body" id="confirm-body"></div>
+  <div class="dialog-body"><div id="confirm-body"></div><input class="input hidden" id="confirm-input" type="text" aria-label="Value" autocomplete="off"></div>
   <div class="dialog-foot"><button type="button" class="btn" data-dialog-cancel>Cancel</button><button type="button" class="btn btn-primary" data-dialog-confirm>Confirm</button></div>
 </dialog>
+<div id="ctx-sink" class="hidden" aria-hidden="true"></div>
 {% endmacro %}

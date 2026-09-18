@@ -327,6 +327,27 @@ async def set_feed_interval(
     return back("/manage/feeds", "feed_updated")
 
 
+@router.post("/feeds/{feed_id}/refresh")
+async def refresh_feed_now(
+    request: Request,
+    feed_id: uuid.UUID,
+    user: CsrfUser,
+    session: DB,
+):
+    """Queue an immediate poll of one feed (context menu "Refresh now"); the fetch worker does the rest."""
+    feed = await get_feed_or_404(session, user, feed_id)
+    from pensieve import queue
+
+    try:
+        await queue.enqueue(queue.FETCH_FEED, str(feed.id), _job_id=queue.job_id_for("fetch", feed.id))
+    except Exception as exc:
+        log.warning("could not enqueue refresh for feed %s: %s", feed.id, exc)
+        raise HTTPException(status_code=503, detail="The fetch queue is unavailable") from exc
+    if is_htmx(request):
+        return Response(status_code=204)
+    return back("/manage/feeds", "feed_updated")
+
+
 @router.post("/feeds/{feed_id}/pause")
 async def pause_feed(
     request: Request,
