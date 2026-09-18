@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from datetime import UTC, datetime
 from typing import Annotated
@@ -27,6 +28,26 @@ async def load_item(session: AsyncSession, user: User, item_id: uuid.UUID) -> tu
         raise HTTPException(status_code=404, detail="Item not found")
     return pair
 
+
+
+READER_MIN_CHARS = 120  # an extraction shorter than this is nav/boilerplate, not the article
+THIN_TEXT_CHARS = 700  # a feed body shorter than this is a link post (HN, link blogs): open Reader view for it
+
+
+def strip_tags(html: str) -> str:
+    return re.sub(r"<[^>]+>", " ", html or "").strip()
+
+
+def is_thin(item) -> bool:
+    """True when the feed entry carries no real article: little text, or text that is mostly link chrome."""
+    text = (item.content_text or "").strip()
+    if len(text) >= THIN_TEXT_CHARS:
+        return False
+    return bool(item.url)
+
+
+def wants_auto_reader(user) -> bool:
+    return bool((user.settings or {}).get("auto_reader", True))
 
 async def article_context(session: AsyncSession, user: User, item: Item, feed: Feed) -> dict:
     state = await get_state(session, user, item.id)
@@ -66,7 +87,10 @@ async def article_context(session: AsyncSession, user: User, item: Item, feed: F
         "notes": notes,
         "cluster": cluster,
         "related": related,
-        "use_reader": False,
+        "thin": is_thin(item),
+        "use_reader": bool(item.reader_html) and is_thin(item),
+        "auto_reader": wants_auto_reader(user) and is_thin(item) and bool(item.url) and not item.reader_html,
+        "web_fallback": False,
     }
 
 
@@ -196,9 +220,13 @@ async def reader_mode(
     user: CsrfUser,
     session: DB,
     off: Annotated[int, Form()] = 0,
+    auto: Annotated[int, Form()] = 0,
 ):
+    """Switch the body to Reader view. ``auto=1`` is the first-render trigger for thin items: a failed or
+    empty extraction then shows the web-page fallback card instead of an error banner."""
     item, feed = await load_item(session, user, item_id)
     ctx = await article_context(session, user, item, feed)
+    ctx["auto_reader"] = False  # never re-trigger from the swapped body
     error = None
     if off:
         ctx["use_reader"] = False
@@ -220,13 +248,18 @@ async def reader_mode(
                     log.warning("reader mode failed for %s: %s", item.id, exc)
                     html = None
                     error = "Couldn't extract a reader view for this page."
-                if html:
+                if html and len(strip_tags(html)) >= READER_MIN_CHARS:
                     item.reader_html = html
                     item.reader_fetched_at = datetime.now(UTC)
                     await session.commit()
                 elif not error:
                     error = "Nothing readable was found on that page."
         ctx["use_reader"] = bool(item.reader_html) and not error
+    if error and item.url and not off:
+        # The page needs a browser (JS app, paywall, image post, or an aggregator's own site). Offer it.
+        ctx["web_fallback"] = True
+        ctx["fallback_reason"] = error
+        error = None if auto else error
     ctx["error"] = error
     return render(request, "partials/body.html", ctx, user=user)
 

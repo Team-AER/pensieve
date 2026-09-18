@@ -1084,6 +1084,7 @@ async def save_account(
     measure = str(form.get("measure") or settings.get("measure") or "normal")
     settings["font_size"] = font_size if font_size in FONT_SIZES else "m"
     settings["measure"] = measure if measure in MEASURES else "normal"
+    settings["auto_reader"] = str(form.get("auto_reader") or "") == "1"  # checkbox: absent means off
     db_user.settings = settings
     await session.commit()
     return back("/manage/account", "account_saved")

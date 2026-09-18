@@ -107,7 +107,7 @@ async def test_login_rate_limit_blocks_after_failures(client, user, memory_limit
 async def test_security_headers_present(client, user):
     r = await client.get("/login")
     csp = r.headers["content-security-policy"]
-    assert "default-src 'self'" in csp and "frame-ancestors 'none'" in csp and "frame-src https://www.youtube.com" in csp
+    assert "default-src 'self'" in csp and "frame-ancestors 'none'" in csp and "frame-src https:" in csp
     assert r.headers["x-content-type-options"] == "nosniff"
     assert r.headers["referrer-policy"] == "strict-origin-when-cross-origin"
     assert r.headers["x-frame-options"] == "DENY"

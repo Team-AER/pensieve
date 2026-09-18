@@ -396,3 +396,13 @@
   .ctxmenu .menu-head { padding: 6px 10px 4px; font-size: var(--text-xs, 11px); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #confirm-input { margin-top: 12px; }
 }
+
+/* Auto Reader view and the web-page fallback (partials/body.html) */
+@layer components {
+  .body-mode-pending { opacity: .8; }
+  .web-fallback { margin-bottom: var(--space-4, 16px); border-color: var(--line-3); }
+  .web-fallback .card-body { display: flex; flex-direction: column; gap: 12px; }
+  .embed { border: 1px solid var(--line-3); border-radius: var(--radius-md); overflow: hidden; background: var(--card); }
+  .embed iframe { display: block; width: 100%; height: min(78vh, 1100px); border: 0; background: #fff; }
+  .embed p { margin: 0; padding: 8px 12px; border-bottom: 1px solid var(--line-2); }
+}

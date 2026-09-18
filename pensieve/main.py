@@ -23,7 +23,7 @@ CONTENT_SECURITY_POLICY = (
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
     "font-src 'self' https://fonts.gstatic.com data:; "
     "script-src 'self' 'unsafe-inline'; "
-    "frame-src https://www.youtube.com https://www.youtube-nocookie.com https://player.vimeo.com; "
+    "frame-src https:; "
     "frame-ancestors 'none'"
 )
 

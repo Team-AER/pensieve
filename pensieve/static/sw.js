@@ -51,7 +51,20 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return;
   if (req.method === 'GET') {
     if (url.pathname.startsWith('/static/')) {
-      event.respondWith(caches.open(VERSION).then((c) => c.match(req).then((hit) => hit || fetch(req).then((r) => { if (r.ok) c.put(req, r.clone()); return r; }))));
+      // Cache-first, but never let a cache or network error reject respondWith: that would fail the
+      // stylesheet and script for the whole page instead of just missing the cache.
+      event.respondWith((async () => {
+        try {
+          const c = await caches.open(VERSION);
+          const hit = await c.match(req);
+          if (hit) return hit;
+          const r = await fetch(req);
+          if (r.ok) c.put(req, r.clone()).catch(() => {});
+          return r;
+        } catch (_) {
+          try { return await fetch(req); } catch (__) { return new Response('', { status: 504 }); }
+        }
+      })());
     } else if (isReaderGet(url) && !url.pathname.startsWith('/reader/api/')) {
       event.respondWith(staleWhileRevalidate(req));
     }

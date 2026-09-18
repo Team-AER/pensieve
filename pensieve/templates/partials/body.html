@@ -1,4 +1,8 @@
 {% import "_macros.html" as m %}
+{% if auto_reader is defined and auto_reader %}
+<span hidden hx-post="/items/{{ item.id }}/reader-mode" hx-trigger="load" hx-target="#body-{{ item.id }}" hx-swap="innerHTML" hx-vals='{"auto": 1}'></span>
+<div class="body-mode body-mode-pending" aria-live="polite"><span class="chip">{{ m.icon('reader', 12) }} Opening Reader view…</span></div>
+{% endif %}
 {% if error is defined and error %}<div class="flash flash-error" role="alert">{{ m.icon('warning', 14) }} {{ error }}</div>{% endif %}
 {% if use_reader and item.reader_html %}
 <div class="body-mode">
@@ -7,6 +11,25 @@
 </div>
 <div class="prose">{{ item.reader_html|safe }}</div>
 {% else %}
+{% if web_fallback is defined and web_fallback and item.url %}
+<div class="card web-fallback" id="web-fallback-{{ item.id }}">
+  <div class="card-body">
+    <div class="row wrap space-between">
+      <div class="col" style="gap:2px">
+        <strong>{{ m.icon('external', 14) }} This one needs the web page</strong>
+        <span class="muted small">{{ fallback_reason or "Reader view couldn't extract an article from that page." }} The feed only carried a link.</span>
+      </div>
+      <div class="row wrap">
+        <a class="btn btn-primary btn-sm" href="{{ item.url }}" target="_blank" rel="noopener noreferrer" hx-boost="false">{{ m.icon('external', 14) }} Open web page</a>
+        <button type="button" class="btn btn-sm" data-embed-toggle="#embed-{{ item.id }}" aria-controls="embed-{{ item.id }}" aria-expanded="false">{{ m.icon('reader', 14) }} Show it here</button>
+      </div>
+    </div>
+    <div class="embed hidden" id="embed-{{ item.id }}" data-src="{{ item.url }}">
+      <p class="muted small">Some sites refuse to be embedded; if this stays blank, use Open web page.</p>
+    </div>
+  </div>
+</div>
+{% endif %}
 <div class="prose">{{ item.content_html|safe }}</div>
 {% if item.enclosure_url %}
 <div class="enclosure">

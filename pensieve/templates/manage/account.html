@@ -22,6 +22,9 @@
       <span class="field-hint">Also <kbd>+</kbd> / <kbd>-</kbd> in the reader.</span></div>
     <div class="field"><label for="measure">Line width</label>
       <select class="input input-sm" id="measure" name="measure" data-measure-select>{% for w, label in [('narrow','Narrow'),('normal','Normal'),('wide','Wide')] %}<option value="{{ w }}"{% if measure == w %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+    <div class="field"><span class="field-label">Link-only items</span>
+      <label class="check" for="auto_reader"><input type="checkbox" class="checkbox" id="auto_reader" name="auto_reader" value="1"{% if (user.settings or {}).get('auto_reader', True) %} checked{% endif %}><span>Open Reader view automatically when a feed only carries a link (Hacker News, link blogs)</span></label>
+      <span class="field-hint">When the page can't be extracted, the article shows an “Open web page” card instead.</span></div>
   </div>
   <div class="card-foot"><button class="btn btn-primary" type="submit">Save</button></div>
 </form>

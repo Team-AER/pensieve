@@ -748,3 +748,22 @@
     build(items, e.clientX, e.clientY);
   });
 })();
+
+// ---- Web-page fallback: embed the original page on demand (sandboxed, no referrer) ----
+(function () {
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest && e.target.closest('[data-embed-toggle]'); if (!b) return;
+    e.preventDefault();
+    const box = document.querySelector(b.dataset.embedToggle); if (!box) return;
+    const open = box.classList.toggle('hidden') === false;
+    b.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open && !box.querySelector('iframe')) {
+      const f = document.createElement('iframe');
+      f.src = box.dataset.src; f.loading = 'lazy'; f.referrerPolicy = 'no-referrer';
+      f.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-forms');
+      f.setAttribute('title', 'Original web page');
+      box.appendChild(f);
+    }
+    b.querySelector('.btn-label') && (b.querySelector('.btn-label').textContent = open ? 'Hide it' : 'Show it here');
+  });
+})();

@@ -120,14 +120,14 @@ async def test_reader_mode_stores_reader_html(client, session, user, monkeypatch
 
     async def extract_reader_html(url):
         assert url == "https://example.com/article"
-        return "<p>Clean reader text</p>"
+        return "<p>Clean reader text. " + ("Extracted paragraph text. " * 8) + "</p>"
 
     fake_module(monkeypatch, "pensieve.fetch.reader_mode", extract_reader_html=extract_reader_html)
     headers = await login(client, user)
     r = await client.post(f"/items/{item.id}/reader-mode", headers=headers | HX)
     assert r.status_code == 200 and "Clean reader text" in r.text and "Show feed version" in r.text
     await session.refresh(item)
-    assert item.reader_html == "<p>Clean reader text</p>" and item.reader_fetched_at is not None
+    assert item.reader_html.startswith("<p>Clean reader text") and item.reader_fetched_at is not None
     r = await client.post(f"/items/{item.id}/reader-mode", data={"off": "1"}, headers=headers | HX)
     assert "Clean reader text" not in r.text
 
@@ -178,3 +178,53 @@ async def test_boosted_deep_link_renders_the_whole_reader(client, session, user)
     assert r.status_code == 200 and "Deep link" in r.text
     assert "<html" in r.text and 'id="article-toolbar"' in r.text and "pane-nav" in r.text
     assert "Mark read" in r.text  # the toolbar is present, with the read toggle
+
+
+async def test_thin_items_open_reader_view_automatically(client, session, user, monkeypatch):
+    """A link post (short body + URL) triggers Reader view on first render; a real article does not."""
+    feed = await seed_feed(session, user, "HN")
+    thin = await seed_item(session, feed, "Link post", text="Article URL: https://x.test/a Points: 17", url="https://x.test/a")
+    full = await seed_item(session, feed, "Essay", text="word " * 400, url="https://x.test/essay")
+    await login(client, user)
+    r = await client.get(f"/items/{thin.id}?keep_unread=1", headers=HX)
+    assert r.status_code == 200 and f"/items/{thin.id}/reader-mode" in r.text and '"auto": 1' in r.text
+    r = await client.get(f"/items/{full.id}?keep_unread=1", headers=HX)
+    assert '"auto": 1' not in r.text
+
+    # opting out on the account page turns it off
+    db_user = await session.get(models.User, user.id)
+    db_user.settings = {**(db_user.settings or {}), "auto_reader": False}
+    await session.commit()
+    r = await client.get(f"/items/{thin.id}?keep_unread=1", headers=HX)
+    assert '"auto": 1' not in r.text
+
+
+async def test_auto_reader_falls_back_to_the_web_page(client, session, user, monkeypatch):
+    """When extraction yields nothing (JS app, paywall, image post) the auto path shows the web-page card,
+    not an error banner; the explicit Reader-view button still reports the error."""
+    import pensieve.fetch.reader_mode as rm
+
+    feed = await seed_feed(session, user, "HN")
+    item = await seed_item(session, feed, "JS-only page", text="Article URL: https://x.test/app", url="https://x.test/app")
+    headers = await login(client, user)
+
+    async def nothing(_url):
+        return "<nav>menu</nav>"  # too short to count as an article
+
+    monkeypatch.setattr(rm, "extract_reader_html", nothing)
+    r = await client.post(f"/items/{item.id}/reader-mode", data={"auto": "1"}, headers={**headers, **HX})
+    assert r.status_code == 200
+    assert "Open web page" in r.text and 'data-embed-toggle="#embed-' in r.text and 'href="https://x.test/app"' in r.text
+    assert "flash-error" not in r.text and '"auto": 1' not in r.text  # no banner, no re-trigger loop
+    r = await client.post(f"/items/{item.id}/reader-mode", headers={**headers, **HX})
+    assert "flash-error" in r.text and "Open web page" in r.text
+
+    async def article(_url):
+        return "<p>" + ("real prose " * 80) + "</p>"
+
+    monkeypatch.setattr(rm, "extract_reader_html", article)
+    r = await client.post(f"/items/{item.id}/reader-mode", data={"auto": "1"}, headers={**headers, **HX})
+    assert "Reader view" in r.text and "real prose" in r.text and "Open web page" not in r.text
+    # cached now: the next plain open shows Reader view without a trigger
+    r = await client.get(f"/items/{item.id}?keep_unread=1", headers=HX)
+    assert "real prose" in r.text and '"auto": 1' not in r.text
