@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     session_cookie_secure: bool = False  # LAN over plain http by default; set true behind TLS (also enables HSTS)
     login_rate_limit_attempts: int = 10  # failed sign-ins per (client ip, email) before a 429
     login_rate_limit_window_s: int = 15 * 60
-    undo_batch_max_ids: int = 500  # mark-all-read keeps at most this many ids for Undo
+    undo_batch_max_ids: int = 5000  # mark-all-read keeps at most this many ids for Undo (ids live in Redis, not the form)
 
     # LLM gateway (LiteLLM, OpenAI-compatible, keyless on the LAN). Never a public API.
     llm_base_url: str = "http://llm-proxy.cls/v1"
