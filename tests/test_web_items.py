@@ -165,3 +165,16 @@ async def test_related_history_failures_are_swallowed(client, session, user, mon
     await login(client, user)
     r = await client.get(f"/items/{item.id}", headers=HX)
     assert r.status_code == 200 and "From your memory" not in r.text
+
+
+async def test_boosted_deep_link_renders_the_whole_reader(client, session, user):
+    """A digest link is a plain <a> under body[hx-boost]; the request carries HX-Request *and* HX-Boosted.
+    Answering it with the bare article partial swapped the shell away (no nav, no toolbar, no way to mark
+    unread), so boosted requests must get the full reader page with the article open."""
+    feed = await seed_feed(session, user, "Feed")
+    item = await seed_item(session, feed, "Deep link", text="Body " * 50)
+    await login(client, user)
+    r = await client.get(f"/items/{item.id}", headers={**HX, "HX-Boosted": "true"})
+    assert r.status_code == 200 and "Deep link" in r.text
+    assert "<html" in r.text and 'id="article-toolbar"' in r.text and "pane-nav" in r.text
+    assert "Mark read" in r.text  # the toolbar is present, with the read toggle

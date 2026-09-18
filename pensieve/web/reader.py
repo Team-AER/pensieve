@@ -25,7 +25,7 @@ from pensieve.web.queries import (
     set_cached_nav_counts,
     undo_read,
 )
-from pensieve.web.templating import DB, CsrfUser, CurrentUser, hx_trigger, render
+from pensieve.web.templating import DB, CsrfUser, CurrentUser, hx_trigger, is_htmx, render
 from pensieve.web.undo import load_undo, save_undo
 
 router = APIRouter()
@@ -488,13 +488,13 @@ async def render_list(request: Request, session: AsyncSession, user: User, view:
         "next_cursor": encode_cursor(rows[-1].item) if rows and has_more else None,
         "list_url": f"{view.path}/list",
     }
-    if not opts.first_page and request.headers.get("hx-request") == "true":
+    if not opts.first_page and is_htmx(request):
         return render(request, "partials/rows.html", ctx, user=user)
     unread, total = await view_counts(session, user, view)
     ctx.update({"unread": unread, "total": total})
     if extra:
         ctx.update(extra)
-    if request.headers.get("hx-request") != "true":
+    if not is_htmx(request):
         nav = await nav_data(session, user, view)
         ctx.update({"nav": nav, "article_html": None, "pane": "list"})
         return render(request, "reader.html", ctx, user=user)
@@ -508,7 +508,7 @@ async def _mark_read_common(request, session, user, view: View, older_than: str 
     extra = {"undo_token": token, "undo_count": len(ids), "undo_marked": True}
     headers = hx_trigger("counts-changed")
     response = await render_list(request, session, user, view, extra=extra)
-    if request.headers.get("hx-request") != "true":
+    if not is_htmx(request):
         return RedirectResponse(view.path, status_code=303, headers=headers)
     for k, v in headers.items():
         response.headers[k] = v
@@ -561,7 +561,7 @@ async def undo_read_route(
     kind, _, key = view.partition("/")
     v = await resolve_view(session, user, kind or "unread", key or None)
     headers = hx_trigger("counts-changed")
-    if request.headers.get("hx-request") != "true":
+    if not is_htmx(request):
         return RedirectResponse(v.path, status_code=303, headers=headers)
     response = await render_list(request, session, user, v)
     for k, val in headers.items():

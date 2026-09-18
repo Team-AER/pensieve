@@ -37,7 +37,16 @@ from pensieve.models import (
     UserRole,
 )
 from pensieve.web.queries import invalidate_nav_cache, parse_uuid
-from pensieve.web.templating import DB, FONT_SIZES, MEASURES, CsrfUser, CurrentUser, hx_trigger, render
+from pensieve.web.templating import (
+    DB,
+    FONT_SIZES,
+    MEASURES,
+    CsrfUser,
+    CurrentUser,
+    hx_trigger,
+    is_htmx,
+    render,
+)
 
 log = logging.getLogger(__name__)
 router = APIRouter(prefix="/manage")
@@ -274,7 +283,7 @@ async def move_feed(
     feed.folder_id = folder.id if folder else None
     await session.commit()
     invalidate_nav_cache(user.id)
-    if request.headers.get("hx-request") == "true":
+    if is_htmx(request):
         # Drag-and-drop in the reader nav: no page to render, just refresh the counts/tree.
         return Response(status_code=204, headers=hx_trigger("counts-changed"))
     return back("/manage/feeds", "feed_updated")
@@ -403,7 +412,7 @@ async def dismiss_suggestion(
         feed.suggested_folder_name = None
         feed.suggested_folder_confidence = None
         await session.commit()
-        return Response(status_code=204) if request.headers.get("hx-request") == "true" else back("/manage/feeds")
+        return Response(status_code=204) if is_htmx(request) else back("/manage/feeds")
     try:
         await dismiss_folder_suggestion(session, user, feed)
         await session.commit()
@@ -415,7 +424,7 @@ async def dismiss_suggestion(
         feed.suggested_folder_name = None
         feed.suggested_folder_confidence = None
         await session.commit()
-    if request.headers.get("hx-request") == "true":
+    if is_htmx(request):
         return Response(status_code=204)
     return back("/manage/feeds", "suggestion_dismissed")
 

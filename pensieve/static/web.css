@@ -79,8 +79,8 @@
   .article-head .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: 1; min-width: 0; padding: 6px 0; }
   .article-head:has(#article-toolbar:empty) { display: none; }
   .toolbar-more { display: none; }
-  .article-head .btn-iconic { width: 30px; padding: 0; }
-  .article-head .btn-iconic .btn-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .article-head .btn-iconic:not([data-action="read"]) { width: 30px; padding: 0; }
+  .article-head .btn-iconic:not([data-action="read"]) .btn-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .toolbar-spacer { flex: 1; }
   .toolbar-error { font-size: var(--text-sm); color: var(--danger); flex-basis: 100%; }
   .article-foot { display: none; }

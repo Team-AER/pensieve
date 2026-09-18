@@ -13,7 +13,7 @@ from sqlalchemy.orm import aliased
 from pensieve.models import Feed, Folder, Item, ItemState
 from pensieve.web.queries import is_unread, not_hidden, parse_uuid
 from pensieve.web.reader import PAGE_SIZE, Row, View, nav_data
-from pensieve.web.templating import DB, CsrfUser, CurrentUser, render
+from pensieve.web.templating import DB, CsrfUser, CurrentUser, is_htmx, render
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -101,9 +101,9 @@ async def search(
         "pane": "list",
         "article_html": None,
     }
-    if request.headers.get("hx-request") == "true" and page > 1:
+    if is_htmx(request) and page > 1:
         return render(request, "partials/search_rows.html", ctx, user=user)
-    if request.headers.get("hx-request") == "true":
+    if is_htmx(request):
         return render(request, "partials/search_list.html", ctx, user=user)
     ctx["nav"] = await nav_data(session, user, view)
     return render(request, "search.html", ctx, user=user)

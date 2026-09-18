@@ -15,7 +15,7 @@ from sqlalchemy.orm import aliased
 from pensieve import queue
 from pensieve.models import AIJob, Cluster, ClusterItem, Feed, Item, ItemAI, ItemState, Note, User
 from pensieve.web.queries import get_state, get_user_item, set_read, set_starred, upsert_states
-from pensieve.web.templating import DB, CsrfUser, CurrentUser, hx_trigger, render
+from pensieve.web.templating import DB, CsrfUser, CurrentUser, hx_trigger, is_htmx, render
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -92,7 +92,7 @@ async def article(
     item, feed = await load_item(session, user, item_id)
     ctx = await article_context(session, user, item, feed)
     ctx["auto_open"] = not keep_unread and not ctx["is_read"]
-    if request.headers.get("hx-request") == "true":
+    if is_htmx(request):
         return render(request, "partials/article.html", ctx, user=user)
     # Deep link: render the whole reader with the article open.
     from pensieve.web.reader import render_reader, resolve_view
