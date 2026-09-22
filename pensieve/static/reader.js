@@ -23,6 +23,7 @@
     const a = app();
     if (!a) return;
     a.dataset.pane = name;
+    showChrome(true);
     if (name === 'nav') { const first = $('#nav .nav-item'); if (first && !isMobile()) first.focus({ preventScroll: true }); }
   }
   function closeDrawer() { const a = app(); if (a && a.dataset.pane === 'nav') setPane('list'); }
@@ -451,6 +452,50 @@
       move(1, true);
     }
   });
+
+  // ---- Phones: the article's header and footer slide away while reading down, and return on the way back up ----
+  // Both bars float over #article (web.css); its padding matches their measured height so nothing starts hidden.
+  // They also come back at the top and bottom of the article, on a new article, and whenever they take focus.
+  const chrome = { y: 0, travel: 0, observer: null, head: null, foot: null };
+  const articlePane = () => $('.pane-article');
+  function showChrome(show) {
+    const p = articlePane(); if (!p) return;
+    if (show) delete p.dataset.chrome; else p.dataset.chrome = 'hidden';
+  }
+  function fitChrome() {
+    const p = articlePane(); if (!p || !window.ResizeObserver) return;
+    const head = $('.article-head', p), foot = $('.article-foot', p);
+    if (head === chrome.head && foot === chrome.foot) return; // same bars (hx-boost swaps bring new ones)
+    if (chrome.observer) chrome.observer.disconnect();
+    chrome.head = head; chrome.foot = foot;
+    chrome.observer = new ResizeObserver(() => {
+      if (head) p.style.setProperty('--chrome-top', head.offsetHeight + 'px');
+      if (foot) p.style.setProperty('--chrome-bottom', foot.offsetHeight + 'px');
+    });
+    [head, foot].forEach((el) => { if (el) chrome.observer.observe(el); });
+  }
+  document.addEventListener('scroll', (e) => {
+    const el = e.target;
+    if (!el || el.id !== 'article' || !isMobile()) return;
+    const y = el.scrollTop, dy = y - chrome.y;
+    chrome.y = y;
+    const p = el.closest('.pane-article'); if (!p) return;
+    // Top (and iOS's rubber band above it) or the last screenful: always show, the footer's "next" lives here.
+    if (y <= 8 || y + el.clientHeight >= el.scrollHeight - 48) { chrome.travel = 0; showChrome(true); return; }
+    if ((dy > 0) !== (chrome.travel > 0)) chrome.travel = 0; // direction changed: start counting again
+    chrome.travel += dy;
+    if (chrome.travel > 24) {
+      // Never pull the bars out from under an open menu or a focused control.
+      if (p.querySelector('details.menu[open]') || (document.activeElement && document.activeElement.closest('.article-head, .article-foot'))) return;
+      showChrome(false);
+    } else if (chrome.travel < -24) showChrome(true);
+  }, { capture: true, passive: true });
+  document.addEventListener('focusin', (e) => { if (e.target.closest && e.target.closest('.article-head, .article-foot')) showChrome(true); });
+  document.body.addEventListener('htmx:afterSwap', (e) => {
+    if (e.detail && e.detail.target && e.detail.target.id === 'article') { chrome.y = 0; chrome.travel = 0; showChrome(true); }
+  });
+  document.addEventListener('htmx:afterSettle', fitChrome);
+  fitChrome();
 
   // ---- Keyboard ----
   let pendingG = false, pendingTimer = null;

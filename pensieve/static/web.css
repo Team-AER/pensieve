@@ -781,3 +781,23 @@
     .archive-frame { height: calc(100dvh - 200px); }
   }
 }
+
+/* ---- Phones: the article's header and footer float over the text and slide away while reading down ----
+   reader.js sets data-chrome="hidden" on .pane-article and measures the bars into --chrome-top/--chrome-bottom.
+   No transform (and no will-change) while shown: either would trap the menus' fixed bottom sheets inside the bar. */
+@layer layout {
+  @media (max-width: 899.98px) {
+    .app[data-pane="article"] .pane-article { position: relative; }
+    .pane-article > .article-head, .pane-article > .article-foot { position: absolute; left: 0; right: 0; transition: transform 0.32s cubic-bezier(0.2, 0.7, 0.2, 1); }
+    .pane-article > .article-head { top: 0; z-index: 21; }
+    .pane-article > .article-foot { bottom: 0; z-index: 20; }
+    .pane-article > .pane-body {
+      padding-top: var(--chrome-top, calc(53px + env(safe-area-inset-top, 0px)));
+      padding-bottom: var(--chrome-bottom, calc(77px + env(safe-area-inset-bottom, 0px)));
+      scroll-padding-top: var(--chrome-top, calc(53px + env(safe-area-inset-top, 0px)));
+    }
+    /* Hidden: the header keeps a strip under the status bar so the clock never sits on top of text. */
+    .pane-article[data-chrome="hidden"] > .article-head { transform: translateY(calc(env(safe-area-inset-top, 0px) - 100%)); transition-timing-function: cubic-bezier(0.4, 0, 0.6, 1); }
+    .pane-article[data-chrome="hidden"] > .article-foot { transform: translateY(100%); transition-timing-function: cubic-bezier(0.4, 0, 0.6, 1); }
+  }
+}
