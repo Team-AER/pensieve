@@ -31,6 +31,7 @@
     }
     a.dataset.pane = name;
     showBars(true);
+    measureBars();
     if (isMobile() && was !== name) scrollPageTo(name === 'article' ? 0 : paneY.at[name] || 0);
     if (name === 'nav') { const first = $('#nav .nav-item'); if (first && !isMobile()) first.focus({ preventScroll: true }); }
   }
@@ -464,11 +465,41 @@
   // ---- Phones: every screen's top and bottom bars slide away while reading down, and return on the way back up ----
   // On phones the document scrolls (web.css), so the browser's own toolbar shrinks along with ours. The bars also
   // come back at the top and the bottom of the page, on a new article or pane, and whenever they take focus.
-  const bars = { y: 0, travel: 0 };
+  const bars = { y: 0, travel: 0, timer: null, observer: null, watched: [] };
+  const TOP_BARS = '.topbar, .pane-head', BOTTOM_BARS = '.tabbar, .article-foot';
   function showBars(show) {
     const a = app(); if (!a) return;
-    if (show) delete a.dataset.bars; else a.dataset.bars = 'hidden';
+    if (show) {
+      if (!a.dataset.bars) return;
+      clearTimeout(bars.timer);
+      if (a.dataset.bars === 'gone') { a.dataset.bars = 'away'; void a.offsetHeight; } // back in the page, off-screen
+      delete a.dataset.bars; // ...then slide in
+    } else {
+      if (a.dataset.bars) return;
+      a.dataset.bars = 'away'; // slide out, then leave the page so Safari stops tinting its edges with them
+      bars.timer = setTimeout(() => { if (a.dataset.bars === 'away') a.dataset.bars = 'gone'; }, 340);
+    }
   }
+  // The padding under the floating bars matches the bars on screen (list head, article head, tab bar, footer).
+  function measureBars() {
+    const a = app(); if (!a || !isMobile() || a.dataset.bars) return; // keep the last size while they are away
+    const tallest = (sel) => Math.max(0, ...$$(sel, a).map((e) => (e.getClientRects().length ? e.offsetHeight : 0)));
+    a.style.setProperty('--bar-top', tallest(TOP_BARS) + 'px');
+    a.style.setProperty('--bar-bottom', tallest(BOTTOM_BARS) + 'px');
+  }
+  function watchBars() {
+    const a = app(); if (!a || !window.ResizeObserver) return;
+    const els = $$(TOP_BARS + ', ' + BOTTOM_BARS, a);
+    if (els.length === bars.watched.length && els.every((e, i) => e === bars.watched[i])) return;
+    if (!bars.observer) bars.observer = new ResizeObserver(() => measureBars());
+    bars.observer.disconnect();
+    els.forEach((e) => bars.observer.observe(e));
+    bars.watched = els;
+    measureBars();
+  }
+  document.addEventListener('htmx:afterSettle', watchBars);
+  window.addEventListener('resize', measureBars);
+  watchBars();
   // Scroll without the jump counting as "reading down".
   function scrollPageTo(y) { bars.y = y; bars.travel = 0; window.scrollTo(0, y); }
   window.addEventListener('scroll', () => {

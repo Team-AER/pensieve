@@ -782,30 +782,31 @@
 }
 
 /* ---- Phones: the page scrolls, not a pane, and every screen's bars slide away while reading down ----
-   Scrolling the document lets the browser shrink its own toolbar too, and it keeps content clear of the notch and
-   home indicator without any inset padding. Top bars stick to the top and bottom bars to the bottom; reader.js
-   sets data-bars="hidden" on .app while scrolling down. No transform (and no will-change) while shown: either would
-   trap the menus' fixed bottom sheets inside the bar. */
+   Scrolling the document lets Safari shrink its own toolbar and run the page under the clock and the address
+   pill. The bars float (fixed) over padding that reader.js sizes to them (--bar-top / --bar-bottom), so taking
+   them out never moves the text. While scrolling down reader.js sets data-bars="away" (they slide off), then
+   "gone" (display: none): Safari paints the colour of any bar pinned to an edge across the status bar and toolbar,
+   so a bar that is merely off-screen still leaves a solid strip there. No transform (and no will-change) while
+   shown: either would trap the menus' fixed bottom sheets inside the bar. */
 @layer layout {
   @media (max-width: 899.98px) {
-    .app { height: auto; min-height: 100dvh; overflow: visible; }
+    .app { height: auto; min-height: 100dvh; overflow: visible; padding-top: var(--bar-top, 56px); padding-bottom: var(--bar-bottom, 64px); }
     .panes, .manage { flex: 1 0 auto; min-height: 0; }
     .app[data-pane="nav"] .pane-nav, .app[data-pane="list"] .pane-list, .app[data-pane="article"] .pane-article { flex: 1 0 auto; min-height: 0; overflow: visible; }
     .pane-body, .page-body, .manage-body, .app[data-pane="nav"] .pane-nav { flex: 1 0 auto; min-height: 0; overflow: visible; }
-    .topbar, .pane-head { position: sticky; top: 0; z-index: 31; }
-    .tabbar, .article-foot { position: sticky; bottom: 0; z-index: 30; }
+    .topbar, .pane-head { position: fixed; top: 0; left: 0; right: 0; z-index: 31; }
+    .tabbar, .article-foot { position: fixed; bottom: 0; left: 0; right: 0; z-index: 30; }
     .tabbar { height: 64px; padding: 6px 12px; }
-    .toasts { bottom: calc(64px + var(--space-3)); }
-    .app[data-pane="article"] .toasts { bottom: calc(60px + var(--space-3)); }
+    .toasts { bottom: calc(var(--bar-bottom, 64px) + var(--space-3)); }
     .topbar, .pane-head, .tabbar, .article-foot { transition: transform 0.32s cubic-bezier(0.2, 0.7, 0.2, 1); }
-    .app[data-bars="hidden"] :is(.topbar, .pane-head) { transform: translateY(-100%); }
-    .app[data-bars="hidden"] :is(.tabbar, .article-foot) { transform: translateY(100%); }
-    .app[data-bars="hidden"] :is(.topbar, .pane-head, .tabbar, .article-foot) { transition-timing-function: cubic-bezier(0.4, 0, 0.6, 1); }
-    /* The paper's section chips stick under the top bar, and take its place when it slides away. */
-    .paper-nav { top: 56px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -16px; padding: 8px 16px; transition: top 0.32s cubic-bezier(0.2, 0.7, 0.2, 1); }
+    .app[data-bars] :is(.topbar, .pane-head) { transform: translateY(-100%); }
+    .app[data-bars] :is(.tabbar, .article-foot) { transform: translateY(100%); }
+    .app[data-bars] :is(.topbar, .pane-head, .tabbar, .article-foot) { transition-timing-function: cubic-bezier(0.4, 0, 0.6, 1); }
+    .app[data-bars="gone"] :is(.topbar, .pane-head, .tabbar, .article-foot) { display: none !important; }
+    /* Nothing else may pin to the top edge either: the paper's section chips scroll with the page. */
+    .paper-nav { position: static; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -16px; padding: 8px 16px; }
     .paper-nav::-webkit-scrollbar { display: none; }
     .paper-nav .chip { flex: 0 0 auto; }
-    .app[data-bars="hidden"] .paper-nav { top: 0; }
     /* Opening an article (htmx "show:#article:top") lands at the very top, header included. */
     .pane-article > .pane-body { scroll-margin-top: 100vh; }
     .item { scroll-margin-top: 140px; scroll-margin-bottom: 80px; }
