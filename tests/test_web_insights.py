@@ -194,6 +194,7 @@ async def test_paper_tune_more_less_reset_records_corrections(client, session, u
     r = await client.post(f"/insights/paper/{edition.id}/tune", data={"key": key, "direction": "more"}, headers=headers | HX)
     assert r.status_code == 200 and "paper-tuned-more" in r.headers.get("HX-Trigger", "")
     assert 'class="chip chip-sm pstory-boost up"' in r.text and "+1.5" in r.text
+    assert " open>" in r.text  # the swapped-in story stays expanded, so the next action is still in reach
     assert "Tuned: AI +1 · Beta +0.5 · Alpha +0.5" in r.text and ">Reset<" in r.text
     await session.refresh(user)
     tuning = user.settings["paper"]["tuning"]

@@ -276,6 +276,7 @@ def _story_ctx(user: User, edition: Insight, section: dict | None, story: dict, 
         "story": story,
         "summary_prefs": ai_insights.summary_prefs(user),
         "tune_line": paper.tune_summary(config, story, feeds),
+        "hx_open": True,  # the reader acted inside the expanded story: the swapped-in row must stay open
     }
 
 
