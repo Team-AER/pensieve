@@ -1,8 +1,6 @@
 name: pensieve
 
 x-app: &app
-  build:
-    context: .
   image: pensieve:local
   env_file: .env
   environment:
@@ -43,6 +41,8 @@ services:
     restart: unless-stopped
   web:
     <<: *app
+    build:
+      context: .
     command: >-
       sh -c "alembic upgrade head &&
       exec uvicorn pensieve.main:app --host 0.0.0.0 --port 8000
