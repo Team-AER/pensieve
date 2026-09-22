@@ -39,8 +39,8 @@ from pensieve.models import (
 from pensieve.web.queries import invalidate_nav_cache, parse_uuid
 from pensieve.web.templating import (
     DB,
-    FONT_SIZES,
-    MEASURES,
+    READING_PREFS,
+    THEMES,
     CsrfUser,
     CurrentUser,
     hx_trigger,
@@ -1079,11 +1079,10 @@ async def save_account(
         db_user.display_name = display_name.strip()[:120]
     form = await request.form()
     settings = dict(db_user.settings or {})
-    settings["theme"] = theme if theme in {"auto", "light", "dark", "sepia"} else "auto"
-    font_size = str(form.get("font_size") or settings.get("font_size") or "m")
-    measure = str(form.get("measure") or settings.get("measure") or "normal")
-    settings["font_size"] = font_size if font_size in FONT_SIZES else "m"
-    settings["measure"] = measure if measure in MEASURES else "normal"
+    settings["theme"] = theme if theme in THEMES else "auto"
+    for key, (choices, default) in READING_PREFS.items():
+        value = str(form.get(key) or settings.get(key) or default)
+        settings[key] = value if value in choices else default
     settings["auto_reader"] = str(form.get("auto_reader") or "") == "1"  # checkbox: absent means off
     db_user.settings = settings
     await session.commit()
@@ -1091,20 +1090,21 @@ async def save_account(
 
 
 @router.post("/account/font")
-async def save_font(
-    request: Request,
-    user: CsrfUser,
-    session: DB,
-    font_size: Annotated[str, Form()] = "",
-    measure: Annotated[str, Form()] = "",
-):
-    """Persist the reader's +/- font-size and line-width keys (fetch from reader.js; 204)."""
+async def save_font(request: Request, user: CsrfUser, session: DB):
+    """Persist reading preferences changed live in the reader (the Aa popover and the +/- keys; 204).
+
+    Accepts any subset of the READING_PREFS keys plus ``theme``; unknown values are ignored.
+    """
+    form = await request.form()
     db_user = await session.get(User, user.id)
     settings = dict(db_user.settings or {})
-    if font_size in FONT_SIZES:
-        settings["font_size"] = font_size
-    if measure in MEASURES:
-        settings["measure"] = measure
+    for key, (choices, _default) in READING_PREFS.items():
+        value = str(form.get(key) or "")
+        if value in choices:
+            settings[key] = value
+    theme = str(form.get("theme") or "")
+    if theme in THEMES:
+        settings["theme"] = theme
     db_user.settings = settings
     await session.commit()
     return Response(status_code=204)

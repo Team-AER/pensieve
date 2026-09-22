@@ -1,0 +1,28 @@
+{# The "Aa" popover: every reading preference as a segmented control. Buttons carry data-pref (the <html>
+   data-* name reader.js flips) and data-value; the current state is rendered from the render() context and
+   re-synced by reader.js after swaps. #}
+{% import "_macros.html" as m %}
+{% set current = {'font': font_size|default('m'), 'face': font_family|default('sans'), 'leading': line_height|default('normal'), 'measure': measure|default('normal'), 'align': text_align|default('left'), 'theme': theme|default('auto')} %}
+{% set knobs = [
+  ('font', 'Text size', [('s', 'S'), ('m', 'M'), ('l', 'L'), ('xl', 'XL')]),
+  ('face', 'Font', [('sans', 'Sans'), ('serif', 'Serif'), ('system', 'System')]),
+  ('leading', 'Line height', [('tight', 'Tight'), ('normal', 'Normal'), ('loose', 'Loose')]),
+  ('measure', 'Width', [('narrow', 'Narrow'), ('normal', 'Normal'), ('wide', 'Wide')]),
+  ('align', 'Align', [('left', 'Left'), ('justify', 'Justify')]),
+  ('theme', 'Theme', [('auto', 'Auto'), ('light', 'Light'), ('dark', 'Dark'), ('sepia', 'Sepia')]),
+] %}
+<details class="menu reading-menu">
+  <summary class="btn btn-icon btn-sm" title="Reading settings" aria-label="Reading settings" aria-haspopup="dialog">{{ m.icon('type', 18) }}</summary>
+  <div class="menu-body reading-panel" role="group" aria-label="Reading settings">
+    <div class="reading-head"><span>Reading</span><a class="plain" href="/manage/account">All settings</a></div>
+    {% for name, label, choices in knobs %}
+    <div class="reading-row">
+      <span class="reading-label" id="reading-{{ name }}">{{ label }}</span>
+      <div class="seg" role="radiogroup" aria-labelledby="reading-{{ name }}">
+        {% for value, text in choices %}<button type="button" class="seg-btn{% if current[name] == value %} on{% endif %}" role="radio" aria-checked="{{ 'true' if current[name] == value else 'false' }}" data-pref="{{ name }}" data-value="{{ value }}">{{ text }}</button>{% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+    <div class="reading-foot">Saved to your account. <kbd>+</kbd> / <kbd>-</kbd> change the text size too.</div>
+  </div>
+</details>

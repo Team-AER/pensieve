@@ -16,12 +16,19 @@
   <div class="field"><label for="display_name">Display name</label><input class="input input-sm" id="display_name" name="display_name" value="{{ user.display_name }}" autocomplete="nickname"></div>
   <div class="field-row align-start">
     <div class="field"><label for="theme">Theme</label>
-      <select class="input input-sm" id="theme" name="theme" data-theme-select>{% for t, label in [('auto','Auto (system)'),('light','Light'),('dark','Dark'),('sepia','Sepia')] %}<option value="{{ t }}"{% if theme == t %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+      <select class="input input-sm" id="theme" name="theme" data-pref="theme">{% for t, label in [('auto','Auto (system)'),('light','Light'),('dark','Dark'),('sepia','Sepia')] %}<option value="{{ t }}"{% if theme == t %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
     <div class="field"><label for="font_size">Reading text size</label>
-      <select class="input input-sm" id="font_size" name="font_size" data-font-select>{% for f, label in [('s','Small'),('m','Medium'),('l','Large'),('xl','Extra large')] %}<option value="{{ f }}"{% if font_size == f %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+      <select class="input input-sm" id="font_size" name="font_size" data-pref="font">{% for f, label in [('s','Small'),('m','Medium'),('l','Large'),('xl','Extra large')] %}<option value="{{ f }}"{% if font_size == f %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
       <span class="field-hint">Also <kbd>+</kbd> / <kbd>-</kbd> in the reader.</span></div>
+    <div class="field"><label for="font_family">Reading font</label>
+      <select class="input input-sm" id="font_family" name="font_family" data-pref="face">{% for f, label in [('sans','Sans (Instrument Sans)'),('serif','Serif'),('system','System')] %}<option value="{{ f }}"{% if font_family == f %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+    <div class="field"><label for="line_height">Line height</label>
+      <select class="input input-sm" id="line_height" name="line_height" data-pref="leading">{% for f, label in [('tight','Tight'),('normal','Normal'),('loose','Loose')] %}<option value="{{ f }}"{% if line_height == f %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
     <div class="field"><label for="measure">Line width</label>
-      <select class="input input-sm" id="measure" name="measure" data-measure-select>{% for w, label in [('narrow','Narrow'),('normal','Normal'),('wide','Wide')] %}<option value="{{ w }}"{% if measure == w %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+      <select class="input input-sm" id="measure" name="measure" data-pref="measure">{% for w, label in [('narrow','Narrow'),('normal','Normal'),('wide','Wide')] %}<option value="{{ w }}"{% if measure == w %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+    <div class="field"><label for="text_align">Alignment</label>
+      <select class="input input-sm" id="text_align" name="text_align" data-pref="align">{% for f, label in [('left','Left (ragged right)'),('justify','Justified, hyphenated')] %}<option value="{{ f }}"{% if text_align == f %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+      <span class="field-hint">All of these are also in the reader's <strong>Aa</strong> menu and apply as you change them.</span></div>
     <div class="field"><span class="field-label">Link-only items</span>
       <label class="check" for="auto_reader"><input type="checkbox" class="checkbox" id="auto_reader" name="auto_reader" value="1"{% if (user.settings or {}).get('auto_reader', True) %} checked{% endif %}><span>Open Reader view automatically when a feed only carries a link (Hacker News, link blogs)</span></label>
       <span class="field-hint">When the page can't be extracted, the article shows an “Open web page” card instead.</span></div>

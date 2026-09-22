@@ -330,12 +330,40 @@ async def test_font_size_and_measure_settings(client, session, user):
     assert user.settings["font_size"] == "s"
 
 
+async def test_reading_preferences_font_face_leading_align_theme(client, session, user):
+    headers = await login(client, user)
+    r = await client.get("/")
+    assert 'data-face="sans"' in r.text and 'data-leading="normal"' in r.text and 'data-align="left"' in r.text
+    # Live changes from the popover post one key at a time.
+    for key, value in [("font_family", "serif"), ("line_height", "loose"), ("text_align", "justify"), ("theme", "sepia")]:
+        r = await client.post("/manage/account/font", data={key: value}, headers=headers)
+        assert r.status_code == 204
+    await session.refresh(user)
+    assert user.settings["font_family"] == "serif" and user.settings["line_height"] == "loose"
+    assert user.settings["text_align"] == "justify" and user.settings["theme"] == "sepia"
+    r = await client.get("/manage/account")
+    assert 'data-face="serif"' in r.text and 'data-leading="loose"' in r.text and 'data-align="justify"' in r.text
+    assert 'data-theme="sepia"' in r.text and 'value="serif" selected' in r.text
+    # Out-of-range values are ignored, both live and from the profile form (which falls back to the default).
+    r = await client.post("/manage/account/font", data={"font_family": "comic", "theme": "neon"}, headers=headers)
+    assert r.status_code == 204
+    await session.refresh(user)
+    assert user.settings["font_family"] == "serif" and user.settings["theme"] == "sepia"
+    r = await client.post("/manage/account/profile", data={"theme": "auto", "font_family": "wingdings", "line_height": "tight"}, headers=headers)
+    assert r.status_code == 303
+    await session.refresh(user)
+    assert user.settings["font_family"] == "sans" and user.settings["line_height"] == "tight"
+
+
 async def test_toolbar_share_and_shortcuts_listed(client, session, user):
     feed = await seed_feed(session, user, "Feed")
     item = await seed_item(session, feed, "Share me", url="https://example.com/share")
     await login(client, user)
     r = await client.get(f"/items/{item.id}", headers=HX)
     assert 'data-action="share"' in r.text and 'data-share-url="https://example.com/share"' in r.text
+    # The Aa reading-settings popover rides along with the toolbar, current choices pressed.
+    assert 'class="menu reading-menu"' in r.text and 'data-pref="face" data-value="sans"' in r.text
+    assert 'class="seg-btn on" role="radio" aria-checked="true" data-pref="font" data-value="m"' in r.text
     r = await client.get("/")
     assert "Mark everything in this view" in r.text and "Larger / smaller reading text" in r.text
 

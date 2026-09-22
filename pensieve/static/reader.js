@@ -63,18 +63,48 @@
     if (metas.length < 2) { const m = document.createElement('meta'); m.name = 'theme-color'; m.setAttribute('media', '(prefers-color-scheme: dark)'); m.content = THEME_COLORS.dark; first.after(m); }
     else { metas[1].setAttribute('media', '(prefers-color-scheme: dark)'); metas[1].content = THEME_COLORS.dark; }
   }
+  function applyTheme(value) {
+    const html = document.documentElement;
+    if (value === 'auto') html.removeAttribute('data-theme'); else html.dataset.theme = value;
+    html.setAttribute('data-theme-src', value);
+    setThemeColor(value);
+    try { const uid = html.dataset.uid || ''; localStorage.setItem('pensieve.theme:' + uid, value); localStorage.setItem('pensieve.theme:', value); } catch (_) {}
+  }
+
+  // ---- Reading preferences: data-* on <html> drive the typography in app.css; every change is applied at once
+  // and persisted through /manage/account/font. Controls carry data-pref (attribute name) + data-value (buttons)
+  // or are <select>s whose value is the preference. Mirrors READING_PREF_ATTRS in templating.py. ----
+  const PREF_FORM_KEYS = { font: 'font_size', measure: 'measure', face: 'font_family', leading: 'line_height', align: 'text_align', theme: 'theme' };
+  const PREF_LABELS = { font: 'Text size', face: 'Font', leading: 'Line height', measure: 'Line width', align: 'Alignment', theme: 'Theme' };
+  function prefValue(name) {
+    const h = document.documentElement;
+    return name === 'theme' ? (h.getAttribute('data-theme-src') || 'auto') : (h.dataset[name] || '');
+  }
+  function syncPrefControls(root) {
+    $$('[data-pref]', root).forEach((el) => {
+      const cur = prefValue(el.dataset.pref);
+      if (el.tagName === 'SELECT') { if (el.value !== cur) el.value = cur; return; }
+      const on = el.dataset.value === cur;
+      el.classList.toggle('on', on);
+      el.setAttribute('aria-checked', on ? 'true' : 'false');
+    });
+  }
+  function setPref(name, value, opts) {
+    if (!PREF_FORM_KEYS[name] || prefValue(name) === value) return;
+    if (name === 'theme') applyTheme(value); else document.documentElement.dataset[name] = value;
+    syncPrefControls();
+    const body = new URLSearchParams({ [PREF_FORM_KEYS[name]]: value });
+    fetch('/manage/account/font', { method: 'POST', credentials: 'same-origin', body, headers: { 'X-CSRF-Token': csrfToken() } }).catch(() => {});
+    if (opts && opts.announce) announce(PREF_LABELS[name] + ': ' + value);
+  }
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-pref]');
+    if (b) { e.preventDefault(); setPref(b.dataset.pref, b.dataset.value, { announce: true }); }
+  });
   document.addEventListener('change', (e) => {
     const t = e.target;
     if (t.matches('[data-toggle]')) { const el = $(t.dataset.toggle); if (el) el.classList.toggle('hidden', !t.checked); if (el && t.checked) { const f = el.querySelector('textarea'); if (f) f.focus(); } }
-    if (t.matches('[data-theme-select]')) {
-      const html = document.documentElement;
-      if (t.value === 'auto') html.removeAttribute('data-theme'); else html.dataset.theme = t.value;
-      html.setAttribute('data-theme-src', t.value);
-      setThemeColor(t.value);
-      try { const uid = html.dataset.uid || ''; localStorage.setItem('pensieve.theme:' + uid, t.value); localStorage.setItem('pensieve.theme:', t.value); } catch (_) {}
-    }
-    if (t.matches('[data-font-select]')) document.documentElement.dataset.font = t.value;
-    if (t.matches('[data-measure-select]')) document.documentElement.dataset.measure = t.value;
+    if (t.matches('select[data-pref]')) setPref(t.dataset.pref, t.value);
     // File drop zones echo the chosen file name.
     if (t.matches('.file input[type="file"]')) { const name = t.closest('.file').querySelector('[data-file-name]'); if (name) name.textContent = t.files && t.files[0] ? t.files[0].name : ''; }
   });
@@ -235,7 +265,7 @@
     const s = d.querySelector(':scope > summary'); if (s) s.setAttribute('aria-expanded', d.open ? 'true' : 'false');
     if (d.open) { $$('details.menu[open]').forEach((o) => { if (o !== d) o.removeAttribute('open'); }); }
   }, true);
-  function menuItems(d) { return $$('.menu-item, .menu-form .input, .menu-form .btn', d).filter((el) => el.offsetParent !== null); }
+  function menuItems(d) { return $$('.menu-item, .menu-form .input, .menu-form .btn, .reading-row .seg-btn', d).filter((el) => el.offsetParent !== null); }
   document.addEventListener('keydown', (e) => {
     const d = e.target.closest && e.target.closest('details.menu'); if (!d) return;
     const items = menuItems(d);
@@ -338,16 +368,13 @@
       if (everything) form.requestSubmit(everything); else form.requestSubmit();
     });
   }
-  // Reading size: cycle data-font on <html>, persist through /manage/account/font.
+  // Reading size keys (+ / -): step data-font on <html> through setPref, which also persists it.
   const FONT_SIZES = ['s', 'm', 'l', 'xl'];
   function stepFont(delta) {
-    const html = document.documentElement;
-    const idx = Math.max(0, FONT_SIZES.indexOf(html.dataset.font || 'm'));
+    const idx = Math.max(0, FONT_SIZES.indexOf(prefValue('font') || 'm'));
     const next = FONT_SIZES[Math.max(0, Math.min(FONT_SIZES.length - 1, idx + delta))];
-    if (next === html.dataset.font) return;
-    html.dataset.font = next;
-    const body = new URLSearchParams({ font_size: next });
-    fetch('/manage/account/font', { method: 'POST', credentials: 'same-origin', body, headers: { 'X-CSRF-Token': csrfToken() } }).catch(() => {});
+    if (next === prefValue('font')) return;
+    setPref('font', next);
     toast('Reading text: ' + ({ s: 'small', m: 'medium', l: 'large', xl: 'extra large' })[next]);
   }
   function share(btn) {
@@ -401,7 +428,7 @@
     }
     if (t.id === 'list' || t.id === 'list-body' || t.closest('#list-body')) { syncTabindex(); updatePos(); }
   });
-  document.body.addEventListener('htmx:afterSettle', () => relocateToolbar());
+  document.body.addEventListener('htmx:afterSettle', () => { relocateToolbar(); syncPrefControls(); });
   document.body.addEventListener('htmx:responseError', (e) => {
     const xhr = e.detail && e.detail.xhr;
     if (xhr && (xhr.status === 401 || xhr.status === 403)) window.location.reload();

@@ -13,7 +13,7 @@ memory, and daily insights—or disable AI and use Pensieve as a straightforward
 
 ## Highlights
 
-- Fast three-pane reader with keyboard shortcuts, mobile navigation, themes, and offline app shell
+- Fast three-pane reader with keyboard shortcuts, mobile navigation, themes, per-account reading settings (text size, font, line height, width, alignment), and offline app shell
 - Feed discovery, conditional fetches, reader mode, favicon caching, OPML import/export, and adaptive polling
 - Reeder and NetNewsWire support through Google Reader and Fever-compatible sync APIs
 - Per-user folders, tags, rules, saved items, notes, search, and household administration

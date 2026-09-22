@@ -117,11 +117,14 @@ def snippet(text: str | None, length: int = 160) -> str:
     return text if len(text) <= length else text[: length - 1].rstrip() + "…"
 
 
+THEMES = ("auto", "light", "dark", "sepia")
+
+
 def theme_for(user: User | None) -> str:
     if user is None:
         return "auto"
-    settings = user.settings or {}
-    return str(settings.get("theme") or "auto")
+    value = str((user.settings or {}).get("theme") or "auto")
+    return value if value in THEMES else "auto"
 
 
 _QUERY_NOISE = {"or", "and", "not"}
@@ -148,16 +151,45 @@ def highlight(text: str | None, query: str | None) -> Markup:
 
 FONT_SIZES = ("s", "m", "l", "xl")
 MEASURES = ("narrow", "normal", "wide")
+FONT_FAMILIES = ("sans", "serif", "system")
+LINE_HEIGHTS = ("tight", "normal", "loose")
+TEXT_ALIGNS = ("left", "justify")
+
+# Reading preferences: settings key -> (allowed values, default). Each one is mirrored to a data-* attribute
+# on <html> (see READING_PREF_ATTRS) so app.css can drive typography from it and reader.js can flip it live.
+READING_PREFS: dict[str, tuple[tuple[str, ...], str]] = {
+    "font_size": (FONT_SIZES, "m"),
+    "measure": (MEASURES, "normal"),
+    "font_family": (FONT_FAMILIES, "sans"),
+    "line_height": (LINE_HEIGHTS, "normal"),
+    "text_align": (TEXT_ALIGNS, "left"),
+}
+READING_PREF_ATTRS = {
+    "font_size": "font",
+    "measure": "measure",
+    "font_family": "face",
+    "line_height": "leading",
+    "text_align": "align",
+}
+
+
+def reading_pref(user: User | None, key: str) -> str:
+    """The user's value for one reading preference, or its default when unset or out of range."""
+    choices, default = READING_PREFS[key]
+    value = str((user.settings or {}).get(key) or default) if user else default
+    return value if value in choices else default
+
+
+def reading_prefs_for(user: User | None) -> dict[str, str]:
+    return {key: reading_pref(user, key) for key in READING_PREFS}
 
 
 def font_size_for(user: User | None) -> str:
-    value = str((user.settings or {}).get("font_size") or "m") if user else "m"
-    return value if value in FONT_SIZES else "m"
+    return reading_pref(user, "font_size")
 
 
 def measure_for(user: User | None) -> str:
-    value = str((user.settings or {}).get("measure") or "normal") if user else "normal"
-    return value if value in MEASURES else "normal"
+    return reading_pref(user, "measure")
 
 
 def _csrf_serializer() -> URLSafeTimedSerializer:
@@ -248,8 +280,8 @@ def render(
         "request": request,
         "user": user,
         "theme": theme_for(user),
-        "font_size": font_size_for(user),
-        "measure": measure_for(user),
+        **reading_prefs_for(user),
+        "reading_pref_attrs": READING_PREF_ATTRS,
         "csrf_token": make_csrf(user.id if user else None),
         "settings": get_settings(),
         "htmx": is_htmx(request),

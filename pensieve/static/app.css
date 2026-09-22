@@ -23,10 +23,15 @@
     /* Breakpoints (read by reader.js; media queries below repeat the literal values) */
     --bp-wide: 1160px;
     --bp-mobile: 900px;
-    /* Reading size and measure: driven by data-font / data-measure on <html>. */
+    /* Reading preferences, driven by data-* attributes on <html> (see READING_PREF_ATTRS in templating.py):
+       data-font (size), data-measure (line width), data-face (font), data-leading (line height), data-align. */
     --fs-body: 15px;
     --fs-prose: 17px;
     --measure: 70ch;
+    --font-prose: var(--font-body);
+    --lh-prose: 1.65;
+    --align-prose: left;
+    --hyphens-prose: manual;
     /* Brand (theme-independent: login hero, app icon) */
     --brand-ink: #1B1A17;
     --brand-paper: #F3F1EA;
@@ -64,6 +69,10 @@
     --focus-ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
     --font-display: 'Fraunces', Georgia, serif;
     --font-body: 'Instrument Sans', system-ui, -apple-system, sans-serif;
+    /* Reading-only faces: text serifs the OS ships (Fraunces is loaded as a display cut only) and the system UI face. */
+    --font-serif: Charter, 'Iowan Old Style', 'Palatino Linotype', 'Book Antiqua', Georgia, 'Times New Roman', serif;
+    --font-system: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
   }
 
   /* Dark: system preference (unless the account picked light or sepia) and the explicit choice. */
@@ -103,6 +112,11 @@
   :root[data-font="xl"] { --fs-body: 17px; --fs-prose: 21px; }
   :root[data-measure="narrow"] { --measure: 58ch; }
   :root[data-measure="wide"] { --measure: 88ch; }
+  :root[data-face="serif"] { --font-prose: var(--font-serif); }
+  :root[data-face="system"] { --font-prose: var(--font-system); }
+  :root[data-leading="tight"] { --lh-prose: 1.45; }
+  :root[data-leading="loose"] { --lh-prose: 1.85; }
+  :root[data-align="justify"] { --align-prose: justify; --hyphens-prose: auto; }
 }
 
 /* =====================================================================
@@ -411,11 +425,61 @@
   /* ---- Article ---- */
   .article { display: flex; flex-direction: column; gap: 22px; padding: 32px 48px 48px; max-width: 800px; }
   .article-title { font-size: var(--text-3xl); line-height: 1.15; max-width: var(--measure); }
-  .prose { font-size: var(--fs-prose); line-height: 1.65; max-width: var(--measure); overflow-wrap: anywhere; }
-  .prose img, .prose video, .prose iframe { max-width: 100%; height: auto; border-radius: 8px; }
-  .prose pre { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; overflow-x: auto; font-size: var(--text-md); }
-  .prose blockquote { margin: 0; padding-left: 16px; border-left: 3px solid var(--line-3); color: var(--muted); }
-  .prose table { max-width: 100%; overflow-x: auto; display: block; }
+
+  /* ---- Prose: sanitised feed / Reader-view HTML, typeset from the reading preferences on <html>.
+     The base layer zeroes p/h margins for the chrome, so every block element gets its rhythm back here. ---- */
+  .prose { font-family: var(--font-prose); font-size: var(--fs-prose); line-height: var(--lh-prose); max-width: var(--measure); color: var(--ink); text-align: var(--align-prose); hyphens: var(--hyphens-prose); -webkit-hyphens: var(--hyphens-prose); overflow-wrap: break-word; text-rendering: optimizeLegibility; font-kerning: normal; }
+  .prose > :first-child { margin-top: 0; }
+  .prose > :last-child { margin-bottom: 0; }
+  .prose p, .prose ul, .prose ol, .prose dl, .prose pre, .prose table, .prose details, .prose audio, .prose video, .prose iframe { margin: 0 0 1.15em; }
+  .prose p:empty { display: none; }
+  .prose h1, .prose h2, .prose h3, .prose h4, .prose h5, .prose h6 { font-family: var(--font-display); font-weight: 500; letter-spacing: -0.01em; line-height: 1.2; color: var(--ink); margin: 1.6em 0 0.5em; text-align: left; hyphens: manual; -webkit-hyphens: manual; }
+  .prose h1 { font-size: 1.6em; }
+  .prose h2 { font-size: 1.4em; }
+  .prose h3 { font-size: 1.2em; }
+  .prose h4 { font-size: 1.05em; }
+  .prose h5, .prose h6 { font-size: 1em; font-family: var(--font-prose); font-weight: 600; }
+  .prose h1 + h2, .prose h2 + h3, .prose h3 + h4 { margin-top: 0.4em; }
+  .prose a { color: var(--accent); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 0.16em; text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+  .prose a:hover { color: var(--accent-ink); text-decoration-color: currentColor; }
+  .prose strong, .prose b { font-weight: 600; }
+  .prose ul, .prose ol { padding-left: 1.5em; }
+  .prose li { margin: 0 0 0.4em; }
+  .prose li::marker { color: var(--muted); }
+  .prose li > p { margin-bottom: 0.4em; }
+  .prose li > ul, .prose li > ol { margin: 0.4em 0 0; }
+  .prose dt { font-weight: 600; }
+  .prose dd { margin: 0 0 0.6em 1.5em; }
+  .prose hr { border: 0; border-top: 1px solid var(--line-3); margin: 2em 0; }
+  .prose img, .prose picture, .prose video, .prose iframe { max-width: 100%; height: auto; border-radius: 8px; }
+  .prose img { vertical-align: middle; }
+  .prose > img, .prose p > img:only-child, .prose figure img, .prose picture img { display: block; margin: 0 auto; }
+  .prose > img, .prose p > img:only-child { margin-bottom: 1.15em; }
+  .prose figure { margin: 1.4em 0; }
+  .prose figcaption { margin-top: 0.5em; font-family: var(--font-body); font-size: 0.8em; line-height: 1.45; color: var(--muted); text-align: center; hyphens: manual; -webkit-hyphens: manual; }
+  .prose iframe { display: block; width: 100%; aspect-ratio: 16 / 9; border: 0; }
+  .prose audio { width: 100%; }
+  .prose blockquote { margin: 1.15em 0; padding: 0.1em 0 0.1em 1.1em; border-left: 3px solid var(--line-3); color: var(--ink-2); }
+  .prose blockquote > :last-child { margin-bottom: 0; }
+  .prose blockquote cite { display: block; margin-top: 0.4em; font-size: 0.85em; color: var(--muted); font-style: normal; }
+  .prose code, .prose kbd, .prose samp, .prose var { font-family: var(--font-mono); font-size: 0.875em; font-style: normal; }
+  .prose :not(pre) > code { padding: 0.1em 0.35em; border-radius: 4px; background: var(--chip); color: var(--ink); overflow-wrap: anywhere; }
+  .prose pre { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; overflow-x: auto; font-size: 0.82em; line-height: 1.55; text-align: left; hyphens: manual; -webkit-hyphens: manual; tab-size: 4; }
+  .prose pre code { padding: 0; background: transparent; font-size: inherit; white-space: pre; }
+  .prose kbd { padding: 0.1em 0.4em; border: 1px solid var(--line-3); border-radius: 4px; background: var(--card); color: var(--muted); font-size: 0.8em; }
+  .prose table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; font-size: 0.875em; line-height: 1.45; text-align: left; hyphens: manual; -webkit-hyphens: manual; }
+  .prose th, .prose td { padding: 6px 10px; border: 1px solid var(--line); vertical-align: top; }
+  .prose th { font-weight: 600; background: var(--panel); }
+  .prose caption { caption-side: bottom; padding-top: 6px; font-size: 0.85em; color: var(--muted); }
+  .prose sup, .prose sub { font-size: 0.75em; line-height: 0; }
+  .prose small { font-size: 0.85em; }
+  .prose abbr[title] { text-decoration: underline dotted; text-underline-offset: 0.16em; cursor: help; }
+  .prose details { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
+  .prose details > summary { font-weight: 600; }
+  .prose details[open] > summary { margin-bottom: 0.5em; }
+  .prose mark { background: var(--highlight); color: inherit; }
+  /* Feed HTML that uses <br><br> for paragraphs sits in one block; keep the last break from adding a blank line. */
+  .prose > br:last-child { display: none; }
   .keybar { height: 34px; flex: 0 0 auto; display: flex; align-items: center; gap: 18px; padding: 0 24px; border-top: 1px solid var(--line); background: var(--panel); font-size: var(--text-sm); color: var(--faint); overflow: hidden; white-space: nowrap; }
   .keybar kbd { color: var(--muted); }
 
