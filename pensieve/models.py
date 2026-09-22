@@ -16,6 +16,7 @@ from datetime import datetime
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     Computed,
     DateTime,
@@ -37,6 +38,13 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from pensieve.db import Base
 
 EMBEDDING_DIMS = 768
+
+#: items.search_vector: title (A), feed or saved-page text (B), archived page text of a feed item (C).
+SEARCH_VECTOR_SQL = (
+    "setweight(to_tsvector('english', coalesce(title, '')), 'A') || "
+    "setweight(to_tsvector('english', coalesce(content_text, '')), 'B') || "
+    "setweight(to_tsvector('english', coalesce(archive_text, '')), 'C')"
+)
 
 #: Expression index on items(id) equal to ``syncapi.common.long_id_sql(Item.id)``: the sync APIs' int64 item id.
 LONG_ID_INDEX_SQL = "((('x'||substr(replace(id::text,'-',''),1,16))::bit(64)::bigint) & 9223372036854775807)"
@@ -150,9 +158,19 @@ class Folder(TimestampMixin, Base):
     feeds: Mapped[list[Feed]] = relationship(back_populates="folder", foreign_keys="Feed.folder_id")
 
 
+#: ``Feed.kind`` values. A 'saved' feed is the per-user home of links saved with Save link: never polled,
+#: hidden from feed management and OPML, shown in the reader as "Saved".
+FEED_KIND_RSS = "rss"
+FEED_KIND_SAVED = "saved"
+SAVED_FEED_URL = "pensieve:saved"
+
+
 class Feed(TimestampMixin, Base):
     __tablename__ = "feeds"
-    __table_args__ = (UniqueConstraint("user_id", "url", name="uq_feed_user_url"),)
+    __table_args__ = (
+        UniqueConstraint("user_id", "url", name="uq_feed_user_url"),
+        Index("uq_feed_user_saved", "user_id", unique=True, postgresql_where=text("kind = 'saved'")),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -184,6 +202,8 @@ class Feed(TimestampMixin, Base):
     last_error: Mapped[str | None] = mapped_column(Text)
     paused: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     websub_hub: Mapped[str | None] = mapped_column(String(2048))
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, default=FEED_KIND_RSS, server_default=FEED_KIND_RSS)
+    """'rss' (a subscription) or 'saved' (the user's saved links; see pensieve/archive)."""
 
     user: Mapped[User] = relationship(back_populates="feeds")
     folder: Mapped[Folder | None] = relationship(back_populates="feeds", foreign_keys=[folder_id])
@@ -244,16 +264,22 @@ class Item(Base):
     """SHA-256 of normalised title + content_text, for exact dedup across feeds."""
     enclosure_url: Mapped[str | None] = mapped_column(String(2048))
     enclosure_type: Mapped[str | None] = mapped_column(String(100))
+    archive_text: Mapped[str | None] = mapped_column(Text)
+    """Full text of the archived page for a feed item (starred items are archived). Saved links keep their
+    full text in content_text instead, so this stays NULL for them."""
     search_vector = mapped_column(
         TSVECTOR,
-        Computed(
-            "setweight(to_tsvector('english', coalesce(title, '')), 'A') || "
-            "setweight(to_tsvector('english', coalesce(content_text, '')), 'B')",
-            persisted=True,
-        ),
+        Computed(SEARCH_VECTOR_SQL, persisted=True),
     )
 
     feed: Mapped[Feed] = relationship(back_populates="items")
+
+    @property
+    def full_text(self) -> str:
+        """The richest text Pensieve has: the archived page when it beats the feed's excerpt."""
+        archived = self.archive_text or ""
+        own = self.content_text or ""
+        return archived if len(archived) > len(own) else own
 
 
 class ItemState(Base):
@@ -308,6 +334,72 @@ class Note(TimestampMixin, Base):
     item_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("items.id", ondelete="CASCADE"), nullable=False, index=True)
     quote: Mapped[str] = mapped_column(Text, nullable=False, default="")
     body: Mapped[str] = mapped_column(Text, nullable=False, default="")
+
+
+# ---------------------------------------------------------------------------
+# Page archive (saved links, starred items): metadata here, blobs in the S3 store
+# ---------------------------------------------------------------------------
+
+
+class Snapshot(TimestampMixin, Base):
+    """One archived capture of an item's page per user; a re-capture replaces it in place.
+
+    Blob keys live under ``snap/<id>/<generation>/`` in the bucket: ``raw`` (server HTML, gzip), ``page``
+    (the frozen rendered DOM, gzip), ``shot`` (full-page JPEG) and ``file`` (a PDF or other non-HTML body).
+    Images, fonts and the site icon are content-addressed :class:`ArchiveAsset` rows shared across captures.
+    """
+
+    __tablename__ = "snapshots"
+    __table_args__ = (UniqueConstraint("user_id", "item_id", name="uq_snapshot_user_item"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    item_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("items.id", ondelete="CASCADE"), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued")
+    """queued | rendering | done | failed"""
+    generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error: Mapped[str | None] = mapped_column(Text)
+    requested_url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    final_url: Mapped[str | None] = mapped_column(String(2048))
+    http_status: Mapped[int | None] = mapped_column(Integer)
+    content_type: Mapped[str | None] = mapped_column(String(120))
+    render_mode: Mapped[str | None] = mapped_column(String(16))
+    """browser (rendered in Chromium) | http (server HTML only) | client (DOM sent by the extension) | file"""
+    site_name: Mapped[str | None] = mapped_column(String(300))
+    byline: Mapped[str | None] = mapped_column(String(300))
+    lang: Mapped[str | None] = mapped_column(String(20))
+    word_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    page_published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lead_image_sha: Mapped[str | None] = mapped_column(String(64))
+    icon_sha: Mapped[str | None] = mapped_column(String(64))
+    raw_key: Mapped[str | None] = mapped_column(String(512))
+    page_key: Mapped[str | None] = mapped_column(String(512))
+    shot_key: Mapped[str | None] = mapped_column(String(512))
+    file_key: Mapped[str | None] = mapped_column(String(512))
+    bytes_total: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    """Blob bytes of this capture (raw + page + shot + file + its assets' sizes at capture time)."""
+    captured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ArchiveAsset(Base):
+    """A content-addressed blob (image, font, icon) at ``assets/<sha[:2]>/<sha>`` in the bucket."""
+
+    __tablename__ = "archive_assets"
+
+    sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
+    content_type: Mapped[str] = mapped_column(String(120), nullable=False)
+    size: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class SnapshotAsset(Base):
+    """Which assets a snapshot uses: drives the ownership check on /archive/a/<sha> and garbage collection."""
+
+    __tablename__ = "snapshot_assets"
+
+    snapshot_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("snapshots.id", ondelete="CASCADE"), primary_key=True)
+    sha256: Mapped[str] = mapped_column(ForeignKey("archive_assets.sha256", ondelete="CASCADE"), primary_key=True, index=True)
 
 
 # ---------------------------------------------------------------------------

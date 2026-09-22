@@ -5,6 +5,8 @@
 {% if opts.first_page %}
 {% if view.kind == 'unread' %}
 {{ m.empty_state('All caught up', 'Nothing unread in ' ~ view.title ~ '. New items appear here as feeds are polled.', 'check-circle', action='<a class="btn btn-sm" href="/reader/all">Browse all items</a> <a class="btn btn-sm" href="/manage/feeds">Add a feed</a>'|safe) }}
+{% elif view.kind == 'saved' %}
+{{ m.empty_state('Nothing saved yet' if not view.key else ('Nothing archived yet' if view.key == 'archive' else 'Nothing saved yet'), 'Save any page with the Save button, press b, use the bookmarklet, or share to Pensieve from your phone. A full copy is kept, so it stays readable offline.' if view.key != 'archive' else 'Saved links you finish (mark read) move here.', 'bookmark', action='<button type="button" class="btn btn-sm btn-primary" data-open-dialog="#save-dialog">Save a link</button> <a class="btn btn-sm" href="/manage/saving">Bookmarklet and phone setup</a>'|safe) }}
 {% elif view.kind == 'starred' %}
 {{ m.empty_state('All caught up', 'Nothing starred yet. Press s on any item to keep it here.', 'star') }}
 {% else %}

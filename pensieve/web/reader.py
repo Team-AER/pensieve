@@ -13,7 +13,18 @@ from sqlalchemy import and_, exists, func, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
-from pensieve.models import Cluster, ClusterItem, Feed, Folder, Item, ItemAI, ItemState, Tag, User
+from pensieve.models import (
+    FEED_KIND_SAVED,
+    Cluster,
+    ClusterItem,
+    Feed,
+    Folder,
+    Item,
+    ItemAI,
+    ItemState,
+    Tag,
+    User,
+)
 from pensieve.web.cursor import decode_cursor, encode_cursor
 from pensieve.web.queries import (
     NavCounts,
@@ -31,7 +42,10 @@ from pensieve.web.undo import load_undo, save_undo
 router = APIRouter()
 
 PAGE_SIZE = 40
-VIEW_KINDS = {"all", "unread", "starred", "folder", "feed", "tag"}
+VIEW_KINDS = {"all", "unread", "starred", "folder", "feed", "tag", "saved"}
+KEYED_KINDS = {"folder", "feed", "tag", "saved"}
+#: Saved-links views, Pocket style: My list (unread), Archive (read), All.
+SAVED_KEYS = {None: "My list", "archive": "Archive", "all": "All saved"}
 
 
 # ---------------------------------------------------------------------------
@@ -96,6 +110,7 @@ class NavData:
     view: View
     total_unread: int
     starred: int
+    saved: int
     folders: list[FolderNav]
     inbox: list[tuple[Feed, int]]
     inbox_count: int
@@ -125,6 +140,10 @@ async def resolve_view(session: AsyncSession, user: User, kind: str, key: str | 
         return View("unread", title="All unread")
     if kind == "starred":
         return View("starred", title="Starred")
+    if kind == "saved":
+        if key not in SAVED_KEYS:
+            raise HTTPException(status_code=404, detail="Unknown view")
+        return View("saved", key=key, title=SAVED_KEYS[key])
     if kind == "folder":
         folder_id = parse_uuid(key)
         folder = await session.get(Folder, folder_id) if folder_id else None
@@ -157,6 +176,15 @@ def cluster_subquery(user_id: uuid.UUID):
 
 
 def apply_view_filter(stmt, view: View, user_id: uuid.UUID, state):
+    # Saved links live in their own view (Pocket's list), not in the feed river.
+    if view.kind in {"unread", "all"}:
+        stmt = stmt.where(Feed.kind != FEED_KIND_SAVED)
+    if view.kind == "saved":
+        stmt = stmt.where(Feed.kind == FEED_KIND_SAVED)
+        if view.key is None:
+            stmt = stmt.where(is_unread(state))
+        elif view.key == "archive":
+            stmt = stmt.where(state.is_read.is_(True))
     if view.kind == "unread":
         stmt = stmt.where(is_unread(state))
     elif view.kind == "starred":
@@ -334,9 +362,11 @@ async def nav_data(session: AsyncSession, user: User, view: View) -> NavData:
     starred = counts.starred
     user_tag_counts = counts.user_tag_counts
     ai_tag_counts = counts.ai_tag_counts
-    feeds = list(
+    all_feeds = list(
         await session.scalars(select(Feed).where(Feed.user_id == user.id).order_by(Feed.position, Feed.title))
     )
+    feeds = [f for f in all_feeds if f.kind != FEED_KIND_SAVED]
+    saved_unread = sum(unread_by_feed.get(f.id, 0) for f in all_feeds if f.kind == FEED_KIND_SAVED)
     folders = list(
         await session.scalars(
             select(Folder).where(Folder.user_id == user.id).order_by(Folder.position, Folder.name)
@@ -355,8 +385,9 @@ async def nav_data(session: AsyncSession, user: User, view: View) -> NavData:
     ai_tags = sorted({t.name for t in tags if t.kind == "ai"} | set(ai_tag_counts))
     return NavData(
         view=view,
-        total_unread=sum(unread_by_feed.values()),
+        total_unread=sum(n for f in feeds if (n := unread_by_feed.get(f.id, 0))),
         starred=int(starred or 0),
+        saved=saved_unread,
         folders=folder_navs,
         inbox=inbox,
         inbox_count=sum(n for _, n in inbox),
@@ -459,7 +490,7 @@ async def reader_keyed(
     user: CurrentUser,
     session: DB,
 ):
-    if kind not in {"folder", "feed", "tag"}:
+    if kind not in KEYED_KINDS:
         raise HTTPException(status_code=404)
     view = await resolve_view(session, user, kind, key)
     return await render_reader(request, session, user, view)

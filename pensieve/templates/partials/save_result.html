@@ -1,0 +1,3 @@
+{% import "_macros.html" as m %}
+{% if error %}<div class="flash flash-error" role="alert">{{ m.icon('warning', 14) }} {{ error }}</div>
+{% elif result %}<div class="flash flash-ok" role="status">{{ m.icon('check', 14) }} {{ 'Saved' if result.created else 'Already saved' }}: <a href="/items/{{ result.item.id }}">{{ result.item.title }}</a></div>{% endif %}

@@ -1,0 +1,89 @@
+{% extends "manage/layout.html" %}
+{% import "_macros.html" as m %}
+{% block mtitle %}Saving and archive{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div class="page-head-text">
+    <h1>Saving and archive</h1>
+    <p class="page-summary">{{ stats.saved }} saved link{{ 's' if stats.saved != 1 }} · {{ stats.done }} page{{ 's' if stats.done != 1 }} archived · {{ stats.bytes|filesize }}{% if stats.pending %} · {{ stats.pending }} capturing{% endif %}{% if stats.failed %} · {{ stats.failed }} failed{% endif %}</p>
+  </div>
+  <div class="page-head-actions"><button type="button" class="btn btn-primary" data-open-dialog="#save-dialog">{{ m.icon('bookmark-plus', 14) }} Save a link</button></div>
+</div>
+{% if saving_flash is defined and saving_flash %}<div class="flash flash-ok" role="status">{{ m.icon('check', 14) }} {{ saving_flash }}</div>{% endif %}
+
+<section class="card section">
+  <div class="card-head"><h2>How pages are kept</h2>
+    <span class="chip chip-sm {{ 'chip-ok' if storage_on else 'chip-warn' }}">{{ 'Archive storage on' if storage_on else 'Text only' }}</span>
+    <span class="chip chip-sm {{ 'chip-ok' if browser_on else 'chip-warn' }}">{{ 'Browser rendering on' if browser_on else 'No browser' }}</span>
+  </div>
+  <p class="muted">When you save a link, Pensieve fetches it from this server, renders it in a headless browser so script-built pages come out whole, and keeps the article text (searchable, and what the AI reads), a static copy of the page with its images and styles, a full-page screenshot and the original HTML. None of it needs the site to still be there.</p>
+  {% if not storage_on %}<p class="flash flash-warn">{{ m.icon('info', 14) }} No object store is configured, so only the article text is kept. Set the <code>PENSIEVE_S3_*</code> values (the compose file runs Garage for this).</p>{% endif %}
+  <form method="post" action="/manage/saving/settings" class="row wrap" style="gap:10px">{{ m.csrf_field(csrf_token) }}
+    <label class="switch-row"><input type="checkbox" name="archive_starred" value="1" {% if archive_starred %}checked{% endif %} onchange="this.form.requestSubmit()"> <span><strong>Also archive items I star</strong><br><span class="muted small">Starring a feed item keeps a full copy of its page too.</span></span></label>
+    <noscript><button class="btn btn-sm" type="submit">Save</button></noscript>
+  </form>
+  <div class="row wrap" style="gap:8px;margin-top:10px">
+    <form method="post" action="/manage/saving/backfill">{{ m.csrf_field(csrf_token) }}<button class="btn btn-sm" type="submit">{{ m.icon('archive', 14) }} Archive everything already starred</button></form>
+    {% if stats.failed %}<form method="post" action="/manage/saving/retry">{{ m.csrf_field(csrf_token) }}<button class="btn btn-sm" type="submit">{{ m.icon('refresh', 14) }} Retry {{ stats.failed }} failed capture{{ 's' if stats.failed != 1 }}</button></form>{% endif %}
+  </div>
+  {% if failed %}
+  <ul class="failed-list small">
+    {% for s in failed %}<li><a href="/items/{{ s.item_id }}">{{ s.requested_url|host }}</a> <span class="faint">{{ s.error|truncate(120) }}</span></li>{% endfor %}
+  </ul>
+  {% endif %}
+</section>
+
+<section class="card section">
+  <div class="card-head"><h2>{{ m.icon('bookmark', 16) }} Bookmarklet</h2><span class="chip chip-sm">any desktop browser</span></div>
+  <p class="muted">Drag this button to your bookmarks bar. On any page, click it: a small window opens with the link filled in; press Save.</p>
+  <p><a class="btn btn-primary bookmarklet" href="{{ bookmarklet }}" onclick="event.preventDefault(); window.alert('Drag this button to your bookmarks bar, then click it on any page.');" title="Drag to your bookmarks bar">{{ m.icon('bookmark-plus', 14) }} Save to Pensieve</a></p>
+  <details class="small"><summary class="muted">Or copy the code</summary><code class="token-plain">{{ bookmarklet }}</code></details>
+</section>
+
+<section class="card section">
+  <div class="card-head"><h2>{{ m.icon('share', 16) }} From your phone</h2></div>
+  <div class="grid-2">
+    <div class="col" style="gap:6px">
+      <h3>Android</h3>
+      <p class="muted small">Open Pensieve in Chrome and choose <strong>Install app</strong> (or <em>Add to Home screen</em>). Pensieve then appears in the share sheet of every app: share a page to it and tap Save.</p>
+    </div>
+    <div class="col" style="gap:6px">
+      <h3>iPhone and iPad</h3>
+      <p class="muted small">Safari doesn't let web apps join the share sheet, so use a Shortcut. Create a token below, then in the Shortcuts app:</p>
+      <ol class="small steps">
+        <li>New shortcut, turn on <strong>Show in Share Sheet</strong> and accept <em>URLs</em> and <em>Safari web pages</em>.</li>
+        <li>Add <strong>Get Contents of URL</strong>: <code>{{ base }}/api/v1/save</code>, method <strong>POST</strong>, request body <strong>JSON</strong> with a key <code>url</code> set to <em>Shortcut Input</em>.</li>
+        <li>Add a header <code>Authorization</code> with the value <code>Bearer</code>, a space, and your token.</li>
+        <li>Optionally add <strong>Show Notification</strong> "Saved to Pensieve".</li>
+      </ol>
+    </div>
+  </div>
+  {% if new_token %}
+  <div class="token-reveal" role="status">
+    <p class="small"><strong>Token created.</strong> Copy it now; it won't be shown again. Your header value is:</p>
+    <code class="token-plain" id="new-token">Bearer {{ new_token }}</code>
+    <p class="faint small">Test it: <code>curl -H "Authorization: Bearer {{ new_token }}" -d url=https://example.com {{ base }}/api/v1/save</code></p>
+  </div>
+  {% else %}
+  <form method="post" action="/manage/saving/token" class="row wrap" style="gap:8px">{{ m.csrf_field(csrf_token) }}
+    <input class="input input-sm" name="label" value="Save from my phone" aria-label="Token label" style="max-width:240px">
+    <button class="btn btn-sm" type="submit">{{ m.icon('key', 14) }} Create a token for the Shortcut</button>
+    <a class="btn btn-ghost btn-sm" href="/manage/tokens">Manage tokens</a>
+  </form>
+  {% endif %}
+</section>
+
+<section class="card section">
+  <div class="card-head"><h2>{{ m.icon('upload', 16) }} Import from Pocket, Instapaper or bookmarks</h2></div>
+  <p class="muted">Upload Pocket's export (the HTML file or the CSV), Instapaper's CSV, or a bookmarks file exported from your browser. Tags, dates and read status come across; pages are captured in the background, a few at a time.</p>
+  <form method="post" action="/manage/saving/import" enctype="multipart/form-data" class="row wrap" style="gap:8px" hx-boost="false">{{ m.csrf_field(csrf_token) }}
+    <input class="input input-sm" type="file" name="file" id="saving-file" accept=".html,.htm,.csv,text/html,text/csv" required aria-label="Export file" style="max-width:340px">
+    <button class="btn btn-sm btn-primary" type="submit">Import</button>
+  </form>
+</section>
+
+<section class="card section">
+  <div class="card-head"><h2>{{ m.icon('external', 16) }} Browser extension</h2><span class="chip chip-sm">Chrome, Edge, Firefox</span></div>
+  <p class="muted">For paywalled or signed-in pages: the extension sends the page exactly as you see it, so the copy has what your server alone couldn't fetch. It lives in the <code>extension/</code> folder of the Pensieve source; load it unpacked, then enter <code>{{ base }}</code> and an API token in its options.</p>
+</section>
+{% endblock %}

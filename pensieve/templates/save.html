@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% import "_macros.html" as m %}
+{% block title %}{{ 'Saved' if done else 'Save a link' }} · Pensieve{% endblock %}
+{% block body %}
+<main class="save-page" id="main">
+  <div class="save-card card">
+    <div class="save-brand row"><span class="brand">{{ m.icon('mark', 22) }} Pensieve</span><span class="grow"></span><a class="btn btn-ghost btn-sm" href="/reader/saved" target="_blank" rel="noopener">Open Saved</a></div>
+    {% if done %}
+    <div class="save-done col" role="status">
+      <div class="save-done-mark">{{ m.icon('check', 26) }}</div>
+      <h1>{{ 'Saved' if done.created else 'Already saved' }}</h1>
+      <p class="muted">{{ done.item.title if done.item.title != done.item.url else (done.item.url|host) }}</p>
+      <p class="faint small">{{ 'A full copy of the page is being captured, so it stays readable if the site changes.' if done.created else 'Moved back to the top of My list.' }}</p>
+      <div class="row wrap" style="justify-content:center">
+        <a class="btn btn-primary" href="/items/{{ done.item.id }}" target="_blank" rel="noopener" data-close-after>Read it now</a>
+        <button type="button" class="btn" data-window-close>Close</button>
+      </div>
+    </div>
+    <script>
+      /* Opened as the bookmarklet's popup: close on its own shortly after saving. */
+      (function(){ if (window.opener) { setTimeout(function(){ window.close(); }, 1600); }
+        document.addEventListener('click', function(e){ if (e.target.closest('[data-window-close]')) { window.close(); if (!window.closed) location.href = '/reader/saved'; } });
+      })();
+    </script>
+    {% else %}
+    <form method="post" action="/save" class="col save-form" hx-boost="false">
+      {{ m.csrf_field(csrf_token) }}
+      <h1>{{ m.icon('bookmark-plus', 20) }} Save a link</h1>
+      {% if error %}<div class="flash flash-error" role="alert">{{ m.icon('warning', 14) }} {{ error }}</div>{% endif %}
+      <div class="field"><label for="save-page-url">Link</label><input class="input" id="save-page-url" name="url" type="url" inputmode="url" value="{{ url }}" required placeholder="https://…"></div>
+      <div class="field"><label for="save-page-title">Title <span class="faint">optional; the page's own is used otherwise</span></label><input class="input input-sm" id="save-page-title" name="title" value="{{ title }}"></div>
+      <div class="field"><label for="save-page-tags">Tags <span class="faint">comma separated</span></label><input class="input input-sm" id="save-page-tags" name="tags" placeholder="e.g. homelab, to-try"></div>
+      <div class="field"><label for="save-page-note">Note</label><input class="input input-sm" id="save-page-note" name="note" placeholder="Why you're keeping it"></div>
+      <button class="btn btn-primary btn-lg" type="submit" autofocus>{{ m.icon('bookmark', 16) }} Save to Pensieve</button>
+      <p class="faint small" style="margin:0">Pensieve fetches the page from your server, renders it, and keeps the text, a static copy and a screenshot.</p>
+    </form>
+    {% endif %}
+  </div>
+</main>
+{% endblock %}

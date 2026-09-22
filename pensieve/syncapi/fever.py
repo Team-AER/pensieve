@@ -222,6 +222,9 @@ async def _mark(session: AsyncSession, user_id: uuid.UUID, params) -> None:
             await set_read(session, user_id, item_ids, False)
         elif action == "saved":
             await set_starred(session, user_id, item_ids, True)
+            from pensieve.archive.save import archive_after_star
+
+            await archive_after_star(session, user_id, item_ids)
         elif action == "unsaved":
             await set_starred(session, user_id, item_ids, False)
         return

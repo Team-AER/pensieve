@@ -20,7 +20,7 @@ EMBED_TEXT_CHARS = 2000
 
 
 def embedding_text(item: models.Item) -> str:
-    return f"{item.title}\n\n{(item.content_text or '')[:EMBED_TEXT_CHARS]}".strip()
+    return f"{item.title}\n\n{item.full_text[:EMBED_TEXT_CHARS]}".strip()
 
 
 async def embed_items(

@@ -23,8 +23,44 @@ function cacheKey(request) {
 }
 
 function isReaderGet(url) {
+  if (/^\/items\/[^/]+\/capture$/.test(url.pathname)) return false; // a capture poll must always ask the server
   return url.pathname === '/' || url.pathname.startsWith('/reader/') || url.pathname.startsWith('/items/') || url.pathname.startsWith('/clusters/');
 }
+// Archived copies and their assets never change for a given URL (page URLs carry ?g=<capture generation>).
+function isArchiveGet(url) { return url.pathname.startsWith('/archive/'); }
+
+async function cacheFirst(request) {
+  const cache = await caches.open(VERSION);
+  const hit = await cache.match(request);
+  if (hit) return hit;
+  try {
+    const resp = await fetch(request);
+    if (resp && resp.ok && resp.type === 'basic') cache.put(request, resp.clone()).catch(() => {});
+    return resp;
+  } catch (_) {
+    return new Response('', { status: 504 });
+  }
+}
+
+// The Saved list asks for its articles to be cached so they open with no connection at all.
+self.addEventListener('message', (event) => {
+  const data = event.data || {};
+  if (data.type !== 'warm' || !Array.isArray(data.urls)) return;
+  event.waitUntil((async () => {
+    const cache = await caches.open(VERSION);
+    for (const path of data.urls.slice(0, 40)) {
+      try {
+        const url = new URL(path, self.location.origin);
+        if (url.origin !== self.location.origin) continue;
+        const req = new Request(url.href, { headers: { 'HX-Request': 'true' }, credentials: 'same-origin' });
+        const key = cacheKey(req);
+        if (await cache.match(key)) continue;
+        const resp = await fetch(req);
+        if (resp.ok) await cache.put(key, resp);
+      } catch (_) { /* offline or gone: try again next visit */ }
+    }
+  })());
+});
 function isStateChange(url) {
   return /^\/items\/[^/]+\/(read|unread|star|unstar|tag|note)$/.test(url.pathname) || url.pathname === '/items/undo-read' || /\/mark-read$/.test(url.pathname);
 }
@@ -65,6 +101,8 @@ self.addEventListener('fetch', (event) => {
           try { return await fetch(req); } catch (__) { return new Response('', { status: 504 }); }
         }
       })());
+    } else if (isArchiveGet(url)) {
+      event.respondWith(cacheFirst(req));
     } else if (isReaderGet(url) && !url.pathname.startsWith('/reader/api/')) {
       event.respondWith(staleWhileRevalidate(req));
     }

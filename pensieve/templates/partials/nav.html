@@ -7,6 +7,7 @@
   <a class="nav-item{% if view.kind == 'unread' %} active{% endif %}" href="/reader/unread" data-key="ga" {% if view.kind == 'unread' %}aria-current="page"{% endif %}><span class="row">{{ m.icon('inbox') }} All unread</span><span class="count">{{ nav.total_unread }}</span></a>
   <a class="nav-item{% if view.kind == 'all' %} active{% endif %}" href="/reader/all" {% if view.kind == 'all' %}aria-current="page"{% endif %}><span class="row">{{ m.icon('layers') }} All items</span></a>
   <a class="nav-item{% if view.kind == 'starred' %} active{% endif %}" href="/reader/starred" {% if view.kind == 'starred' %}aria-current="page"{% endif %}><span class="row">{{ m.icon('star') }} Starred</span><span class="count">{{ nav.starred }}</span></a>
+  <a class="nav-item{% if view.kind == 'saved' %} active{% endif %}" href="/reader/saved" data-key="gb" {% if view.kind == 'saved' %}aria-current="page"{% endif %}><span class="row">{{ m.icon('bookmark') }} Saved</span><span class="count">{{ nav.saved }}</span></a>
   <a class="nav-item" href="/insights"><span class="row ai-mark">{{ m.icon('sparkle') }} <span style="color:var(--ink)">Today's digest</span></span><span class="chip chip-ai chip-sm">AI</span></a>
 </div>
 <div class="nav-section">

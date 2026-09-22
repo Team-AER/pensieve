@@ -8,9 +8,16 @@
   {% if auto_open is defined and auto_open %}<span hidden hx-post="/items/{{ item.id }}/open" hx-trigger="load" hx-target="#toolbar-{{ item.id }}" hx-swap="innerHTML"></span>{% endif %}
   <header class="article-header">
     <div class="article-meta">
+      {% if is_saved %}
+      <span class="row">{% if snapshot and snapshot.icon_sha %}<img class="favicon" src="/archive/a/{{ snapshot.icon_sha }}" alt="" width="14" height="14" loading="lazy">{% else %}{{ m.icon('bookmark', 14) }}{% endif %}<a class="item-source plain" href="/reader/saved">{{ (snapshot.site_name if snapshot and snapshot.site_name else item.url|host) }}</a></span>
+      {% if item.author %}<span>by {{ item.author }}</span>{% endif %}
+      {% if snapshot and snapshot.page_published_at %}<time datetime="{{ snapshot.page_published_at.isoformat() }}">{{ snapshot.page_published_at.strftime('%-d %b %Y') }}</time>{% endif %}
+      <span title="{{ item.published_at.strftime('%-d %b %Y, %H:%M') }}">saved {{ item.published_at|timeago }}</span>
+      {% else %}
       <span class="row">{% if feed.icon_url %}<img class="favicon" src="/favicons/{{ feed.id }}" alt="" width="14" height="14" loading="lazy">{% endif %}<a class="item-source plain" href="/reader/feed/{{ feed.id }}">{{ feed.title or feed.url }}</a></span>
       {% if item.author %}<span>by {{ item.author }}</span>{% endif %}
       <time datetime="{{ item.published_at.isoformat() }}" title="{{ item.published_at.strftime('%-d %b %Y, %H:%M') }}">{{ item.published_at|timeago }}</time>
+      {% endif %}
       <span>{{ item.content_text|reading_time }}</span>
       {% if ai and ai.content_type %}<span class="chip chip-sm" title="Content type, detected by AI">{{ ai.content_type|replace('_', ' ') }}</span>{% endif %}
       {% if cluster and cluster.source_count > 1 %}<button type="button" class="sources" hx-get="/clusters/{{ cluster.id }}" hx-target="#article-cluster" hx-swap="innerHTML" aria-label="{{ cluster.source_count }} sources, show them">{{ cluster.source_count }} sources</button>{% endif %}

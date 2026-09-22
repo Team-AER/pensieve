@@ -19,6 +19,11 @@ a straightforward feed reader.
 - Feed discovery, conditional fetches, reader mode, favicon caching, OPML import/export, and adaptive polling
 - Reeder and NetNewsWire support through Google Reader and Fever-compatible sync APIs
 - Per-user folders, tags, rules, saved items, notes, search, and household administration
+- Pocket-style **Save link**: save any page from the app, a bookmarklet, the Android share sheet, an iOS
+  Shortcut or the browser extension. Pensieve renders it in headless Chromium and keeps the article text
+  (searchable, and what the AI reads), a static offline copy with its images, a full-page screenshot and the
+  original HTML, in an S3 object store (Garage). Starred feed items are archived the same way. Pocket,
+  Instapaper and bookmark exports import in the background
 - Optional local-model workflows with configurable models and reasoning effort; summaries retry on their own (a half-hourly sweep re-queues what the eager job missed), and the paper learns from "more like this" / "less" and from your notes on a why-it-matters
 - PostgreSQL + pgvector storage, Redis/ARQ jobs, Alembic migrations, and Docker Compose deployment
 - SSRF protections, CSRF protection, Argon2 password hashing, rate limiting, and secure proxy headers
@@ -33,11 +38,15 @@ cd pensieve
 cp .env.example .env
 ```
 
-Generate two independent secrets and place them in `.env`:
+Generate the secrets and place them in `.env`:
 
 ```bash
-openssl rand -hex 32  # PENSIEVE_POSTGRES_PASSWORD
-openssl rand -hex 32  # PENSIEVE_SECRET_KEY
+openssl rand -hex 32                # PENSIEVE_POSTGRES_PASSWORD
+openssl rand -hex 32                # PENSIEVE_SECRET_KEY
+openssl rand -hex 32                # PENSIEVE_GARAGE_RPC_SECRET
+openssl rand -hex 24                # PENSIEVE_GARAGE_ADMIN_TOKEN
+echo "GK$(openssl rand -hex 12)"    # PENSIEVE_S3_ACCESS_KEY (Garage key ids are GK + 24 hex)
+openssl rand -hex 32                # PENSIEVE_S3_SECRET_KEY
 ```
 
 Set `PENSIEVE_BASE_URL` to the public HTTPS URL, then start the stack:
@@ -75,13 +84,32 @@ All application settings use the `PENSIEVE_` prefix. The most important values a
 | `PENSIEVE_LLM_API_KEY` | Gateway API key, if required |
 | `PENSIEVE_LLM_CATALOG_URL` | Optional endpoint used to populate model choices |
 | `PENSIEVE_TIMEZONE` | IANA timezone for scheduled insights |
+| `PENSIEVE_GARAGE_RPC_SECRET`, `PENSIEVE_GARAGE_ADMIN_TOKEN` | Secrets of the bundled Garage object store |
+| `PENSIEVE_S3_ACCESS_KEY`, `PENSIEVE_S3_SECRET_KEY` | The archive's bucket credentials; `storage-init` imports them into Garage on every start |
+| `PENSIEVE_GARAGE_CAPACITY_GB` | Size the Garage node advertises (default 200) |
+| `PENSIEVE_CAPTURE_CONCURRENCY` | Pages captured at once by `worker-capture` (default 2) |
 
 See [.env.example](.env.example) and [`pensieve/config.py`](pensieve/config.py) for the full set of defaults.
 Keep `.env` private; it is excluded from Git and the Docker build context.
 
+### Saved links and the page archive
+
+`docker compose up` also starts **garage** (S3 API, internal only), a one-shot **storage-init** that
+bootstraps it (layout, key, bucket; idempotent), **worker-capture**, and **browser**: headless Chromium on its
+own network with no route to the database, Redis or Garage. Every request the browser makes passes the same
+SSRF check as feed fetches. Archived pages are served back with a CSP that runs no script and loads nothing
+but Pensieve's own archive assets.
+
+Save from anywhere: the **Save** button (or `b`), the bookmarklet and phone setup under **Manage > Saving and
+archive**, `POST /api/v1/save` with `Authorization: Bearer <token>`, or the extension in [`extension/`](extension).
+Without S3 credentials (for example when running outside Compose) saving still works but keeps only the text.
+
+Maintenance: `docker compose exec worker-capture python -m pensieve.archive check | gc | recapture <email> |
+archive-starred <email>`. Back up the `garage-meta` and `garage-data` volumes along with PostgreSQL.
+
 ### Updating
 
-Back up the PostgreSQL volume before an upgrade, then pull and recreate the services. The web container
+Back up the PostgreSQL and Garage volumes before an upgrade, then pull and recreate the services. The web container
 runs pending Alembic migrations before it accepts traffic.
 
 ```bash
@@ -103,7 +131,8 @@ make migrate
 make dev
 ```
 
-Run the fetch and AI workers in separate terminals with `make worker` and `make worker-ai`. Quality checks:
+Run the fetch, AI and capture workers in separate terminals with `make worker`, `make worker-ai` and
+`make worker-capture`. `make dev-db` also starts Garage and the browser on loopback. Quality checks:
 
 ```bash
 make lint
@@ -117,13 +146,17 @@ database and Redis ports only on loopback through `docker-compose.dev.yaml`.
 ## Architecture
 
 ```text
-browser / sync client
+browser / sync client / extension
         │
         ▼
- FastAPI + Jinja + HTMX ───── PostgreSQL + pgvector
-        │                            ▲
-        ▼                            │
-      Redis ───── fetch worker / optional AI worker ───── model gateway
+ FastAPI + Jinja + HTMX ───── PostgreSQL + pgvector          Garage (S3): page copies,
+        │                            ▲                        screenshots, images
+        ▼                            │                              ▲
+      Redis ───── fetch worker / AI worker ───── model gateway      │
+        └──────── capture worker ───────────────────────────────────┘
+                        │ (isolated network)
+                        ▼
+                headless Chromium ───── the web
 ```
 
 The app is server-rendered and intentionally avoids a Node build pipeline. Static assets, including HTMX,

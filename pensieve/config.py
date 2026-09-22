@@ -73,6 +73,23 @@ class Settings(BaseSettings):
     cluster_jaccard_merge_threshold: float = 0.45  # no-embeddings path: title Jaccard at/above this merges outright
     cluster_jaccard_confirm_threshold: float = 0.30  # ... and this band up to merge asks the LLM to confirm
 
+    # Saved links and the page archive (pensieve/archive). Blobs go to an S3 API (Garage in compose); with no
+    # access key set, saving still works but keeps only the extracted text and reader HTML in Postgres.
+    s3_endpoint: str = "http://localhost:3900"
+    s3_bucket: str = "pensieve-archive"
+    s3_access_key: str = ""
+    s3_secret_key: str = ""
+    s3_region: str = "garage"
+    garage_admin_url: str = "http://localhost:3903"  # only `python -m pensieve.archive init-storage` uses it
+    garage_admin_token: str = ""
+    garage_capacity_gb: int = 200  # the single node's layout capacity; Garage refuses writes past it
+    browser_ws: str = "ws://localhost:3000/"  # Playwright run-server (compose service `browser`); "" = no rendering
+    capture_timeout_s: float = 45.0  # page load + settle budget inside the browser
+    capture_max_asset_mb: int = 60  # images/fonts/css kept from one capture, in total
+    capture_max_file_mb: int = 40  # PDFs and other files saved as-is
+    capture_shot_max_px: int = 12000  # full-page screenshot height cap
+    capture_concurrency: int = 2
+
 
 @lru_cache
 def get_settings() -> Settings:

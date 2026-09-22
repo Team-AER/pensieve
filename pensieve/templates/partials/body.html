@@ -1,4 +1,16 @@
 {% import "_macros.html" as m %}
+{% if snapshot is defined and snapshot %}{% include "partials/archive_bar.html" %}{% endif %}
+{% set mode = archive_mode if archive_mode is defined else 'article' %}
+{% if mode == 'page' and snapshot and snapshot.page_key %}
+<iframe class="archive-frame" src="/archive/s/{{ snapshot.id }}/page?g={{ snapshot.generation }}" sandbox="allow-same-origin allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" title="Archived copy of {{ item.title }}"></iframe>
+{% elif mode == 'shot' and snapshot and snapshot.shot_key %}
+<div class="archive-shot"><img src="/archive/s/{{ snapshot.id }}/shot?g={{ snapshot.generation }}" alt="Full-page screenshot of {{ item.title }}" loading="lazy"></div>
+{% elif mode == 'file' and snapshot and snapshot.file_key %}
+<div class="card archive-file"><div class="card-body row wrap space-between"><div class="col" style="gap:2px"><strong>{{ m.icon('download', 14) }} {{ snapshot.content_type or 'File' }}</strong><span class="muted small">Saved as-is when you saved the link.</span></div><a class="btn btn-sm btn-primary" href="/archive/s/{{ snapshot.id }}/file" target="_blank" rel="noopener" hx-boost="false">Open the file</a></div></div>
+{% if snapshot.content_type == 'application/pdf' %}<iframe class="archive-frame archive-pdf" src="/archive/s/{{ snapshot.id }}/file?g={{ snapshot.generation }}" title="{{ item.title }}"></iframe>{% endif %}
+{% elif is_saved is defined and is_saved and not item.content_html %}
+<div class="archive-placeholder muted">{{ m.skeleton(3) }}<p class="small">The article appears here once the page is captured. It usually takes a few seconds.</p></div>
+{% else %}
 {% if auto_reader is defined and auto_reader %}
 <span hidden hx-post="/items/{{ item.id }}/reader-mode" hx-trigger="load" hx-target="#body-{{ item.id }}" hx-swap="innerHTML" hx-vals='{"auto": 1}'></span>
 <div class="body-mode body-mode-pending" aria-live="polite"><span class="chip">{{ m.icon('reader', 12) }} Opening Reader view…</span></div>
@@ -38,4 +50,6 @@
   {% else %}<a class="btn btn-sm" href="{{ item.enclosure_url }}" target="_blank" rel="noopener noreferrer" hx-boost="false">{{ m.icon('external') }} Enclosure</a>{% endif %}
 </div>
 {% endif %}
+{% endif %}
+
 {% endif %}

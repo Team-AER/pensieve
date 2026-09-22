@@ -4,7 +4,11 @@
 {% else %}
 <button type="button" class="btn btn-sm btn-iconic" data-action="star" title="Star (s)" hx-post="/items/{{ item.id }}/star" hx-target="#toolbar-{{ item.id }}" hx-swap="innerHTML" hx-indicator="this" aria-label="Star">{{ m.icon('star') }}<span class="btn-label">Star</span></button>
 {% endif %}
-{% if is_read %}
+{% if is_saved and is_read %}
+<button type="button" class="btn btn-sm btn-iconic" data-action="read" title="Back to My list (m)" hx-post="/items/{{ item.id }}/unread" hx-target="#toolbar-{{ item.id }}" hx-swap="innerHTML" hx-indicator="this" aria-label="Move back to My list">{{ m.icon('bookmark') }}<span class="btn-label">Back to My list</span></button>
+{% elif is_saved %}
+<button type="button" class="btn btn-sm btn-iconic" data-action="read" title="Archive (m)" hx-post="/items/{{ item.id }}/read" hx-target="#toolbar-{{ item.id }}" hx-swap="innerHTML" hx-indicator="this" aria-label="Archive: done reading">{{ m.icon('archive') }}<span class="btn-label">Archive</span></button>
+{% elif is_read %}
 <button type="button" class="btn btn-sm btn-iconic" data-action="read" title="Mark unread (m)" hx-post="/items/{{ item.id }}/unread" hx-target="#toolbar-{{ item.id }}" hx-swap="innerHTML" hx-indicator="this" aria-label="Mark unread">{{ m.icon('mail') }}<span class="btn-label">Mark unread</span></button>
 {% else %}
 <button type="button" class="btn btn-sm btn-iconic" data-action="read" title="Mark read (m)" hx-post="/items/{{ item.id }}/read" hx-target="#toolbar-{{ item.id }}" hx-swap="innerHTML" hx-indicator="this" aria-label="Mark read">{{ m.icon('check-circle') }}<span class="btn-label">Mark read</span></button>
@@ -13,7 +17,8 @@
 <button type="button" class="btn btn-sm btn-iconic toolbar-secondary" data-action="note" title="Add a note" data-toggle="#note-form-{{ item.id }}" aria-label="Add a note">{{ m.icon('note') }}<span class="btn-label">Note</span></button>
 <button type="button" class="btn btn-sm btn-ai toolbar-secondary" data-action="summarize" hx-post="/items/{{ item.id }}/summarize" hx-target="#summary-{{ item.id }}" hx-swap="innerHTML" hx-indicator="this" aria-label="Summarize with the local model">{{ m.icon('sparkle') }}<span class="btn-label">Summarize</span></button>
 <span class="toolbar-spacer"></span>
-<button type="button" class="btn btn-sm toolbar-secondary" data-action="reader" hx-post="/items/{{ item.id }}/reader-mode" hx-target="#body-{{ item.id }}" hx-swap="innerHTML" hx-indicator="this" aria-label="Reader view">{{ m.icon('reader') }}<span class="btn-label">Reader view</span></button>
+{% if not is_saved %}<button type="button" class="btn btn-sm toolbar-secondary" data-action="reader" hx-post="/items/{{ item.id }}/reader-mode" hx-target="#body-{{ item.id }}" hx-swap="innerHTML" hx-indicator="this" aria-label="Reader view">{{ m.icon('reader') }}<span class="btn-label">Reader view</span></button>
+{% if item.url %}<button type="button" class="btn btn-sm toolbar-secondary" data-action="save-link" hx-post="/items/{{ item.id }}/save-link" hx-swap="none" hx-indicator="this" title="Save to My list with a full copy (b saves any link)" aria-label="Save to My list">{{ m.icon('bookmark-plus') }}<span class="btn-label">Save</span></button>{% endif %}{% endif %}
 {% if item.url %}<a class="btn btn-sm toolbar-secondary" data-action="open" href="{{ item.url }}" target="_blank" rel="noopener noreferrer" hx-boost="false" aria-label="Open original in a new tab">{{ m.icon('external') }}<span class="btn-label">Open original</span></a>{% endif %}
 {% if cluster and cluster.source_count > 1 %}
 <button type="button" class="btn btn-sm toolbar-secondary" data-action="unmerge" hx-post="/items/{{ item.id }}/unmerge" hx-target="#toolbar-{{ item.id }}" hx-swap="innerHTML" hx-confirm="Split this item out of its story group? Pensieve won't merge it again." data-confirm-title="Unmerge this item?" data-confirm-label="Unmerge" aria-label="Unmerge from its story group">{{ m.icon('split') }}<span class="btn-label">Unmerge</span></button>
@@ -24,7 +29,9 @@
   <div class="menu-body" role="menu" aria-label="More actions">
     <button type="button" class="menu-item" role="menuitem" data-toggle="#note-form-{{ item.id }}">{{ m.icon('note', 14) }} Add a note</button>
     <button type="button" class="menu-item" role="menuitem" hx-post="/items/{{ item.id }}/summarize" hx-target="#summary-{{ item.id }}" hx-swap="innerHTML">{{ m.icon('sparkle', 14) }} Summarize</button>
-    <button type="button" class="menu-item" role="menuitem" hx-post="/items/{{ item.id }}/reader-mode" hx-target="#body-{{ item.id }}" hx-swap="innerHTML">{{ m.icon('reader', 14) }} Reader view</button>
+    {% if not is_saved %}<button type="button" class="menu-item" role="menuitem" hx-post="/items/{{ item.id }}/reader-mode" hx-target="#body-{{ item.id }}" hx-swap="innerHTML">{{ m.icon('reader', 14) }} Reader view</button>
+    {% if item.url %}<button type="button" class="menu-item" role="menuitem" hx-post="/items/{{ item.id }}/save-link" hx-swap="none">{{ m.icon('bookmark-plus', 14) }} Save to My list</button>{% endif %}{% endif %}
+    {% if item.url %}<button type="button" class="menu-item" role="menuitem" hx-post="/items/{{ item.id }}/recapture" hx-target="#body-{{ item.id }}" hx-swap="innerHTML">{{ m.icon('archive', 14) }} {{ 'Capture the page again' if snapshot is defined and snapshot else 'Keep an archived copy' }}</button>{% endif %}
     {% if item.url %}<a class="menu-item" role="menuitem" href="{{ item.url }}" target="_blank" rel="noopener noreferrer" hx-boost="false">{{ m.icon('external', 14) }} Open original</a>{% endif %}
     {% if cluster and cluster.source_count > 1 %}<button type="button" class="menu-item" role="menuitem" hx-post="/items/{{ item.id }}/unmerge" hx-target="#toolbar-{{ item.id }}" hx-swap="innerHTML" hx-confirm="Split this item out of its story group? Pensieve won't merge it again." data-confirm-title="Unmerge this item?" data-confirm-label="Unmerge">{{ m.icon('split', 14) }} Unmerge</button>{% endif %}
   </div>

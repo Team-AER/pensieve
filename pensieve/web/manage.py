@@ -23,6 +23,7 @@ from pensieve.auth import (
 )
 from pensieve.config import get_settings
 from pensieve.models import (
+    FEED_KIND_SAVED,
     AIJob,
     ApiToken,
     Feed,
@@ -81,6 +82,7 @@ SECTIONS = [
     ("folders", "Folders and tags", "/manage/folders"),
     ("rules", "Rules and filters", "/manage/rules"),
     ("ai", "AI and memory", "/manage/ai"),
+    ("saving", "Saving and archive", "/manage/saving"),
     ("import", "Import and export", "/manage/import"),
 ]
 ACCOUNT_SECTIONS = [
@@ -171,7 +173,7 @@ async def _feeds(
     error: str | None = None,
     status_code: int = 200,
 ):
-    stmt = select(Feed).where(Feed.user_id == user.id).order_by(Feed.title, Feed.url)
+    stmt = select(Feed).where(Feed.user_id == user.id, Feed.kind != FEED_KIND_SAVED).order_by(Feed.title, Feed.url)
     if q.strip():
         like = f"%{q.strip().lower()}%"
         stmt = stmt.where(func.lower(Feed.title).like(like) | func.lower(Feed.url).like(like))
@@ -611,7 +613,11 @@ RULE_ACTIONS = {"hide", "star", "tag", "mark_read"}
 @router.get("/rules")
 async def rules_page(request: Request, user: CurrentUser, session: DB):
     rules = list(await session.scalars(select(FeedRule).where(FeedRule.user_id == user.id).order_by(FeedRule.created_at)))
-    feeds = list(await session.scalars(select(Feed).where(Feed.user_id == user.id).order_by(Feed.title)))
+    feeds = list(
+        await session.scalars(
+            select(Feed).where(Feed.user_id == user.id, Feed.kind != FEED_KIND_SAVED).order_by(Feed.title)
+        )
+    )
     feed_names = {f.id: f.title or f.url for f in feeds}
     return page(request, user, "rules", "manage/rules.html", {"rules": rules, "feeds": feeds, "feed_names": feed_names})
 
@@ -957,7 +963,11 @@ async def import_opml_route(
 
 @router.get("/export/opml")
 async def export_opml_route(user: CurrentUser, session: DB):
-    feeds = list(await session.scalars(select(Feed).where(Feed.user_id == user.id).order_by(Feed.title)))
+    feeds = list(
+        await session.scalars(
+            select(Feed).where(Feed.user_id == user.id, Feed.kind != FEED_KIND_SAVED).order_by(Feed.title)
+        )
+    )
     folders = await user_folders(session, user)
     try:
         from pensieve.fetch.opml import export_opml  # type: ignore[import-not-found]

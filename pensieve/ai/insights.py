@@ -861,7 +861,7 @@ async def summarize_item(
         prompts.item_summary_user(
             profile,
             item.title,
-            (item.content_text or "")[:SUMMARY_TEXT_CHARS],
+            item.full_text[:SUMMARY_TEXT_CHARS],
             focus=prefs["focus"],
             hint=" ".join(hint.split())[:SUMMARY_FOCUS_CHARS],
         ),

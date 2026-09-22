@@ -36,6 +36,7 @@
   {% endif %}
   <div class="topbar-spacer"></div>
   <div class="topbar-actions">
+    <button type="button" class="btn btn-sm save-open" data-open-dialog="#save-dialog" title="Save a link (b)" aria-label="Save a link">{{ m.icon('bookmark-plus') }}<span class="btn-label">Save</span></button>
     {{ account_menu(user) }}
   </div>
 </header>
@@ -61,4 +62,17 @@
   <div class="dialog-foot"><button type="button" class="btn" data-dialog-cancel>Cancel</button><button type="button" class="btn btn-primary" data-dialog-confirm>Confirm</button></div>
 </dialog>
 <div id="ctx-sink" class="hidden" aria-hidden="true"></div>
+<dialog id="save-dialog" class="dialog" aria-labelledby="save-dialog-title">
+  <form class="save-form" hx-post="/saved" hx-target="#save-result" hx-swap="innerHTML" hx-indicator="#save-submit" autocomplete="off">
+    <div class="dialog-head"><h2 id="save-dialog-title">{{ m.icon('bookmark-plus', 18) }} Save a link</h2><button type="button" class="btn btn-icon btn-sm btn-ghost" data-dialog-dismiss aria-label="Close">{{ m.icon('close') }}</button></div>
+    <div class="dialog-body col" style="gap:12px">
+      <p class="muted small" style="margin:0">Pensieve keeps a full copy of the page, as it renders, so it stays readable and searchable if the site changes or goes away.</p>
+      <div class="field"><label for="save-url">Link</label><input class="input" id="save-url" name="url" type="url" inputmode="url" placeholder="https://…" required></div>
+      <div class="field"><label for="save-tags">Tags <span class="faint">optional, comma separated</span></label><input class="input input-sm" id="save-tags" name="tags" placeholder="e.g. homelab, to-try"></div>
+      <div class="field"><label for="save-note">Note <span class="faint">optional</span></label><input class="input input-sm" id="save-note" name="note" placeholder="Why you're keeping it"></div>
+      <div id="save-result" aria-live="polite"></div>
+    </div>
+    <div class="dialog-foot"><a class="btn btn-ghost btn-sm" href="/manage/saving">Bookmarklet and phone setup</a><span class="grow"></span><button type="button" class="btn" data-dialog-dismiss>Cancel</button><button class="btn btn-primary" id="save-submit" type="submit">{{ m.icon('bookmark', 14) }} Save</button></div>
+  </form>
+</dialog>
 {% endmacro %}

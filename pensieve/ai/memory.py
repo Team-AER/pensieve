@@ -223,11 +223,17 @@ async def refresh_profile(
 
 
 async def _history_pool(session: AsyncSession, user_id: uuid.UUID) -> list[uuid.UUID]:
+    """Items the user chose: read, starred, or saved with Save link (saving is a deliberate signal, read or not)."""
     stmt = select(models.ItemState.item_id).where(
         models.ItemState.user_id == user_id,
         (models.ItemState.is_read.is_(True)) | (models.ItemState.is_starred.is_(True)),
     )
-    return list((await session.scalars(stmt)).all())
+    saved = (
+        select(models.Item.id)
+        .join(models.Feed, models.Feed.id == models.Item.feed_id)
+        .where(models.Feed.user_id == user_id, models.Feed.kind == models.FEED_KIND_SAVED)
+    )
+    return list(dict.fromkeys([*(await session.scalars(stmt)).all(), *(await session.scalars(saved)).all()]))
 
 
 async def _same_cluster_ids(session: AsyncSession, user_id: uuid.UUID, item_id: uuid.UUID) -> set[uuid.UUID]:
@@ -420,7 +426,7 @@ async def ask_reading(
     excerpts: list[tuple[int, str, str, str]] = []
     used = 0
     for n, it in enumerate(unique, start=1):
-        text = (it.content_text or "")[:ASK_EXCERPT_CHARS]
+        text = it.full_text[:ASK_EXCERPT_CHARS]
         cost = len(text) + len(it.title) + 40
         if used + cost > budget_chars:
             break

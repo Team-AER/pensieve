@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
@@ -23,7 +24,7 @@ CONTENT_SECURITY_POLICY = (
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
     "font-src 'self' https://fonts.gstatic.com data:; "
     "script-src 'self' 'unsafe-inline'; "
-    "frame-src https:; "
+    "frame-src 'self' https:; "
     "frame-ancestors 'none'"
 )
 
@@ -83,7 +84,8 @@ def create_app() -> FastAPI:
         # Browser requests without a session go to the login page; API clients get JSON.
         if _html_client(request):
             if exc.status_code == 401:
-                return RedirectResponse(url=f"/login?next={request.url.path}", status_code=303)
+                target = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+                return RedirectResponse(url=f"/login?next={quote(target, safe='/')}", status_code=303)
             if exc.status_code in (403, 404, 500):
                 return _error_page(request, exc.status_code, exc.headers)
         return JSONResponse({"detail": exc.detail}, status_code=exc.status_code, headers=exc.headers)

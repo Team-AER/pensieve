@@ -30,10 +30,22 @@
       </details>
     </div>
   </div>
+  {% if view.kind == 'saved' %}
+  <div class="saved-head row wrap">
+    <nav class="seg saved-tabs" aria-label="Saved lists">
+      <a href="/reader/saved" hx-get="/reader/saved/list" hx-target="#list" hx-swap="innerHTML" hx-push-url="/reader/saved" class="seg-btn{% if not view.key %} on" aria-current="page{% endif %}">My list</a>
+      <a href="/reader/saved/archive" hx-get="/reader/saved/archive/list" hx-target="#list" hx-swap="innerHTML" hx-push-url="/reader/saved/archive" class="seg-btn{% if view.key == 'archive' %} on" aria-current="page{% endif %}">Archive</a>
+      <a href="/reader/saved/all" hx-get="/reader/saved/all/list" hx-target="#list" hx-swap="innerHTML" hx-push-url="/reader/saved/all" class="seg-btn{% if view.key == 'all' %} on" aria-current="page{% endif %}">All</a>
+    </nav>
+    <span class="grow"></span>
+    <button type="button" class="btn btn-sm btn-primary" data-open-dialog="#save-dialog">{{ m.icon('bookmark-plus', 14) }} Save a link</button>
+  </div>
+  {% endif %}
   <div class="chip-row mobile-only" role="group" aria-label="Filters">
     <a class="{% if opts.grouped %}on{% endif %}" href="{{ view.path }}?grouped={{ 0 if opts.grouped else 1 }}&sort={{ opts.sort }}" hx-get="{{ list_url }}?grouped={{ 0 if opts.grouped else 1 }}&sort={{ opts.sort }}" hx-target="#list" hx-swap="innerHTML" hx-push-url="{{ view.path }}?grouped={{ 0 if opts.grouped else 1 }}&sort={{ opts.sort }}">Grouped</a>
     <a class="{% if view.kind == 'unread' %}on{% endif %}" href="/reader/unread">Unread</a>
     <a class="{% if view.kind == 'starred' %}on{% endif %}" href="/reader/starred">Starred</a>
+    <a class="{% if view.kind == 'saved' %}on{% endif %}" href="/reader/saved">Saved</a>
     <a class="{% if view.kind == 'all' %}on{% endif %}" href="/reader/all">All items</a>
     {% if view.kind in ('folder', 'feed', 'tag') %}<a class="on" href="{{ view.path }}">{{ view.title }}</a>{% endif %}
     <details class="menu">

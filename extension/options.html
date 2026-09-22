@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><link rel="stylesheet" href="style.css"><title>Pensieve settings</title></head>
+<body class="options">
+  <h1><img src="icons/icon-48.png" alt="" width="28" height="28"> Save to Pensieve</h1>
+  <form id="form">
+    <label>Your Pensieve address <input id="server" type="url" placeholder="https://pensieve.example.com" required></label>
+    <label>API token <input id="token" type="password" placeholder="From Manage > Saving > Create a token" required></label>
+    <label class="check"><input type="checkbox" id="send-page"> Send the page as I see it by default</label>
+    <p class="hint">The token is kept in this browser's extension storage and only sent to the address above.</p>
+    <div class="row"><button type="submit">Save settings</button><button type="button" id="test">Test connection</button></div>
+  </form>
+  <div id="status" role="status"></div>
+  <script src="pensieve.js"></script>
+  <script src="options.js"></script>
+</body></html>

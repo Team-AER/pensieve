@@ -491,6 +491,30 @@
     const unfold = e.target.closest('[data-unfold]');
     if (unfold) { const sec = $(unfold.dataset.unfold); if (sec) sec.classList.add('unfolded'); }
   });
+  // ---- Save a link ----
+  function openSaveDialog() {
+    const d = $('#save-dialog'); if (!d || typeof d.showModal !== 'function') return;
+    if (!d.open) d.showModal();
+    const f = $('#save-url', d); if (f) { f.focus(); f.select(); }
+  }
+  // Offline: when the Saved list is on screen, have the service worker cache those articles.
+  function warmSaved() {
+    if (!location.pathname.startsWith('/reader/saved')) return;
+    const sw = navigator.serviceWorker && navigator.serviceWorker.controller; if (!sw) return;
+    // The exact URL a row opens (GET /items/<id> is pure; marking read is a separate POST), so offline hits.
+    const urls = $$('#list .item[data-id]').slice(0, 30).map((el) => '/items/' + el.dataset.id);
+    if (urls.length) sw.postMessage({ type: 'warm', urls });
+  }
+  document.body.addEventListener('htmx:afterSettle', (e) => { if (e.target && e.target.id === 'list') warmSaved(); });
+  window.addEventListener('load', () => setTimeout(warmSaved, 1500));
+  document.body.addEventListener('toast', (e) => { const d = (e.detail && e.detail.value) || e.detail || {}; if (d.text) toast(d.text); });
+  document.body.addEventListener('link-saved', (e) => {
+    const d = $('#save-dialog');
+    const detail = (e.detail && e.detail.value) || e.detail || {};
+    toast(detail.created === false ? 'Already saved: moved back to the top of My list' : 'Saved. Capturing the page…');
+    if (d) { const form = $('form', d); if (form) form.reset(); const r = $('#save-result', d); if (r) r.innerHTML = ''; if (d.open) d.close(); }
+    if (location.pathname.startsWith('/reader/saved') && window.htmx) window.htmx.trigger(document.body, 'refresh-list');
+  });
   document.body.addEventListener('story-hidden', () => toast('Hidden from today\'s paper'));
   document.body.addEventListener('paper-tuned-more', () => toast('More like this: its tag and sources gained weight'));
   document.body.addEventListener('paper-tuned-less', () => toast('Less of this: its tag and sources lost weight'));
@@ -509,6 +533,7 @@
       if (key === 'g') { location.href = '/reader/unread'; e.preventDefault(); return; }
       if (key === 'a') { location.href = '/reader/all'; e.preventDefault(); return; }
       if (key === 's') { location.href = '/reader/starred'; e.preventDefault(); return; }
+      if (key === 'b') { location.href = '/reader/saved'; e.preventDefault(); return; }
     }
     switch (key) {
       case 'j': case 'ArrowDown': if (key === 'ArrowDown' && !(e.target.classList && e.target.classList.contains('item'))) return; e.preventDefault(); move(1, key === 'j'); break;
@@ -554,6 +579,7 @@
       case 'g': pendingG = true; pendingTimer = setTimeout(() => { pendingG = false; }, 800); break;
       case '/': { e.preventDefault(); const f = $('#global-search') || $('input[name="q"]'); if (f) { f.focus(); f.select(); } break; }
       case '?': e.preventDefault(); toggleShortcuts(true); break;
+      case 'b': { e.preventDefault(); openSaveDialog(); break; }
       case 'Escape': {
         const a = app();
         if (a && a.dataset.pane === 'nav' && !mqWide.matches) { setPane('list'); break; }

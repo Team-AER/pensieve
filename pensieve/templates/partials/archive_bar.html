@@ -1,0 +1,22 @@
+{# Archive status and view switch above the body of a saved link, or of a feed item that has a copy. #}
+{% import "_macros.html" as m %}
+{% set snap = snapshot %}
+{% if snap %}
+<div class="archive-bar" role="group" aria-label="Archived copy">
+  {% if snap.status in ('queued', 'rendering') %}
+  <span class="chip archive-pending" hx-get="/items/{{ item.id }}/capture" hx-trigger="every 3s" hx-swap="none" aria-live="polite"><span class="spinner" aria-hidden="true"></span> {{ 'Capturing the page…' if snap.status == 'rendering' else 'Waiting to capture the page…' }}</span>
+  {% elif snap.status == 'done' %}
+  <div class="seg seg-sm" role="tablist" aria-label="Archived views">
+    <button type="button" role="tab" aria-selected="{{ 'true' if archive_mode == 'article' else 'false' }}" class="seg-btn{% if archive_mode == 'article' %} on{% endif %}" hx-get="/items/{{ item.id }}/view/article" hx-target="#body-{{ item.id }}" hx-swap="innerHTML">{{ m.icon('reader', 14) }} Article</button>
+    {% if snap.page_key %}<button type="button" role="tab" aria-selected="{{ 'true' if archive_mode == 'page' else 'false' }}" class="seg-btn{% if archive_mode == 'page' %} on{% endif %}" hx-get="/items/{{ item.id }}/view/page" hx-target="#body-{{ item.id }}" hx-swap="innerHTML">{{ m.icon('globe', 14) }} Page</button>{% endif %}
+    {% if snap.shot_key %}<button type="button" role="tab" aria-selected="{{ 'true' if archive_mode == 'shot' else 'false' }}" class="seg-btn{% if archive_mode == 'shot' %} on{% endif %}" hx-get="/items/{{ item.id }}/view/shot" hx-target="#body-{{ item.id }}" hx-swap="innerHTML">{{ m.icon('image', 14) }} Screenshot</button>{% endif %}
+    {% if snap.file_key %}<button type="button" role="tab" aria-selected="{{ 'true' if archive_mode == 'file' else 'false' }}" class="seg-btn{% if archive_mode == 'file' %} on{% endif %}" hx-get="/items/{{ item.id }}/view/file" hx-target="#body-{{ item.id }}" hx-swap="innerHTML">{{ m.icon('download', 14) }} File</button>{% endif %}
+  </div>
+  <span class="archive-meta faint small" title="{{ snap.final_url or snap.requested_url }}">{{ m.icon('archive', 12) }} Archived {{ snap.captured_at|timeago }}{% if snap.bytes_total %} · {{ snap.bytes_total|filesize }}{% endif %}{% if snap.render_mode == 'browser' %} · rendered{% elif snap.render_mode == 'http' %} · server HTML{% elif snap.render_mode == 'client' %} · from your browser{% elif snap.render_mode == 'file' %} · file{% endif %}{% if snap.word_count %} · {{ '{:,}'.format(snap.word_count) }} words{% endif %}</span>
+  {% else %}
+  <span class="chip chip-warn">{{ m.icon('warning', 12) }} Couldn't capture this page</span>{% if snap.error %}<span class="faint small archive-error" title="{{ snap.error }}">{{ snap.error|truncate(90) }}</span>{% endif %}
+  {% endif %}
+  <span class="grow"></span>
+  {% if snap.status in ('done', 'failed') %}<button type="button" class="btn btn-sm btn-ghost" hx-post="/items/{{ item.id }}/recapture" hx-target="#body-{{ item.id }}" hx-swap="innerHTML" hx-indicator="this" title="Capture the page again">{{ m.icon('refresh', 14) }} {{ 'Try again' if snap.status == 'failed' else 'Re-capture' }}</button>{% endif %}
+</div>
+{% endif %}

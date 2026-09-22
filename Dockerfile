@@ -1,6 +1,8 @@
 FROM python:3.12-slim AS builder
 
 COPY --from=ghcr.io/astral-sh/uv:0.12.16 /uv /uvx /bin/
+# Optional dependency groups: the capture worker image is built with EXTRAS=capture (Playwright client).
+ARG EXTRAS=""
 
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
@@ -9,12 +11,12 @@ WORKDIR /app
 
 # Install locked dependencies first so source-only changes keep the dependency layer.
 COPY pyproject.toml uv.lock README.md ./
-RUN uv sync --frozen --no-dev --no-install-project
+RUN uv sync --frozen --no-dev --no-install-project ${EXTRAS:+--extra $EXTRAS}
 
 COPY alembic.ini ./
 COPY alembic ./alembic
 COPY pensieve ./pensieve
-RUN uv sync --frozen --no-dev --no-editable
+RUN uv sync --frozen --no-dev --no-editable ${EXTRAS:+--extra $EXTRAS}
 
 
 FROM python:3.12-slim AS runtime

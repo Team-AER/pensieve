@@ -14,7 +14,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from pensieve import queue
-from pensieve.models import AIJob, Cluster, ClusterItem, Feed, Item, ItemAI, ItemState, Note, User
+from pensieve.models import (
+    FEED_KIND_SAVED,
+    AIJob,
+    Cluster,
+    ClusterItem,
+    Feed,
+    Item,
+    ItemAI,
+    ItemState,
+    Note,
+    Snapshot,
+    User,
+)
 from pensieve.web.queries import get_state, get_user_item, set_read, set_starred, upsert_states
 from pensieve.web.templating import DB, CsrfUser, CurrentUser, hx_trigger, is_htmx, render
 
@@ -75,6 +87,11 @@ async def article_context(session: AsyncSession, user: User, item: Item, feed: F
     if ai:
         for name in ai.tags or []:
             ai_tags.append((name, float((ai.confidences or {}).get(name, 0) or 0)))
+    snapshot = await session.scalar(
+        select(Snapshot).where(Snapshot.user_id == user.id, Snapshot.item_id == item.id)
+    )
+    is_saved = feed.kind == FEED_KIND_SAVED
+    thin = is_thin(item) and not is_saved
     return {
         "item": item,
         "feed": feed,
@@ -87,10 +104,13 @@ async def article_context(session: AsyncSession, user: User, item: Item, feed: F
         "notes": notes,
         "cluster": cluster,
         "related": related,
-        "thin": is_thin(item),
-        "use_reader": bool(item.reader_html) and is_thin(item),
-        "auto_reader": wants_auto_reader(user) and is_thin(item) and bool(item.url) and not item.reader_html,
+        "thin": thin,
+        "use_reader": bool(item.reader_html) and thin,
+        "auto_reader": wants_auto_reader(user) and thin and bool(item.url) and not item.reader_html,
         "web_fallback": False,
+        "snapshot": snapshot,
+        "is_saved": is_saved,
+        "archive_mode": "article",
     }
 
 
@@ -115,7 +135,8 @@ async def article(
     after it renders (unless ``keep_unread=1``), so prefetches, caches and crawlers never change state."""
     item, feed = await load_item(session, user, item_id)
     ctx = await article_context(session, user, item, feed)
-    ctx["auto_open"] = not keep_unread and not ctx["is_read"]
+    # Opening a saved link must not archive it (read = Archive for Save link); that stays an explicit action.
+    ctx["auto_open"] = not keep_unread and not ctx["is_read"] and not ctx["is_saved"]
     if is_htmx(request):
         return render(request, "partials/article.html", ctx, user=user)
     # Deep link: render the whole reader with the article open.
@@ -197,6 +218,9 @@ async def star(
     item, feed = await load_item(session, user, item_id)
     await set_starred(session, user.id, item.id, True)
     await session.commit()
+    from pensieve.archive.save import archive_after_star
+
+    await archive_after_star(session, user.id, [item.id])
     return await _toolbar_response(request, session, user, item, feed, state_headers(item, is_starred=True))
 
 

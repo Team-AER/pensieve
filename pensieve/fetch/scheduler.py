@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from pensieve import queue
 from pensieve.config import get_settings
-from pensieve.models import Cluster, Feed, Insight, Item, ItemState, Note
+from pensieve.models import FEED_KIND_SAVED, Cluster, Feed, Insight, Item, ItemState, Note
 
 log = logging.getLogger(__name__)
 
@@ -69,11 +69,12 @@ def _prunable_items(cutoff: datetime):
     noted = exists().where(Note.item_id == Item.id)
     canonical = exists().where(Cluster.canonical_item_id == Item.id)
     in_insight = exists().where(Item.id == any_(Insight.item_refs))
-    return Item.published_at < cutoff, ~starred, ~noted, ~canonical, ~in_insight
+    saved = exists().where(Feed.id == Item.feed_id, Feed.kind == FEED_KIND_SAVED)  # saved links are kept for good
+    return Item.published_at < cutoff, ~starred, ~noted, ~canonical, ~in_insight, ~saved
 
 
 async def prune_old_items(session: AsyncSession, now: datetime | None = None) -> int:
-    """Delete items older than ``item_retention_days`` unless starred, noted, canonical or cited by an insight."""
+    """Delete items older than ``item_retention_days`` unless saved, starred, noted, canonical or cited by an insight."""
     now = now or datetime.now(UTC)
     cutoff = now - timedelta(days=get_settings().item_retention_days)
     result = await session.execute(delete(Item).where(*_prunable_items(cutoff)))

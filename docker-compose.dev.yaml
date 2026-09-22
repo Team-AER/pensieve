@@ -1,3 +1,5 @@
+# Local development: publish the backing services on loopback so `make dev` / `make worker*` and the tests
+# can reach them from the host.
 services:
   db:
     ports:
@@ -5,3 +7,11 @@ services:
   redis:
     ports:
       - "127.0.0.1:6379:6379"
+  garage:
+    ports:
+      - "127.0.0.1:3900:3900"
+      - "127.0.0.1:3903:3903"
+  browser:
+    networks: [capture, egress, default]
+    ports:
+      - "127.0.0.1:3000:3000"

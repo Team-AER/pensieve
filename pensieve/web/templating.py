@@ -137,6 +137,26 @@ def summary_blocks(markdown: str | None) -> dict[str, Any]:
 _TAG_RE = re.compile(r"<[^>]+>")
 
 
+def host(url: str | None) -> str:
+    """'theverge.com' from a URL (no www.), for saved links that have no feed title."""
+    from urllib.parse import urlsplit
+
+    try:
+        name = urlsplit(url or "").hostname or ""
+    except ValueError:
+        return ""
+    return name.removeprefix("www.")
+
+
+def filesize(n: int | None) -> str:
+    n = int(n or 0)
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n} B"
+
+
 def snippet(text: str | None, length: int = 160) -> str:
     text = _TAG_RE.sub(" ", text or "")
     text = " ".join(text.split())
@@ -275,6 +295,8 @@ def _build_env() -> Environment:
     env.filters["reading_time"] = reading_time
     env.filters["date_long"] = date_long
     env.filters["snippet"] = snippet
+    env.filters["host"] = host
+    env.filters["filesize"] = filesize
     env.filters["highlight"] = highlight
     env.filters["summary_blocks"] = summary_blocks
     env.filters["tojson_attr"] = lambda v: json.dumps(v)

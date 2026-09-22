@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from pensieve.auth import hash_api_token, user_from_api_token, verify_password
 from pensieve.config import get_settings
-from pensieve.models import ApiToken, Feed, Folder, Item, ItemAI, ItemState, Tag, User
+from pensieve.models import FEED_KIND_SAVED, ApiToken, Feed, Folder, Item, ItemAI, ItemState, Tag, User
 from pensieve.syncapi import router
 from pensieve.syncapi.common import (
     AI_LABEL_PREFIX,
@@ -367,6 +367,8 @@ async def subscription_edit(request: Request, user: ReaderUser, session: DbSessi
 
     if action == "unsubscribe":
         for feed in feeds:
+            if feed.kind == FEED_KIND_SAVED:
+                continue  # unsubscribing from "Saved" in a sync client must never delete the saved links
             await session.delete(feed)
         await session.flush()
         return _ok()
@@ -686,6 +688,9 @@ async def edit_tag(request: Request, user: ReaderUser, session: DbSession) -> Re
             await set_read(session, user.id, item_ids, False)
         elif tag.kind == "starred":
             await set_starred(session, user.id, item_ids, True)
+            from pensieve.archive.save import archive_after_star
+
+            await archive_after_star(session, user.id, item_ids)
         elif tag.kind == "label":
             add_tags.append(tag.value)
     for tag in removes:
