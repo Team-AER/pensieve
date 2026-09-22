@@ -51,7 +51,7 @@
 </div>
 {% if not summaries_on %}<p class="muted small">Summaries are off (Manage → AI and memory → “Summarize new items as they arrive”), so stories show sources only.</p>{% endif %}
 {% else %}
-<section class="card insight-card">{{ m.empty_state('Nothing in this window', 'No items arrived in the last ' ~ config.window_hours ~ ' hours, or every story is hidden, muted or already read. Widen the window or relax the filters under Customize.', 'digest', ai=True) }}</section>
+<section class="card insight-card">{{ m.empty_state('Nothing in this window', 'No items arrived in the last ' ~ config.window_hours ~ ' hours, or you have read, removed or muted every story. Widen the window or relax the filters under Customize.', 'digest', ai=True) }}</section>
 {% endif %}
 {% include "partials/paper_settings.html" %}
 {% endif %}

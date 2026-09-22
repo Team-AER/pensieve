@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Form, HTTPException, Request
-from fastapi.responses import RedirectResponse, Response
+from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -154,6 +154,9 @@ async def _paper_ctx(
     request: Request, session: AsyncSession, user: User, edition: Insight | None
 ) -> dict[str, Any]:
     body = dict(edition.body or {}) if edition else {}
+    is_today = bool(edition and edition.period == paper.today().isoformat())
+    if is_today:
+        body = await paper.without_read(session, user.id, body)  # read anywhere: off today's paper
     config = paper.paper_config(user)
     feeds = list(await session.scalars(select(Feed).where(Feed.user_id == user.id).order_by(Feed.title)))
     vocab = list(
@@ -175,7 +178,7 @@ async def _paper_ctx(
         "feeds": feeds,
         "muted": set(config["muted_feeds"]),
         "history": await _history(session, user, ["paper"]),
-        "is_today": bool(edition and edition.period == paper.today().isoformat()),
+        "is_today": is_today,
         "paper_on": ai_on(user, "paper"),
         "summaries_on": ai_on(user, "summarize_items"),
         "summary_prefs": ai_insights.summary_prefs(user),
@@ -205,6 +208,15 @@ async def _fresh_edition(session: AsyncSession, user: User, *, force: bool = Fal
 async def _render_paper(request: Request, session: AsyncSession, user: User, edition: Insight | None):
     ctx = await _paper_ctx(request, session, user, edition)
     return render(request, "insights.html", ctx, partial="partials/paper_body.html", user=user)
+
+
+async def _paper_update(request: Request, session: AsyncSession, user: User, edition: Insight, *events: str):
+    """After a story changes: the whole paper again (counts, chips, sections), swapped into #insight."""
+    if not is_htmx(request):
+        return RedirectResponse(f"/insights/{edition.id}", status_code=303)
+    ctx = await _paper_ctx(request, session, user, edition)
+    headers = {**hx_trigger(*events), "HX-Retarget": "#insight", "HX-Reswap": "innerHTML"}
+    return render(request, "partials/paper_body.html", ctx, user=user, headers=headers)
 
 
 @router.get("/insights")
@@ -491,7 +503,7 @@ async def write_missing_summaries(request: Request, insight_id: uuid.UUID, user:
 async def hide_story(
     request: Request, insight_id: uuid.UUID, user: CsrfUser, session: DB, key: Annotated[str, Form()]
 ):
-    """Prune one story from this edition (kept out of it on recompiles)."""
+    """Take one story off this edition without reading it (kept off on recompiles; its items stay unread)."""
     edition = await _edition_or_404(session, user, insight_id)
     body = _body(edition)
     hidden = list(body.get("hidden") or [])
@@ -509,9 +521,7 @@ async def hide_story(
     body.update(hidden=hidden, sections=sections, story_count=max(0, int(body.get("story_count") or 1) - 1))
     edition.body = body
     await session.commit()
-    if is_htmx(request):
-        return Response(status_code=200, headers=hx_trigger("story-hidden"))
-    return RedirectResponse(f"/insights/{edition.id}", status_code=303)
+    return await _paper_update(request, session, user, edition, "story-removed")
 
 
 @router.post("/insights/paper/{insight_id}/read")
@@ -523,7 +533,7 @@ async def read_story(
     key: Annotated[str, Form()] = "",
     section: Annotated[str, Form()] = "",
 ):
-    """Mark one story (``key``) or a whole section (``section``) as read; returns the updated partial."""
+    """Mark one story (``key``) or a whole section (``section``) read; today's paper then drops it."""
     edition = await _edition_or_404(session, user, insight_id)
     body = _body(edition)
     targets: list[dict] = []
@@ -550,22 +560,8 @@ async def read_story(
     body["unread_count"] = max(0, int(body.get("unread_count") or 0) - len(owned))
     edition.body = body
     await session.commit()
-    feeds = await _feed_titles(session, user)
-    config = paper.paper_config(user)
-    ctx = {
-        "edition": edition,
-        "config": config,
-        "section": hit_section,
-        "summary_prefs": ai_insights.summary_prefs(user),
-        "tune_lines": _tune_lines(config, body, feeds),
-    }
-    if key:
-        ctx.update(_story_ctx(user, edition, hit_section, targets[0], feeds))
-        return render(
-            request, "partials/paper_story.html", ctx, user=user, headers=hx_trigger("counts-changed")
-        )
-    return render(
-        request, "partials/paper_section.html", ctx, user=user, headers=hx_trigger("counts-changed")
+    return await _paper_update(
+        request, session, user, edition, "counts-changed", "paper-read" if key else "paper-section-read"
     )
 
 

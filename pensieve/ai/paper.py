@@ -274,6 +274,42 @@ async def _read_ids(session: AsyncSession, user_id: uuid.UUID, item_ids: list[uu
     return set((await session.scalars(stmt)).all())
 
 
+async def without_read(session: AsyncSession, user_id: uuid.UUID, body: dict[str, Any]) -> dict[str, Any]:
+    """``body`` minus every story whose items are all read now, wherever they were read (a copy; counts redone).
+
+    Today's paper is a reading list: marking a story read, in the paper or in Reader, takes it off the page.
+    """
+    sections = body.get("sections") or []
+    ids = []
+    for sec in sections:
+        for story in [*sec.get("stories", []), *sec.get("brief", [])]:
+            for m in story.get("members") or []:
+                try:
+                    ids.append(uuid.UUID(str(m["item_id"])))
+                except (KeyError, ValueError):
+                    continue
+    read = {str(i) for i in await _read_ids(session, user_id, ids)}
+
+    def unread(story: dict[str, Any]) -> bool:
+        members = story.get("members") or []
+        return not members or any(str(m.get("item_id")) not in read for m in members)
+
+    kept, dropped = [], 0
+    for sec in sections:
+        stories = [s for s in sec.get("stories", []) if unread(s)]
+        brief = [s for s in sec.get("brief", []) if unread(s)]
+        dropped += len(sec.get("stories", [])) + len(sec.get("brief", [])) - len(stories) - len(brief)
+        if not stories and not brief:
+            continue
+        kept.append(
+            {**sec, "stories": stories, "brief": brief, "count": len(stories) + len(brief),
+             "unread": sum(1 for s in [*stories, *brief] if not s.get("read"))}
+        )  # fmt: skip
+    out = dict(body, sections=kept)
+    out["story_count"] = max(0, int(body.get("story_count") or 0) - dropped)
+    return out
+
+
 async def _memberships(
     session: AsyncSession, user_id: uuid.UUID, item_ids: list[uuid.UUID]
 ) -> dict[uuid.UUID, models.Cluster]:
@@ -541,4 +577,5 @@ __all__ = [
     "story_key",
     "today",
     "tune_summary",
+    "without_read",
 ]

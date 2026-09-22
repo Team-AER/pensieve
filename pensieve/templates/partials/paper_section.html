@@ -8,10 +8,10 @@
     <div class="psection-actions">
       <button type="button" class="btn btn-sm btn-ghost" data-expand="#{{ sec_id }}" aria-label="Expand or collapse every story in {{ section.title }}">{{ m.icon('layers', 14) }} <span class="btn-label">Expand all</span></button>
       {% if section.unread %}
-      <form hx-post="/insights/paper/{{ edition.id }}/read" hx-target="#{{ sec_id }}" hx-swap="outerHTML" method="post" action="/insights/paper/{{ edition.id }}/read">{{ m.csrf_field(csrf_token) }}<input type="hidden" name="section" value="{{ section.key }}"><button class="btn btn-sm btn-ghost" type="submit">{{ m.icon('check-circle', 14) }} <span class="btn-label">Mark section read</span></button></form>
+      <form hx-post="/insights/paper/{{ edition.id }}/read" hx-target="#{{ sec_id }}" hx-swap="outerHTML" method="post" action="/insights/paper/{{ edition.id }}/read">{{ m.csrf_field(csrf_token) }}<input type="hidden" name="section" value="{{ section.key }}"><button class="btn btn-sm btn-ghost" type="submit" title="Mark every story here read; they leave today's paper">{{ m.icon('check-circle', 14) }} <span class="btn-label">Mark section read</span></button></form>
       {% endif %}
       {% if section.kind != 'other' %}
-      <form method="post" action="/insights/paper/hide-section" hx-boost="false">{{ m.csrf_field(csrf_token) }}<input type="hidden" name="key" value="{{ section.key }}"><button class="btn btn-sm btn-ghost" type="submit" title="Turn this section off (undo in Customize)">{{ m.icon('close', 14) }} <span class="btn-label">Hide section</span></button></form>
+      <form method="post" action="/insights/paper/hide-section" hx-boost="false">{{ m.csrf_field(csrf_token) }}<input type="hidden" name="key" value="{{ section.key }}"><button class="btn btn-sm btn-ghost" type="submit" title="Stop showing this section in the paper; turn it back on in Customize">{{ m.icon('close', 14) }} <span class="btn-label">Turn off section</span></button></form>
       {% endif %}
     </div>
   </header>

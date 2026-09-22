@@ -19,11 +19,19 @@
   const isMid = () => !mqMobile.matches && !mqWide.matches;
 
   // ---- Panes (mobile: one at a time; mid: nav is a drawer) ----
+  const paneY = { app: null, at: {} };
   function setPane(name) {
     const a = app();
     if (!a) return;
+    const was = a.dataset.pane;
+    if (isMobile() && was !== name) {
+      // One document scroll serves every pane on phones: keep each pane's place (a new article starts at the top).
+      if (paneY.app !== a) { paneY.app = a; paneY.at = {}; }
+      paneY.at[was] = window.scrollY;
+    }
     a.dataset.pane = name;
-    showChrome(true);
+    showBars(true);
+    if (isMobile() && was !== name) scrollPageTo(name === 'article' ? 0 : paneY.at[name] || 0);
     if (name === 'nav') { const first = $('#nav .nav-item'); if (first && !isMobile()) first.focus({ preventScroll: true }); }
   }
   function closeDrawer() { const a = app(); if (a && a.dataset.pane === 'nav') setPane('list'); }
@@ -453,49 +461,56 @@
     }
   });
 
-  // ---- Phones: the article's header and footer slide away while reading down, and return on the way back up ----
-  // Both bars float over #article (web.css); its padding matches their measured height so nothing starts hidden.
-  // They also come back at the top and bottom of the article, on a new article, and whenever they take focus.
-  const chrome = { y: 0, travel: 0, observer: null, head: null, foot: null };
-  const articlePane = () => $('.pane-article');
-  function showChrome(show) {
-    const p = articlePane(); if (!p) return;
-    if (show) delete p.dataset.chrome; else p.dataset.chrome = 'hidden';
+  // ---- Phones: every screen's top and bottom bars slide away while reading down, and return on the way back up ----
+  // On phones the document scrolls (web.css), so the browser's own toolbar shrinks along with ours. The bars also
+  // come back at the top and the bottom of the page, on a new article or pane, and whenever they take focus.
+  const bars = { y: 0, travel: 0 };
+  function showBars(show) {
+    const a = app(); if (!a) return;
+    if (show) delete a.dataset.bars; else a.dataset.bars = 'hidden';
   }
-  function fitChrome() {
-    const p = articlePane(); if (!p || !window.ResizeObserver) return;
-    const head = $('.article-head', p), foot = $('.article-foot', p);
-    if (head === chrome.head && foot === chrome.foot) return; // same bars (hx-boost swaps bring new ones)
-    if (chrome.observer) chrome.observer.disconnect();
-    chrome.head = head; chrome.foot = foot;
-    chrome.observer = new ResizeObserver(() => {
-      if (head) p.style.setProperty('--chrome-top', head.offsetHeight + 'px');
-      if (foot) p.style.setProperty('--chrome-bottom', foot.offsetHeight + 'px');
-    });
-    [head, foot].forEach((el) => { if (el) chrome.observer.observe(el); });
-  }
-  document.addEventListener('scroll', (e) => {
-    const el = e.target;
-    if (!el || el.id !== 'article' || !isMobile()) return;
-    const y = el.scrollTop, dy = y - chrome.y;
-    chrome.y = y;
-    const p = el.closest('.pane-article'); if (!p) return;
-    // Top (and iOS's rubber band above it) or the last screenful: always show, the footer's "next" lives here.
-    if (y <= 8 || y + el.clientHeight >= el.scrollHeight - 48) { chrome.travel = 0; showChrome(true); return; }
-    if ((dy > 0) !== (chrome.travel > 0)) chrome.travel = 0; // direction changed: start counting again
-    chrome.travel += dy;
-    if (chrome.travel > 24) {
+  // Scroll without the jump counting as "reading down".
+  function scrollPageTo(y) { bars.y = y; bars.travel = 0; window.scrollTo(0, y); }
+  window.addEventListener('scroll', () => {
+    if (!isMobile()) return;
+    const y = window.scrollY, dy = y - bars.y;
+    bars.y = y;
+    const end = document.documentElement.scrollHeight - window.innerHeight;
+    // Top (and iOS's rubber band above it) or the last screenful: always show; the article's "next" lives here.
+    if (y <= 8 || y >= end - 48) { bars.travel = 0; showBars(true); return; }
+    if ((dy > 0) !== (bars.travel > 0)) bars.travel = 0; // direction changed: start counting again
+    bars.travel += dy;
+    if (bars.travel > 24) {
       // Never pull the bars out from under an open menu or a focused control.
-      if (p.querySelector('details.menu[open]') || (document.activeElement && document.activeElement.closest('.article-head, .article-foot'))) return;
-      showChrome(false);
-    } else if (chrome.travel < -24) showChrome(true);
-  }, { capture: true, passive: true });
-  document.addEventListener('focusin', (e) => { if (e.target.closest && e.target.closest('.article-head, .article-foot')) showChrome(true); });
+      const f = document.activeElement;
+      if ($('details.menu[open]') || $('dialog[open]') || (f && f.closest && f.closest('.topbar, .pane-head, .tabbar, .article-foot'))) return;
+      showBars(false);
+    } else if (bars.travel < -24) showBars(true);
+  }, { passive: true });
+  document.addEventListener('focusin', (e) => { if (e.target.closest && e.target.closest('.topbar, .pane-head, .tabbar, .article-foot')) showBars(true); });
   document.body.addEventListener('htmx:afterSwap', (e) => {
-    if (e.detail && e.detail.target && e.detail.target.id === 'article') { chrome.y = 0; chrome.travel = 0; showChrome(true); }
+    if (!(e.detail && e.detail.target && e.detail.target.id === 'article')) return;
+    showBars(true);
+    if (isMobile() && app() && app().dataset.pane === 'article') scrollPageTo(0);
   });
-  document.addEventListener('htmx:afterSettle', fitChrome);
-  fitChrome();
+
+  // ---- Keyboard hints (the keybar, the search box's "/"): only while Ctrl or ⌘ is held on its own ----
+  // A short delay keeps them from flashing during ⌘C or Ctrl+F; any other key, releasing, or leaving the tab hides them.
+  let keysTimer = null;
+  function showKeys(on) {
+    clearTimeout(keysTimer); keysTimer = null;
+    document.documentElement.classList.toggle('keys-shown', on);
+  }
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Meta' || e.key === 'Control') {
+      if (!e.repeat && !keysTimer) keysTimer = setTimeout(() => showKeys(true), 250);
+      return;
+    }
+    showKeys(false);
+  });
+  document.addEventListener('keyup', (e) => { if (e.key === 'Meta' || e.key === 'Control') showKeys(false); });
+  window.addEventListener('blur', () => showKeys(false));
+  document.addEventListener('visibilitychange', () => showKeys(false));
 
   // ---- Keyboard ----
   let pendingG = false, pendingTimer = null;
@@ -560,7 +575,24 @@
     if (d) { const form = $('form', d); if (form) form.reset(); const r = $('#save-result', d); if (r) r.innerHTML = ''; if (d.open) d.close(); }
     if (location.pathname.startsWith('/reader/saved') && window.htmx) window.htmx.trigger(document.body, 'refresh-list');
   });
-  document.body.addEventListener('story-hidden', () => toast('Hidden from today\'s paper'));
+  // The paper comes back whole after a story is read or removed (fresh counts): keep open what was open.
+  let paperOpen = null;
+  document.body.addEventListener('htmx:beforeSwap', (e) => {
+    const t = e.detail && e.detail.target;
+    if (t && t.id === 'insight') paperOpen = $$('details.pstory[open], details.pbrief[open]', t).map((d) => d.id || 'brief:' + (d.closest('.psection') || {}).id);
+  });
+  document.body.addEventListener('htmx:afterSwap', (e) => {
+    const t = e.detail && e.detail.target;
+    if (!t || t.id !== 'insight' || !paperOpen) return;
+    paperOpen.forEach((k) => {
+      const d = k.startsWith('brief:') ? $('#' + CSS.escape(k.slice(6)) + ' details.pbrief') : document.getElementById(k);
+      if (d) d.open = true;
+    });
+    paperOpen = null;
+  });
+  document.body.addEventListener('story-removed', () => toast('Removed from today\'s paper; still unread in Reader'));
+  document.body.addEventListener('paper-read', () => toast('Marked read'));
+  document.body.addEventListener('paper-section-read', () => toast('Section marked read'));
   document.body.addEventListener('paper-tuned-more', () => toast('More like this: its tag and sources gained weight'));
   document.body.addEventListener('paper-tuned-less', () => toast('Less of this: its tag and sources lost weight'));
   document.body.addEventListener('paper-tuned-reset', () => toast('Tuning reset for this story'));
@@ -976,6 +1008,6 @@
       f.setAttribute('title', 'Original web page');
       box.appendChild(f);
     }
-    b.querySelector('.btn-label') && (b.querySelector('.btn-label').textContent = open ? 'Hide it' : 'Show it here');
+    b.querySelector('.btn-label') && (b.querySelector('.btn-label').textContent = open ? 'Close it' : 'Show it here');
   });
 })();

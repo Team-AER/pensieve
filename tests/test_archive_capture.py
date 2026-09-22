@@ -238,8 +238,14 @@ async def test_client_dom_from_the_extension_skips_the_browser(session, user, fa
     """A signed-in or paywalled page: the DOM the user saw is the source; images are fetched server-side."""
     item, snap = await _saved(session, user, fake_queue)
     with respx.mock(assert_all_called=False) as router:
-        router.get(URL).respond(200, text="<html><body><p>Subscribe to read.</p></body></html>", headers={"content-type": "text/html"})
-        router.get("https://news.example.com/pic.png").respond(200, content=PNG, headers={"content-type": "image/png"})
+        router.get(URL).respond(
+            200,
+            text="<html><body><p>Subscribe to read.</p></body></html>",
+            headers={"content-type": "text/html"},
+        )
+        router.get("https://news.example.com/pic.png").respond(
+            200, content=PNG, headers={"content-type": "image/png"}
+        )
         router.get(url__regex=r".*").respond(404)
         done = await capture.capture_snapshot(session, snap.id, client_html=RENDERED_DOM)
     await session.refresh(item)

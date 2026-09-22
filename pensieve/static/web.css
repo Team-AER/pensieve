@@ -352,20 +352,20 @@
      ===================================================================== */
   @media (max-width: 899.98px) {
     .split { grid-template-columns: 1fr; min-height: 100dvh; background: var(--brand-ink); }
-    .split-brand { min-height: 360px; padding: calc(56px + env(safe-area-inset-top, 0px)) 28px 28px; gap: 24px; justify-content: space-between; }
+    .split-brand { min-height: 360px; padding: 56px 28px 28px; gap: 24px; justify-content: space-between; }
     .split-copy { gap: 12px; }
     .split-headline { font-size: 34px; }
     .split-sub { display: none; }
     .split-points { display: none; }
     .brand-light { font-size: 22px; }
-    .split-form { padding: 28px 24px calc(32px + env(safe-area-inset-bottom, 0px)); border-radius: 24px 24px 0 0; background: var(--bg); align-items: flex-start; flex: 1; }
+    .split-form { padding: 28px 24px 32px; border-radius: 24px 24px 0 0; background: var(--bg); align-items: flex-start; flex: 1; }
     .auth-form { max-width: none; gap: 18px; }
     .auth-form h1 { font-size: 26px; }
     .auth-form .input { height: 50px; border-radius: 12px; }
     .auth-form .btn-lg { height: 52px; border-radius: 12px; font-size: 16px; }
     .error-page .error-code { font-size: 64px; }
 
-    .topbar { padding: 0 12px; padding-top: env(safe-area-inset-top, 0px); height: calc(56px + env(safe-area-inset-top, 0px)); gap: 10px; }
+    .topbar { padding: 0 12px; height: 56px; gap: 10px; }
     .topbar-search { max-width: none; }
     .topnav { display: none; }
     .brand { font-size: 18px; }
@@ -376,10 +376,9 @@
     .pane-nav, .pane-list, .pane-article { width: 100%; border-right: 0; display: none; }
     .app[data-pane="nav"] .pane-nav, .app[data-pane="list"] .pane-list, .app[data-pane="article"] .pane-article { display: flex; flex: 1 1 0; min-height: 0; overflow: hidden; position: static; box-shadow: none; }
     .app[data-pane="nav"] .nav-backdrop { display: none; }
-    .pane-nav { padding-top: calc(16px + env(safe-area-inset-top, 0px)); }
+    .pane-nav { padding-top: 16px; }
     .nav-toggle { display: inline-flex; }
-    .pane-head { padding-top: env(safe-area-inset-top, 0px); }
-    .list-head { flex-wrap: wrap; padding: calc(8px + env(safe-area-inset-top, 0px)) 12px 10px; gap: 10px; background: var(--bg); }
+    .list-head { flex-wrap: wrap; padding: 8px 12px 10px; gap: 10px; background: var(--bg); }
     .list-head-main { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; align-items: center; width: 100%; }
     .list-title-wrap { flex-direction: column; align-items: center; gap: 0; text-align: center; }
     .list-title { font-family: var(--font-display); font-size: 18px; letter-spacing: -0.01em; }
@@ -400,9 +399,9 @@
     .item { padding: 14px 20px; }
     .item-title { font-size: 16px; }
     .item .item-snippet { display: block; }
-    .article { padding: 20px 20px calc(24px + env(safe-area-inset-bottom, 0px)); }
+    .article { padding: 20px 20px 24px; }
     .article-title { font-size: var(--text-2xl); }
-    .article-head { padding: calc(4px + env(safe-area-inset-top, 0px)) 8px 4px; gap: 2px; min-height: 52px; background: var(--bg); }
+    .article-head { padding: 4px 8px 4px; gap: 2px; min-height: 52px; background: var(--bg); }
     .article-head:has(#article-toolbar:empty) { display: flex; }
     .article-head .toolbar { flex-wrap: nowrap; justify-content: flex-end; gap: 2px; padding: 0; }
     .article-head .toolbar > .btn { border: 0; background: transparent; width: 44px; height: 44px; min-width: 44px; padding: 0; color: var(--ink); }
@@ -413,7 +412,7 @@
     .toolbar-spacer { display: none; }
     .toolbar-error { display: none; }
     .toolbar-more { display: inline-block; }
-    .article-foot { display: flex; gap: 8px; flex: 0 0 auto; padding: 8px 16px calc(24px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--line); background: var(--panel); }
+    .article-foot { display: flex; gap: 8px; flex: 0 0 auto; padding: 8px 16px; border-top: 1px solid var(--line); background: var(--panel); }
     .article-foot .btn { height: 44px; border-radius: 10px; }
     .article-foot .btn-icon { width: 44px; }
     .article-foot .grow { flex: 1; }
@@ -425,21 +424,21 @@
     .manage-nav .nav-item { flex: 0 0 auto; height: 34px; min-height: 34px; padding: 0 14px; border-radius: 17px; border: 1px solid var(--line-3); background: var(--card); color: var(--ink-2); font-size: var(--text-md); }
     .manage-nav .nav-item.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
     .signout { display: none; }
-    .manage-body { padding: 16px 16px calc(40px + env(safe-area-inset-bottom, 0px)); }
+    .manage-body { padding: 16px 16px 40px; }
     .page-head { margin-bottom: 16px; }
     .page-head h1 { font-size: 28px; }
     .page-head-actions .search { width: 100%; }
     .two-col, .insight-grid, .grid-8-4 { grid-template-columns: 1fr; }
-    .page-body { padding: 16px 16px calc(40px + env(safe-area-inset-bottom, 0px)); }
+    .page-body { padding: 16px 16px 40px; }
     .insight-title { font-size: 30px; }
     .insight-lede { font-size: 16px; }
     .stats { grid-template-columns: repeat(2, 1fr); }
     .topbar-search input::placeholder { font-size: 14px; }
     .search-filters { padding: 12px; }
-    .avatar-menu .menu-body { position: fixed; left: 12px; right: 12px; top: auto; bottom: calc(96px + env(safe-area-inset-bottom, 0px)); min-width: 0; }
+    .avatar-menu .menu-body { position: fixed; left: 12px; right: 12px; top: auto; bottom: 96px; min-width: 0; }
     .article-head .toolbar > .reading-menu > summary { border: 0; background: transparent; width: 44px; height: 44px; min-width: 44px; padding: 0; color: var(--ink); }
     /* The generic bottom-sheet rules below position it; only the sizing differs from a menu list. */
-    .reading-menu .menu-body { width: auto; gap: 10px; padding: 6px 16px calc(16px + env(safe-area-inset-bottom, 0px)); }
+    .reading-menu .menu-body { width: auto; gap: 10px; padding: 6px 16px 16px; }
     .reading-row .seg-btn { min-height: 36px; height: 36px; }
   }
   @media (max-width: 419.98px) {
@@ -510,7 +509,7 @@
 
 /* =====================================================================
    Phone audit (spec M-Login / M-Reader / M-Article / M-Settings): 44 px targets, bottom sheets for
-   every menu, scrollable drawer, no horizontal overflow, safe-area padding. Overrides live here in the
+   every menu, scrollable drawer, no horizontal overflow. Overrides live here in the
    layout layer so app.css (foundation, frozen) stays untouched.
    ===================================================================== */
 @layer layout {
@@ -563,7 +562,7 @@
     .touch-hidden, .keybar { display: none !important; }
 
     /* ---- Drawer: scrollable, with a header and a close button ---- */
-    .app[data-pane="nav"] .pane-nav { overflow-y: auto; padding-top: calc(4px + env(safe-area-inset-top, 0px)); padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px)); gap: 16px; }
+    .app[data-pane="nav"] .pane-nav { overflow-y: auto; padding-top: 4px; padding-bottom: 24px; gap: 16px; }
     .nav-head { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; align-items: center; min-height: 52px; margin: 0 -4px; }
     .nav-head-title { grid-column: 2; text-align: center; font-family: var(--font-display); font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
     .nav-head .btn { grid-column: 3; width: 44px; height: 44px; }
@@ -606,7 +605,7 @@
 
     /* ---- Menus become bottom sheets (details-based menus, avatar menu, context menu) ---- */
     details.menu[open]::before { content: ""; position: fixed; inset: 0; z-index: 59; background: var(--backdrop); touch-action: none; }
-    details.menu .menu-body, .avatar-menu .menu-body { position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 60; min-width: 0; max-width: none; max-height: min(80dvh, 640px); overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; border-radius: 18px 18px 0 0; border-bottom: 0; padding: 6px 12px calc(12px + env(safe-area-inset-bottom, 0px)); box-shadow: var(--shadow-lg); gap: 2px; }
+    details.menu .menu-body, .avatar-menu .menu-body { position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 60; min-width: 0; max-width: none; max-height: min(80dvh, 640px); overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; border-radius: 18px 18px 0 0; border-bottom: 0; padding: 6px 12px 12px; box-shadow: var(--shadow-lg); gap: 2px; }
     details.menu .menu-body::before, .ctxmenu.sheet::before { content: ""; display: block; width: 40px; height: 4px; margin: 6px auto 10px; border-radius: 2px; background: var(--line-3); }
     .menu-item { min-height: 48px; height: auto; padding: 0 12px; font-size: var(--text-base); border-radius: var(--radius-md); white-space: normal; }
     .menu-item .ic { width: 18px; height: 18px; }
@@ -616,14 +615,14 @@
     .menu-form .btn { min-height: 44px; }
     .menu-sep { margin: 6px 4px; }
     .ctx-backdrop { display: block; position: fixed; inset: 0; z-index: 59; background: var(--backdrop); touch-action: none; }
-    .ctxmenu.sheet { position: fixed; left: 0 !important; right: 0; top: auto !important; bottom: 0; min-width: 0; max-width: none; max-height: min(80dvh, 640px); overflow-y: auto; overscroll-behavior: contain; border-radius: 18px 18px 0 0; border-bottom: 0; padding: 6px 12px calc(12px + env(safe-area-inset-bottom, 0px)); box-shadow: var(--shadow-lg); }
+    .ctxmenu.sheet { position: fixed; left: 0 !important; right: 0; top: auto !important; bottom: 0; min-width: 0; max-width: none; max-height: min(80dvh, 640px); overflow-y: auto; overscroll-behavior: contain; border-radius: 18px 18px 0 0; border-bottom: 0; padding: 6px 12px 12px; box-shadow: var(--shadow-lg); }
     .ctxmenu .menu-head { padding: 8px 12px 6px; font-size: var(--text-sm); }
     .ctxmenu .menu-item kbd { display: none; }
     .item, .nav-item, .article-head, .article-header { -webkit-touch-callout: none; }
     .item, .nav-item, .article-head { -webkit-user-select: none; user-select: none; }
 
     /* ---- Dialogs: fit the viewport, sit above the tab bar, full-width buttons ---- */
-    .dialog { max-height: calc(100dvh - 32px - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px)); margin-top: auto; margin-bottom: calc(16px + env(safe-area-inset-bottom, 0px)); display: flex; flex-direction: column; }
+    .dialog { max-height: calc(100dvh - 32px); margin-top: auto; margin-bottom: 16px; display: flex; flex-direction: column; }
     .dialog:not([open]) { display: none; }
     .dialog-body { overflow-y: auto; flex: 1 1 auto; min-height: 0; }
     .dialog-head { padding: 16px 20px 0; }
@@ -729,7 +728,7 @@
     .insight-card { padding: 16px; }
 
     /* ---- Error page ---- */
-    .error-page { padding: 40px 24px calc(40px + env(safe-area-inset-bottom, 0px)); }
+    .error-page { padding: 40px 24px 40px; }
     .error-page .btn { min-height: 48px; }
   }
   @media (max-width: 899.98px) and (hover: none) {
@@ -782,22 +781,41 @@
   }
 }
 
-/* ---- Phones: the article's header and footer float over the text and slide away while reading down ----
-   reader.js sets data-chrome="hidden" on .pane-article and measures the bars into --chrome-top/--chrome-bottom.
-   No transform (and no will-change) while shown: either would trap the menus' fixed bottom sheets inside the bar. */
+/* ---- Phones: the page scrolls, not a pane, and every screen's bars slide away while reading down ----
+   Scrolling the document lets the browser shrink its own toolbar too, and it keeps content clear of the notch and
+   home indicator without any inset padding. Top bars stick to the top and bottom bars to the bottom; reader.js
+   sets data-bars="hidden" on .app while scrolling down. No transform (and no will-change) while shown: either would
+   trap the menus' fixed bottom sheets inside the bar. */
 @layer layout {
   @media (max-width: 899.98px) {
-    .app[data-pane="article"] .pane-article { position: relative; }
-    .pane-article > .article-head, .pane-article > .article-foot { position: absolute; left: 0; right: 0; transition: transform 0.32s cubic-bezier(0.2, 0.7, 0.2, 1); }
-    .pane-article > .article-head { top: 0; z-index: 21; }
-    .pane-article > .article-foot { bottom: 0; z-index: 20; }
-    .pane-article > .pane-body {
-      padding-top: var(--chrome-top, calc(53px + env(safe-area-inset-top, 0px)));
-      padding-bottom: var(--chrome-bottom, calc(77px + env(safe-area-inset-bottom, 0px)));
-      scroll-padding-top: var(--chrome-top, calc(53px + env(safe-area-inset-top, 0px)));
-    }
-    /* Hidden: the header keeps a strip under the status bar so the clock never sits on top of text. */
-    .pane-article[data-chrome="hidden"] > .article-head { transform: translateY(calc(env(safe-area-inset-top, 0px) - 100%)); transition-timing-function: cubic-bezier(0.4, 0, 0.6, 1); }
-    .pane-article[data-chrome="hidden"] > .article-foot { transform: translateY(100%); transition-timing-function: cubic-bezier(0.4, 0, 0.6, 1); }
+    .app { height: auto; min-height: 100dvh; overflow: visible; }
+    .panes, .manage { flex: 1 0 auto; min-height: 0; }
+    .app[data-pane="nav"] .pane-nav, .app[data-pane="list"] .pane-list, .app[data-pane="article"] .pane-article { flex: 1 0 auto; min-height: 0; overflow: visible; }
+    .pane-body, .page-body, .manage-body, .app[data-pane="nav"] .pane-nav { flex: 1 0 auto; min-height: 0; overflow: visible; }
+    .topbar, .pane-head { position: sticky; top: 0; z-index: 31; }
+    .tabbar, .article-foot { position: sticky; bottom: 0; z-index: 30; }
+    .tabbar { height: 64px; padding: 6px 12px; }
+    .toasts { bottom: calc(64px + var(--space-3)); }
+    .app[data-pane="article"] .toasts { bottom: calc(60px + var(--space-3)); }
+    .topbar, .pane-head, .tabbar, .article-foot { transition: transform 0.32s cubic-bezier(0.2, 0.7, 0.2, 1); }
+    .app[data-bars="hidden"] :is(.topbar, .pane-head) { transform: translateY(-100%); }
+    .app[data-bars="hidden"] :is(.tabbar, .article-foot) { transform: translateY(100%); }
+    .app[data-bars="hidden"] :is(.topbar, .pane-head, .tabbar, .article-foot) { transition-timing-function: cubic-bezier(0.4, 0, 0.6, 1); }
+    /* The paper's section chips stick under the top bar, and take its place when it slides away. */
+    .paper-nav { top: 56px; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -16px; padding: 8px 16px; transition: top 0.32s cubic-bezier(0.2, 0.7, 0.2, 1); }
+    .paper-nav::-webkit-scrollbar { display: none; }
+    .paper-nav .chip { flex: 0 0 auto; }
+    .app[data-bars="hidden"] .paper-nav { top: 0; }
+    /* Opening an article (htmx "show:#article:top") lands at the very top, header included. */
+    .pane-article > .pane-body { scroll-margin-top: 100vh; }
+    .item { scroll-margin-top: 140px; scroll-margin-bottom: 80px; }
   }
+}
+
+/* ---- Keyboard hints: out of the way until Ctrl or ⌘ is held (reader.js toggles html.keys-shown) ---- */
+@layer layout {
+  .keybar { position: fixed; left: 50%; bottom: 16px; z-index: 80; height: auto; max-width: calc(100vw - 32px); padding: 9px 18px; border: 1px solid var(--line-3); border-radius: 12px; box-shadow: var(--shadow-lg); pointer-events: none; opacity: 0; visibility: hidden; transform: translate(-50%, 6px); transition: opacity 0.15s, transform 0.15s, visibility 0s 0.15s; }
+  html.keys-shown .keybar { opacity: 1; visibility: visible; transform: translate(-50%, 0); transition: opacity 0.15s, transform 0.15s; }
+  .topbar-search kbd { opacity: 0; transition: opacity 0.15s; }
+  html.keys-shown .topbar-search kbd { opacity: 1; }
 }

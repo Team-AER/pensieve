@@ -153,26 +153,46 @@ async def test_paper_compiles_on_open_and_renders_sections(client, session, user
         select(models.Insight).where(models.Insight.user_id == user.id, models.Insight.kind == "paper")
     )
     assert edition is not None and edition.opened_at is not None
-    # hide the story: gone from the edition and kept out on recompile
+    # remove the story: gone from the edition (the whole paper comes back) and kept out on recompile
     key = f"c:{w['cluster'].id}"
     r = await client.post(f"/insights/paper/{edition.id}/hide", data={"key": key}, headers=headers | HX)
-    assert r.status_code == 200 and "story-hidden" in r.headers.get("HX-Trigger", "")
+    assert r.status_code == 200 and "story-removed" in r.headers.get("HX-Trigger", "")
+    assert r.headers.get("HX-Retarget") == "#insight" and "Big launch everywhere" not in r.text
+    assert "Lone AI post" in r.text and "Remove from paper" in r.text and ">Hide<" not in r.text
+    state = await session.get(models.ItemState, (user.id, w["s1"].id))
+    assert state is None or not state.is_read  # removed, not read
     r = await client.get("/insights?refresh=1")
     assert "Big launch everywhere" not in r.text and "Lone AI post" in r.text
     # mark a story read through the paper
     r = await client.post(
         f"/insights/paper/{edition.id}/read", data={"key": f"i:{w['single'].id}"}, headers=headers | HX
     )
-    assert r.status_code == 200 and 'class="pstory read"' in r.text
+    assert r.status_code == 200 and "paper-read" in r.headers.get("HX-Trigger", "")
+    assert "Lone AI post" not in r.text and 'id="sec-apple"' in r.text  # read: off today's paper
     state = await session.get(models.ItemState, (user.id, w["single"].id))
     assert state is not None and state.is_read
     # and a whole section
     r = await client.post(
         f"/insights/paper/{edition.id}/read", data={"section": "apple"}, headers=headers | HX
     )
-    assert r.status_code == 200 and 'id="sec-apple"' in r.text
+    assert r.status_code == 200 and 'id="sec-apple"' not in r.text
     state = await session.get(models.ItemState, (user.id, w["phone"].id))
     assert state is not None and state.is_read
+
+
+async def test_paper_drops_stories_read_in_reader(client, session, user):
+    w = await seed_paper(session, user)
+    headers = await login(client, user)
+    r = await client.get("/insights")
+    assert 'id="sec-apple"' in r.text and "3 stories" in r.text
+    r = await client.post(f"/items/{w['phone'].id}/read", headers=headers | HX)
+    assert r.status_code == 200
+    r = await client.get("/insights")
+    assert 'id="sec-apple"' not in r.text and "2 stories" in r.text
+    # one copy of a two-source story read: the story stays until every copy is
+    await client.post(f"/items/{w['s1'].id}/read", headers=headers | HX)
+    r = await client.get("/insights")
+    assert "Big launch everywhere" in r.text
 
 
 async def test_paper_settings_reorder_hide_and_mute(client, session, user):
