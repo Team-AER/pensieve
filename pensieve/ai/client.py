@@ -165,6 +165,40 @@ def _extract_json(content: str) -> Any:
 # ---------------------------------------------------------------------------
 
 
+_EFFORTS: dict[str, list[str]] = {}
+"""Per-model ``reasoning_efforts`` the catalog advertises (process-wide, refreshed by every ``health()``)."""
+_EFFORT_WARNED: set[tuple[str, str]] = set()
+_EFFORT_LADDER = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
+_EFFORT_ALIASES = {"off": "none"}  # a route may spell "off" in its catalog; LiteLLM validates "none"
+
+
+def clamp_effort(model: str, value: str | None) -> str | None:
+    """Map a reasoning effort onto what the catalog says ``model`` accepts: an unsupported level becomes the
+    nearest supported one on the ladder (the lower on a tie), so a slider setting the route does not know can
+    never 400 every job. Models the catalog does not describe pass through untouched."""
+    if not value:
+        return value
+    allowed = _EFFORTS.get(model)
+    if not allowed:
+        return value
+    allowed_norm = [_EFFORT_ALIASES.get(a, a) for a in allowed]
+    wanted = _EFFORT_ALIASES.get(value, value)
+    if wanted in allowed_norm:
+        return wanted
+    ranked = [a for a in allowed_norm if a in _EFFORT_LADDER]
+    if not ranked:
+        return value
+    if wanted in _EFFORT_LADDER:
+        pos = _EFFORT_LADDER.index(wanted)
+        chosen = min(ranked, key=lambda a: (abs(_EFFORT_LADDER.index(a) - pos), _EFFORT_LADDER.index(a)))
+    else:
+        chosen = ranked[0]
+    if (model, value) not in _EFFORT_WARNED:
+        _EFFORT_WARNED.add((model, value))
+        log.warning("reasoning effort %r is not offered by %s (catalog: %s); sending %r", value, model, allowed, chosen)
+    return chosen
+
+
 class LLMClient:
     """Thin async client over the gateway. Stateless apart from token usage; the embeddings probe is process-wide."""
 
@@ -227,14 +261,14 @@ class LLMClient:
         Flash-Next (``llm_long_reasoning_off_value``); any explicit level is passed through untouched.
         """
         if reasoning:
-            return reasoning
+            return clamp_effort(model, reasoning)
         s = self.settings
         # Fast first: when one model serves both roles (the deployment points both at Flash-Next), a short
         # structured job must still get the "fast" effort the admin chose on the AI page.
         if model == s.llm_fast_model:
-            return s.llm_fast_reasoning_effort or None
+            return clamp_effort(model, s.llm_fast_reasoning_effort or None)
         if model == s.llm_long_model:
-            return s.llm_long_reasoning_off_value or None
+            return clamp_effort(model, s.llm_long_reasoning_off_value or None)
         return None
 
     def _body(
@@ -428,10 +462,33 @@ class LLMClient:
             latency = int((time.monotonic() - started) * 1000)
             if resp.status_code >= 400:
                 return {"ok": False, "models": [], "latency_ms": latency}
-            return {"ok": True, "models": _catalog_models(resp.json()), "latency_ms": latency}
+            payload = resp.json()
+            efforts = _catalog_efforts(payload)
+            if efforts:
+                _EFFORTS.update(efforts)
+            return {"ok": True, "models": _catalog_models(payload), "latency_ms": latency, "efforts": efforts}
         except Exception as exc:  # noqa: BLE001 - health must never raise
             log.warning("gateway health check failed: %r", exc)
             return {"ok": False, "models": [], "latency_ms": int((time.monotonic() - started) * 1000)}
+
+
+def _catalog_rows(payload: Any) -> list:
+    if isinstance(payload, dict):
+        return payload.get("data") or payload.get("models") or payload.get("model_list") or []
+    return payload if isinstance(payload, list) else []
+
+
+def _catalog_efforts(payload: Any) -> dict[str, list[str]]:
+    """{model id: [reasoning efforts]} for catalog rows that advertise ``reasoning_efforts``."""
+    out: dict[str, list[str]] = {}
+    for row in _catalog_rows(payload):
+        if not isinstance(row, dict):
+            continue
+        name = row.get("id") or row.get("model_name") or row.get("name")
+        efforts = row.get("reasoning_efforts")
+        if name and isinstance(efforts, list) and efforts:
+            out[str(name)] = [str(e) for e in efforts]
+    return out
 
 
 def _catalog_models(payload: Any) -> list[str]:

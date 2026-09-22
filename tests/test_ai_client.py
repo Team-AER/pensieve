@@ -52,6 +52,36 @@ async def test_long_model_sends_reasoning_effort(gateway):
     await client.aclose()
 
 
+async def test_reasoning_effort_is_clamped_to_what_the_catalog_offers(gateway, monkeypatch):
+    """A slider level the route does not offer (the vLLM Flash-Next route took only off/low/medium/xhigh one
+    day and 400ed every job on "high") is mapped to the nearest offered level once health() saw the catalog."""
+    from pensieve.ai import client as client_mod
+
+    monkeypatch.setattr(client_mod, "_EFFORTS", {})
+    monkeypatch.setattr(client_mod, "_EFFORT_WARNED", set())
+    payload = {
+        "models": [
+            {"id": settings.llm_fast_model, "reasoning_efforts": ["off", "low", "medium", "xhigh"]},
+            {"id": "other-model"},
+        ]
+    }
+    gateway.router.get(settings.llm_catalog_url).mock(return_value=httpx.Response(200, json=payload))
+    client = LLMClient()
+    health = await client.health()
+    assert health["ok"] and health["efforts"] == {settings.llm_fast_model: ["off", "low", "medium", "xhigh"]}
+    gateway.chat({"answer": "x", "score": 0.1})
+    await client.chat_json(settings.llm_fast_model, "s", "u", SCHEMA, workflow="x", reasoning="high")
+    await client.chat_json(settings.llm_fast_model, "s", "u", SCHEMA, workflow="x", reasoning="minimal")
+    await client.chat_json(settings.llm_fast_model, "s", "u", SCHEMA, workflow="x", reasoning="off")
+    await client.chat_json(settings.llm_fast_model, "s", "u", SCHEMA, workflow="x")  # default "none" = off
+    await client.chat_json("other-model", "s", "u", SCHEMA, workflow="x", reasoning="high")
+    efforts = [c.get("reasoning_effort") for c in gateway.chat_calls]
+    assert efforts == ["medium", "none", "none", "none", "high"]  # minimal sits between none and low; lower wins
+    assert client_mod.clamp_effort(settings.llm_fast_model, "max") == "xhigh"
+    assert client_mod.clamp_effort("unknown", "high") == "high" and client_mod.clamp_effort("x", None) is None
+    await client.aclose()
+
+
 async def test_reasoning_off_is_spelled_per_model(gateway):
     """Off (the default) is `off` on Flash-Next and `none` on the Ollama route; explicit levels pass through."""
     gateway.chat({"answer": "x", "score": 0.1})
