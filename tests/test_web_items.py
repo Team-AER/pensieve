@@ -108,10 +108,13 @@ async def test_summarize_enqueues_and_polls(client, session, user, monkeypatch):
     r = await client.post(f"/items/{item.id}/summarize", headers=headers | HX)
     assert r.status_code == 200 and "Summarizing" in r.text and f"/items/{item.id}/summary" in r.text
     assert calls == [("ai_summarize_item", (str(user.id), str(item.id)), f"ai_summarize_item:{item.id}")]
-    session.add(models.ItemAI(user_id=user.id, item_id=item.id, summary="- One\n- Two"))
+    session.add(models.ItemAI(user_id=user.id, item_id=item.id, summary="- One\n- Two\n\n**Why this matters to you**\n\nIt fits your rack.\n"))
     await session.commit()
     r = await client.get(f"/items/{item.id}/summary", headers=HX)
-    assert "every 2s" not in r.text and "One" in r.text
+    assert "every 2s" not in r.text
+    # rendered, not echoed as markdown
+    assert "<li>One</li>" in r.text and "<li>Two</li>" in r.text and "It fits your rack." in r.text
+    assert "**" not in r.text and "- One" not in r.text
 
 
 async def test_reader_mode_stores_reader_html(client, session, user, monkeypatch):

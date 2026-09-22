@@ -5,8 +5,9 @@ from __future__ import annotations
 import logging
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pensieve import models
@@ -195,13 +196,18 @@ async def file_feed(
         target = by_name[folder_name.lower()]
     elif new_name or folder_name:
         name = (new_name or folder_name)[:120]
-        if name.lower() in by_name:
-            target = by_name[name.lower()]
-        elif confidence >= AUTO_FILE_CONFIDENCE:
-            target = models.Folder(user_id=user.id, name=name, position=len(folders), ai_suggested=True)
-            session.add(target)
-            await session.flush()
-        else:
+        # The folder list was read before the model call; an OPML import or the reader may have created
+        # this name since, so look again before creating it.
+        target = by_name.get(name.lower()) or await _folder_named(session, user.id, name)
+        if target is None and confidence >= AUTO_FILE_CONFIDENCE:
+            try:
+                async with session.begin_nested():
+                    target = models.Folder(user_id=user.id, name=name, position=len(folders), ai_suggested=True)
+                    session.add(target)
+                    await session.flush()
+            except IntegrityError:
+                target = await _folder_named(session, user.id, name)
+        elif target is None:
             log.info("file_feed: proposed new folder %r for feed %s at %.2f; not created", name, feed.id, confidence)
     if target is None:
         feed.suggested_folder_id = None
@@ -215,6 +221,12 @@ async def file_feed(
         feed.folder_id = target.id
     await session.flush()
     return target
+
+
+async def _folder_named(session: AsyncSession, user_id: uuid.UUID, name: str) -> models.Folder | None:
+    return await session.scalar(
+        select(models.Folder).where(models.Folder.user_id == user_id, func.lower(models.Folder.name) == name.lower())
+    )
 
 
 async def dismiss_folder_suggestion(session: AsyncSession, user: models.User, feed: models.Feed) -> None:

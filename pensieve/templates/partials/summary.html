@@ -2,7 +2,11 @@
 {% if ai and ai.summary %}
 <section class="ai-card" aria-label="AI summary">
   <div class="ai-card-head"><span class="eyebrow eyebrow-ai">{{ m.icon('sparkle', 14) }} Summary</span><span class="faint">{{ ai.model }}</span></div>
-  <div class="ai-summary">{% for line in ai.summary.splitlines() %}{% if line.strip() %}<p>{{ line }}</p>{% endif %}{% endfor %}</div>
+  {% set blocks = ai.summary|summary_blocks %}
+  <div class="ai-summary">
+    {% if blocks.bullets %}<ul class="ai-summary-bullets">{% for b in blocks.bullets %}<li>{{ b }}</li>{% endfor %}</ul>{% endif %}
+    {% if blocks.why %}<p class="ai-summary-why"><span class="eyebrow eyebrow-ai">Why it matters to you</span>{{ blocks.why }}</p>{% endif %}
+  </div>
 </section>
 {% elif error %}
 <div class="ai-card" role="alert"><div class="ai-card-head"><span class="eyebrow eyebrow-ai">{{ m.icon('warning', 14) }} Summary failed</span></div><span class="muted">{{ error }}</span> <div><button type="button" class="btn btn-sm btn-ai" hx-post="/items/{{ item.id }}/summarize" hx-target="#summary-{{ item.id }}" hx-swap="innerHTML" hx-indicator="this">{{ m.icon('refresh', 14) }} Retry</button></div></div>

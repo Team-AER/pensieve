@@ -217,6 +217,24 @@ async def test_file_feed_creates_new_folder_only_at_high_confidence(session, use
     assert target.id == created.id and feed.suggested_folder_id == created.id and feed.folder_id == created.id
 
 
+async def test_file_feed_reuses_a_folder_created_during_the_model_call(session, user, gateway, monkeypatch):
+    feed, _ = await seed_items(session, user)
+    real_examples = categorize.filing_examples
+
+    async def import_lands_meanwhile(session_, user_, names):
+        session.add(models.Folder(user_id=user.id, name="Tech News"))  # e.g. an OPML import committing mid-call
+        await session.flush()
+        return await real_examples(session_, user_, names)
+
+    monkeypatch.setattr(categorize, "filing_examples", import_lands_meanwhile)
+    gateway.chat({"folder": None, "new_folder": "tech news", "confidence": 0.95})
+    target = await categorize.file_feed(session, user, feed)
+    await session.commit()
+    folders = list(await session.scalars(select(models.Folder).where(models.Folder.user_id == user.id)))
+    assert [f.name for f in folders] == ["Tech News"]
+    assert target.id == folders[0].id and feed.folder_id == folders[0].id
+
+
 async def test_file_feed_uses_folder_corrections_as_few_shot(session, user, gateway):
     dbs, news = models.Folder(user_id=user.id, name="Databases"), models.Folder(user_id=user.id, name="News")
     session.add_all([dbs, news])
