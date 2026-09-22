@@ -39,7 +39,7 @@ jobs:
       PENSIEVE_REDIS_URL: redis://localhost:6379/0
       PENSIEVE_SECRET_KEY: test-only-secret-key
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -55,6 +55,6 @@ jobs:
   container:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build production image
         run: docker build --tag pensieve:test .
