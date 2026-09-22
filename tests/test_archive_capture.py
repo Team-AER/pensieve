@@ -232,3 +232,16 @@ async def test_starred_feed_item_archive_fills_archive_text_only(session, user, 
     user.settings = {"archive_starred": False}
     await session.commit()
     assert await save.archive_items(session, user, [item.id]) == 0
+
+
+async def test_client_dom_from_the_extension_skips_the_browser(session, user, fake_queue, bucket, browser):
+    """A signed-in or paywalled page: the DOM the user saw is the source; images are fetched server-side."""
+    item, snap = await _saved(session, user, fake_queue)
+    with respx.mock(assert_all_called=False) as router:
+        router.get(URL).respond(200, text="<html><body><p>Subscribe to read.</p></body></html>", headers={"content-type": "text/html"})
+        router.get("https://news.example.com/pic.png").respond(200, content=PNG, headers={"content-type": "image/png"})
+        router.get(url__regex=r".*").respond(404)
+        done = await capture.capture_snapshot(session, snap.id, client_html=RENDERED_DOM)
+    await session.refresh(item)
+    assert done.status == "done" and done.render_mode == "client" and browser.calls == []
+    assert "apple tree" in item.content_text and "/archive/a/" in item.content_html
