@@ -8,8 +8,9 @@ Note: existing items keep their random (v4) ids; new items get time-ordered v7 i
 since_id/max_id paging is correct from here on. Ids are not rewritten (item_states, clusters, notes and
 client caches reference them); old rows simply sort before new ones in long-id order.
 """
-from alembic import op
 import sqlalchemy as sa
+
+from alembic import op
 
 revision = 'b3f1c9a7d2e4'
 down_revision = '842eb4e75246'

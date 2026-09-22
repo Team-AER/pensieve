@@ -4,10 +4,11 @@ Revision ID: 842eb4e75246
 Revises: 
 Create Date: 2026-09-18 00:43:58.151730
 """
-from alembic import op
-import sqlalchemy as sa
 import pgvector.sqlalchemy
+import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
+
+from alembic import op
 
 revision = '842eb4e75246'
 down_revision = None

@@ -48,7 +48,17 @@ async def test_item_ids_are_time_ordered(session, user, fake_queue, monkeypatch)
     assert len(first) == 2 and len(second) == 2
     assert all(i.id.version == 7 for i in first + second)
     assert max(long_id(i.id) for i in first) < min(long_id(i.id) for i in second)
-    # (Within one millisecond the low bits are random: v7 orders across time, not within a batch.)
+
+
+def test_item_ids_are_unique_and_monotonic_within_one_millisecond(monkeypatch):
+    monkeypatch.setattr(models, "time", types.SimpleNamespace(time_ns=lambda: 1_800_000_000_000_000_000))
+    monkeypatch.setattr(models, "_uuid7_last_ms", -1)
+    monkeypatch.setattr(models, "_uuid7_sequence", 0)
+
+    ids = [long_id(models._uuid7()) for _ in range(4097)]
+
+    assert len(ids) == len(set(ids))
+    assert ids == sorted(ids)
 
 
 # ---------------------------------------------------------------------------------------------- refresh_feed

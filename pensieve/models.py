@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import enum
 import os
+import threading
 import time
 import uuid
 from datetime import datetime
@@ -45,12 +46,36 @@ def _uuid() -> uuid.UUID:
     return uuid.uuid4()
 
 
+_uuid7_lock = threading.Lock()
+_uuid7_last_ms = -1
+_uuid7_sequence = 0
+
+
 def _uuid7() -> uuid.UUID:
     """Time-ordered UUID (RFC 9562 v7). Items use it so ids derived from the first 8 bytes
-    (the sync APIs' int64 item ids) increase over time and clients' since_id paging is correct."""
-    ms = time.time_ns() // 1_000_000
-    rand = int.from_bytes(os.urandom(10), "big")
-    value = (ms << 80) | (0x7 << 76) | ((rand >> 62) & 0xFFF) << 64 | (0b10 << 62) | (rand & ((1 << 62) - 1))
+    (the sync APIs' int64 item ids) increase over time and clients' since_id paging is correct.
+
+    UUIDv7 only leaves 12 bits between its millisecond timestamp and the variant bits. A random value in
+    that space can collide after conversion to the sync APIs' 63-bit id. Use a process-local monotonic
+    sequence instead, advancing the logical millisecond if all 4096 values are consumed.
+    """
+    global _uuid7_last_ms, _uuid7_sequence
+
+    with _uuid7_lock:
+        now_ms = time.time_ns() // 1_000_000
+        if now_ms > _uuid7_last_ms:
+            _uuid7_last_ms = now_ms
+            _uuid7_sequence = 0
+        else:
+            _uuid7_sequence += 1
+            if _uuid7_sequence > 0xFFF:
+                _uuid7_last_ms += 1
+                _uuid7_sequence = 0
+        ms = _uuid7_last_ms
+        sequence = _uuid7_sequence
+
+    rand_b = int.from_bytes(os.urandom(8), "big") & ((1 << 62) - 1)
+    value = (ms << 80) | (0x7 << 76) | (sequence << 64) | (0b10 << 62) | rand_b
     return uuid.UUID(int=value)
 
 

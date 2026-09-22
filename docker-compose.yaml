@@ -1,53 +1,79 @@
+name: pensieve
+
+x-app: &app
+  build:
+    context: .
+  image: pensieve:local
+  env_file: .env
+  environment:
+    PENSIEVE_DATABASE_URL: postgresql+asyncpg://pensieve:${PENSIEVE_POSTGRES_PASSWORD:?Set PENSIEVE_POSTGRES_PASSWORD in .env}@db:5432/pensieve
+    PENSIEVE_REDIS_URL: redis://redis:6379/0
+    PENSIEVE_SECRET_KEY: ${PENSIEVE_SECRET_KEY:?Set PENSIEVE_SECRET_KEY in .env}
+    PENSIEVE_BASE_URL: ${PENSIEVE_BASE_URL:?Set PENSIEVE_BASE_URL in .env}
+    PENSIEVE_SESSION_COOKIE_SECURE: ${PENSIEVE_SESSION_COOKIE_SECURE:-true}
+  restart: unless-stopped
+  init: true
+
 services:
   db:
     image: pgvector/pgvector:pg17
     environment:
       POSTGRES_USER: pensieve
-      POSTGRES_PASSWORD: pensieve
+      POSTGRES_PASSWORD: ${PENSIEVE_POSTGRES_PASSWORD:?Set PENSIEVE_POSTGRES_PASSWORD in .env}
       POSTGRES_DB: pensieve
-    ports: ["5432:5432"]
-    volumes: ["pgdata:/var/lib/postgresql/data"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U pensieve"]
+      test: ["CMD-SHELL", "pg_isready -U pensieve -d pensieve"]
       interval: 5s
       timeout: 3s
       retries: 20
+    restart: unless-stopped
+    shm_size: 256mb
   redis:
     image: redis:7-alpine
-    ports: ["6379:6379"]
+    command: redis-server --appendonly yes --maxmemory-policy noeviction
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
   web:
-    build: .
-    profiles: ["app"]
-    env_file: .env
-    environment:
-      PENSIEVE_DATABASE_URL: postgresql+asyncpg://pensieve:pensieve@db:5432/pensieve
-      PENSIEVE_REDIS_URL: redis://redis:6379/0
-    command: sh -c "alembic upgrade head && uvicorn pensieve.main:app --host 0.0.0.0 --port 8000"
-    ports: ["8000:8000"]
+    <<: *app
+    command: >-
+      sh -c "alembic upgrade head &&
+      exec uvicorn pensieve.main:app --host 0.0.0.0 --port 8000
+      --proxy-headers --forwarded-allow-ips='*'"
+    ports:
+      - "8000:8000"
     depends_on:
       db: { condition: service_healthy }
-      redis: { condition: service_started }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
   worker:
-    build: .
-    profiles: ["app"]
-    env_file: .env
-    environment:
-      PENSIEVE_DATABASE_URL: postgresql+asyncpg://pensieve:pensieve@db:5432/pensieve
-      PENSIEVE_REDIS_URL: redis://redis:6379/0
-    command: arq pensieve.worker.WorkerSettings
+    <<: *app
+    command: ["arq", "pensieve.worker.WorkerSettings"]
+    healthcheck:
+      disable: true
     depends_on:
       db: { condition: service_healthy }
-      redis: { condition: service_started }
+      redis: { condition: service_healthy }
   worker-ai:
-    build: .
-    profiles: ["app"]
-    env_file: .env
-    environment:
-      PENSIEVE_DATABASE_URL: postgresql+asyncpg://pensieve:pensieve@db:5432/pensieve
-      PENSIEVE_REDIS_URL: redis://redis:6379/0
-    command: arq pensieve.worker.AIWorkerSettings
+    <<: *app
+    command: ["arq", "pensieve.worker.AIWorkerSettings"]
+    healthcheck:
+      disable: true
     depends_on:
       db: { condition: service_healthy }
-      redis: { condition: service_started }
+      redis: { condition: service_healthy }
 volumes:
   pgdata: {}
+  redisdata: {}

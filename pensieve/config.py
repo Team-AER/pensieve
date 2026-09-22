@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     fetch_default_interval_min: int = 15
     fetch_min_interval_min: int = 5
     fetch_max_interval_min: int = 24 * 60
-    fetch_user_agent: str = "Pensieve/0.1 (+https://github.com/prafiles/pensieve)"
+    fetch_user_agent: str = "Pensieve/0.1 (+https://github.com/Team-AER/pensieve)"
     fetch_timeout_s: float = 20.0
     fetch_per_host_concurrency: int = 2
     item_retention_days: int = 730

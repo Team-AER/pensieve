@@ -2,7 +2,21 @@
 name = "pensieve"
 version = "0.1.0"
 description = "Self-hosted RSS reader with a local-LLM layer: categorization, story clustering, reader memory, insights."
+readme = "README.md"
+license = "MIT"
+authors = [
+  { name = "Team AER" },
+]
 requires-python = ">=3.12"
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Web Environment",
+  "Framework :: FastAPI",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Internet :: WWW/HTTP",
+]
 dependencies = [
   "fastapi>=0.115",
   "uvicorn[standard]>=0.30",
@@ -25,6 +39,12 @@ dependencies = [
   "python-dateutil>=2.9",
   "lxml>=5.2",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Team-AER/pensieve"
+Documentation = "https://github.com/Team-AER/pensieve#readme"
+Issues = "https://github.com/Team-AER/pensieve/issues"
+Source = "https://github.com/Team-AER/pensieve"
 
 [project.optional-dependencies]
 dev = [
