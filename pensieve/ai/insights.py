@@ -61,6 +61,8 @@ SUMMARY_BATCH = 4
 SUMMARY_BATCH_TEXT_CHARS = 6_000  # per article inside a batch; four leads fit the short-model input budget
 SUMMARY_TOKENS_PER_ITEM = 260
 SUMMARY_TOKENS_HEADROOM = 200
+SUMMARY_RETRY_BATCH = 2  # entries the model dropped or mangled get one more, smaller batch
+SUMMARY_FOCUS_CHARS = 400
 TOP_TAGS = 20
 TOP_TAGS_DAYS = 90
 
@@ -595,12 +597,43 @@ async def weekly_review(
 
 def render_summary(bullets: list[str], why: str) -> str:
     lines = [f"- {b.strip()}" for b in bullets if b and b.strip()]
+    if not why or not why.strip():
+        return "\n".join(lines) + "\n"
     return "\n".join(lines) + f"\n\n**Why this matters to you**\n\n{why.strip()}\n"
 
 
-def _summary_entry_ok(entry: object) -> bool:
+def summary_prefs(user: models.User | None) -> dict:
+    """How summaries are written for this reader, from ``user.settings["summaries"]``, every key present:
+    ``bullets`` (2/3/5), ``why`` (personal/general/off) and ``focus`` (free text the why-it-matters must weigh)."""
+    raw = dict(((user.settings if user else None) or {}).get("summaries") or {})
     try:
-        validate_schema(entry, prompts.ITEM_SUMMARY_BATCH_ENTRY_SCHEMA)
+        bullets = int(raw.get("bullets") or 3)
+    except (TypeError, ValueError):
+        bullets = 3
+    if bullets not in prompts.SUMMARY_BULLET_CHOICES:
+        bullets = 3
+    why = str(raw.get("why") or "personal")
+    return {
+        "bullets": bullets,
+        "why": why if why in prompts.WHY_MODES else "personal",
+        "focus": " ".join(str(raw.get("focus") or "").split())[:SUMMARY_FOCUS_CHARS],
+    }
+
+
+def summary_prefs_from_form(form, current: dict) -> dict:
+    out = dict(current)
+    if form.get("bullets") is not None:
+        out["bullets"] = form.get("bullets")
+    if form.get("why") is not None:
+        out["why"] = form.get("why")
+    if form.get("focus") is not None:
+        out["focus"] = form.get("focus")
+    return summary_prefs(models.User(settings={"summaries": out}))
+
+
+def _summary_entry_ok(entry: object, bullets: int = 3) -> bool:
+    try:
+        validate_schema(entry, prompts.item_summary_entry_schema(bullets))
     except LLMError as exc:
         log.warning("summarize_items: skipping malformed entry: %s", exc)
         return False
@@ -638,6 +671,50 @@ async def summarized_cluster_ids(session: AsyncSession, user_id: uuid.UUID, clus
         .distinct()
     )
     return set((await session.scalars(stmt)).all())
+
+
+async def items_without_summary(
+    session: AsyncSession, user_id: uuid.UUID, since: datetime, *, until: datetime | None = None, limit: int = 500
+) -> list[uuid.UUID]:
+    """Ids of the user's items published in [since, until) that have no summary and whose story (cluster) has
+    none either; newest first. What the sweep and the paper's "write missing summaries" hand to the job."""
+    has_summary = (
+        select(models.ItemAI.item_id)
+        .where(
+            models.ItemAI.item_id == models.Item.id,
+            models.ItemAI.user_id == user_id,
+            models.ItemAI.summary.is_not(None),
+        )
+        .exists()
+    )
+    stmt = (
+        select(models.Item.id)
+        .where(
+            models.Item.feed_id.in_(user_feed_ids(user_id)),
+            models.Item.published_at >= since,
+            models.Item.published_at < (until or utcnow() + timedelta(days=1)),
+            ~has_summary,
+        )
+        .order_by(models.Item.published_at.desc())
+        .limit(limit * 4)
+    )
+    ids = list((await session.scalars(stmt)).all())
+    if not ids:
+        return []
+    membership = await _story_siblings(session, user_id, ids)
+    covered = await summarized_cluster_ids(session, user_id, set(membership.values()))
+    out: list[uuid.UUID] = []
+    seen_clusters: set[uuid.UUID] = set()
+    for iid in ids:
+        cid = membership.get(iid)
+        if cid is not None:
+            if cid in covered or cid in seen_clusters:
+                continue
+            seen_clusters.add(cid)
+        out.append(iid)
+        if len(out) >= limit:
+            break
+    return out
 
 
 async def summarize_items(
@@ -694,30 +771,35 @@ async def summarize_items(
         for f in (await session.scalars(select(models.Feed).where(models.Feed.user_id == user.id))).all()
     }
     profile = await profile_text(session, user.id)
+    prefs = summary_prefs(user)
     written: dict[uuid.UUID, str] = {}
-    for start in range(0, len(todo), SUMMARY_BATCH):
-        batch = todo[start : start + SUMMARY_BATCH]
+
+    async def run_batch(batch: list[models.Item]) -> list[models.Item]:
+        """Summarise one batch; returns the items the model left out or mangled."""
         payload = [
             (n, it.title, feeds.get(it.feed_id, ""), (it.content_text or "")[:SUMMARY_BATCH_TEXT_CHARS])
             for n, it in enumerate(batch)
         ]
         result = await client.chat_json(
             settings.llm_fast_model,
-            prompts.ITEM_SUMMARY_BATCH_SYSTEM,
-            prompts.item_summary_batch_user(profile, payload),
-            prompts.ITEM_SUMMARY_BATCH_SCHEMA,
+            prompts.item_summary_batch_system(prefs["bullets"], prefs["why"]),
+            prompts.item_summary_batch_user(profile, payload, focus=prefs["focus"]),
+            prompts.item_summary_batch_schema(prefs["bullets"]),
             max_tokens=SUMMARY_TOKENS_PER_ITEM * len(batch) + SUMMARY_TOKENS_HEADROOM,
             workflow="summarize_items",
             name="item_summaries",
             validate_with=prompts.ITEM_SUMMARY_BATCH_LOOSE_SCHEMA,
         )
-        by_index = {int(e["index"]): e for e in result["items"] if _summary_entry_ok(e)}
+        by_index = {int(e["index"]): e for e in result["items"] if _summary_entry_ok(e, prefs["bullets"])}
         values = []
+        missed: list[models.Item] = []
         for n, item in enumerate(batch):
             entry = by_index.get(n)
             if entry is None:
+                missed.append(item)
                 continue
-            markdown = render_summary([str(b) for b in entry["bullets"]], str(entry["why_it_matters"]))
+            why = "" if prefs["why"] == "off" else str(entry["why_it_matters"])
+            markdown = render_summary([str(b) for b in entry["bullets"]], why)
             written[item.id] = markdown
             values.append(
                 {
@@ -731,35 +813,65 @@ async def summarize_items(
                     "generated_at": utcnow(),
                 }
             )
-        if not values:
-            continue
-        # Upsert: a tagging job may create the row concurrently; on conflict only the summary changes.
-        stmt = pg_insert(models.ItemAI).values(values)
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["user_id", "item_id"], set_={"summary": stmt.excluded.summary}
-        )
-        await session.execute(stmt)
-        await session.flush()
+        if values:
+            # Upsert: a tagging job may create the row concurrently; on conflict only the summary changes.
+            stmt = pg_insert(models.ItemAI).values(values)
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["user_id", "item_id"], set_={"summary": stmt.excluded.summary}
+            )
+            await session.execute(stmt)
+            await session.flush()
+        return missed
+
+    missed: list[models.Item] = []
+    for start in range(0, len(todo), SUMMARY_BATCH):
+        missed += await run_batch(todo[start : start + SUMMARY_BATCH])
+    # Retry once, in smaller batches, whatever the model dropped or mangled the first time round; anything
+    # still missing is left for the sweep (``jobs.ai_summary_sweep``) or the reader's "Summarize now".
+    if missed:
+        log.info("summarize_items: retrying %d entries the model missed", len(missed))
+        still = []
+        for start in range(0, len(missed), SUMMARY_RETRY_BATCH):
+            still += await run_batch(missed[start : start + SUMMARY_RETRY_BATCH])
+        if still:
+            log.warning("summarize_items: %d items still without a summary after retry", len(still))
     return written
 
 
 async def summarize_item(
-    session: AsyncSession, user: models.User, item: models.Item, client: LLMClient | None = None
+    session: AsyncSession,
+    user: models.User,
+    item: models.Item,
+    client: LLMClient | None = None,
+    *,
+    hint: str = "",
 ) -> str:
-    """3 bullets + why-it-matters, stored in ``item_ai.summary``. Raises LLMError on gateway failure."""
+    """Bullets + why-it-matters for one item, stored in ``item_ai.summary``. Raises LLMError on gateway failure.
+
+    ``hint`` is the reader's note on a rejected summary (why the previous why-it-matters missed); the prompt
+    carries it so the rewrite answers it.
+    """
     client = client or get_client()
     settings = get_settings()
     profile = await profile_text(session, user.id)
+    prefs = summary_prefs(user)
     result = await client.chat_json(
         settings.llm_fast_model,
-        prompts.ITEM_SUMMARY_SYSTEM,
-        prompts.item_summary_user(profile, item.title, (item.content_text or "")[:SUMMARY_TEXT_CHARS]),
-        prompts.ITEM_SUMMARY_SCHEMA,
-        max_tokens=400,
+        prompts.item_summary_system(prefs["bullets"], prefs["why"]),
+        prompts.item_summary_user(
+            profile,
+            item.title,
+            (item.content_text or "")[:SUMMARY_TEXT_CHARS],
+            focus=prefs["focus"],
+            hint=" ".join(hint.split())[:SUMMARY_FOCUS_CHARS],
+        ),
+        prompts.item_summary_schema(prefs["bullets"]),
+        max_tokens=SUMMARY_TOKENS_PER_ITEM * 2 + SUMMARY_TOKENS_HEADROOM,
         workflow="summarize_item",
         name="item_summary",
     )
-    markdown = render_summary([str(b) for b in result["bullets"]], str(result["why_it_matters"]))
+    why = "" if prefs["why"] == "off" else str(result["why_it_matters"])
+    markdown = render_summary([str(b) for b in result["bullets"]], why)
     row = await session.scalar(
         select(models.ItemAI).where(models.ItemAI.user_id == user.id, models.ItemAI.item_id == item.id)
     )

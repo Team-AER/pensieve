@@ -17,12 +17,20 @@ Body shape of an ``Insight`` of kind ``paper``::
 
 A ``Story`` is ``{"key", "cluster_id", "item_id", "title", "sources", "feeds": [{"id", "title"}], "tags",
 "tag", "published_at", "summary", "summary_item_id", "read", "members": [{"item_id", "title", "feed_id",
-"feed", "published_at", "read"}], "folded": bool}``. ``brief`` holds the stories under ``min_sources``.
+"feed", "published_at", "read"}], "folded": bool, "boost": float}``. ``brief`` holds the stories whose
+*effective* sources (``sources + boost``) are under ``min_sources``.
+
+Tuning ("more of this" / "less of this") lives in ``config["tuning"] = {"tags": {tag: w}, "feeds": {id: w}}``,
+``w`` in [-3, 3]. A story's ``boost`` is its tags' weights (scaled by how strongly it carries each tag) plus the
+mean weight of its feeds; it counts like extra (or missing) sources when ranking and when splitting main from
+brief, and orders the automatic sections. Every tune is also recorded as a ``Correction`` so the profile refresh
+sees it and the why-it-matters follows.
 """
 
 from __future__ import annotations
 
 import logging
+import math
 import uuid
 from collections import Counter, defaultdict
 from datetime import date, datetime, timedelta
@@ -46,6 +54,10 @@ DEFAULT_MIN_SOURCES = 1
 MAX_MIN_SOURCES = 10
 OTHER_KEY = "other"
 OTHER_TITLE = "Everything else"
+TUNE_MAX = 3.0
+TUNE_STEP_TAG = 1.0
+TUNE_STEP_FEED = 0.5
+TUNE_DIRECTIONS = ("more", "less", "reset")
 _ACRONYMS = {"ai": "AI", "ml": "ML", "llm": "LLMs", "ios": "iOS", "macos": "macOS", "aws": "AWS", "gpu": "GPUs",
              "api": "APIs", "devops": "DevOps", "ux": "UX", "ui": "UI", "vr": "VR", "ar": "AR", "os": "OS",
              "db": "Databases", "k8s": "Kubernetes", "iot": "IoT", "cli": "CLI", "gpt": "GPT", "sql": "SQL",
@@ -105,6 +117,21 @@ def paper_config(user: models.User | None) -> dict[str, Any]:
             muted.append(str(uuid.UUID(str(fid))))
         except ValueError:
             continue
+    tuning_raw = raw.get("tuning") if isinstance(raw.get("tuning"), dict) else {}
+    tuning: dict[str, dict[str, float]] = {"tags": {}, "feeds": {}}
+    for tag, w in (tuning_raw.get("tags") or {}).items():
+        key = str(tag).strip().lower()
+        weight = _clamp_weight(w)
+        if key and weight:
+            tuning["tags"][key] = weight
+    for fid, w in (tuning_raw.get("feeds") or {}).items():
+        try:
+            key = str(uuid.UUID(str(fid)))
+        except ValueError:
+            continue
+        weight = _clamp_weight(w)
+        if weight:
+            tuning["feeds"][key] = weight
     return {
         "group_by": raw.get("group_by") if raw.get("group_by") in GROUP_CHOICES else "tag",
         "window_hours": _nearest_window(raw.get("window_hours")),
@@ -115,7 +142,18 @@ def paper_config(user: models.User | None) -> dict[str, Any]:
         "auto_sections": bool(raw.get("auto_sections", True)),
         "sections": sections,
         "muted_feeds": muted,
+        "tuning": tuning,
     }
+
+
+def _clamp_weight(value: Any) -> float:
+    try:
+        w = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    if math.isnan(w) or math.isinf(w):
+        return 0.0
+    return round(max(-TUNE_MAX, min(TUNE_MAX, w)), 2)
 
 
 def config_from_form(form: Any, current: dict[str, Any]) -> dict[str, Any]:
@@ -149,7 +187,63 @@ def config_from_form(form: Any, current: dict[str, Any]) -> dict[str, Any]:
         except ValueError:
             continue
     out["muted_feeds"] = muted
+    tuning = {"tags": dict(current["tuning"]["tags"]), "feeds": dict(current["tuning"]["feeds"])}
+    for name in form:
+        if name.startswith("tune_tag:"):
+            tuning["tags"][name[len("tune_tag:") :]] = _clamp_weight(form.get(name))
+        elif name.startswith("tune_feed:"):
+            tuning["feeds"][name[len("tune_feed:") :]] = _clamp_weight(form.get(name))
+    if str(form.get("reset_tuning") or "") in {"1", "on", "true"}:
+        tuning = {"tags": {}, "feeds": {}}
+    out["tuning"] = tuning
     return paper_config(models.User(settings={"paper": out}))
+
+
+def story_boost(story: dict[str, Any], tuning: dict[str, dict[str, float]]) -> float:
+    """Extra (or missing) sources a story earns from the reader's tuning: each tag's weight scaled by how
+    strongly the story carries that tag (its heaviest tag counts fully), plus the mean weight of its feeds."""
+    tag_weight = story.get("tag_weight") or {}
+    peak = max(tag_weight.values(), default=0.0) or 1.0
+    boost = 0.0
+    for tag, w in tuning.get("tags", {}).items():
+        if tag in tag_weight:
+            boost += w * (tag_weight[tag] / peak)
+    feed_ids = [f["id"] for f in story.get("feeds") or []]
+    feed_ws = [tuning.get("feeds", {}).get(fid, 0.0) for fid in feed_ids]
+    if feed_ws:
+        boost += sum(feed_ws) / len(feed_ws)
+    return round(boost, 2)
+
+
+def apply_tune(config: dict[str, Any], story: dict[str, Any], direction: str) -> dict[str, Any]:
+    """"more" / "less" of a story: step its main tag and every one of its feeds; "reset" clears them. Returns
+    the changed config (normalised); the caller stores it and records the correction."""
+    if direction not in TUNE_DIRECTIONS:
+        raise ValueError(direction)
+    tuning = {"tags": dict(config["tuning"]["tags"]), "feeds": dict(config["tuning"]["feeds"])}
+    sign = {"more": 1.0, "less": -1.0, "reset": 0.0}[direction]
+    tag = story.get("tag")
+    feed_ids = [f["id"] for f in story.get("feeds") or []]
+    if tag:
+        tuning["tags"][tag] = 0.0 if not sign else tuning["tags"].get(tag, 0.0) + sign * TUNE_STEP_TAG
+    for fid in feed_ids:
+        tuning["feeds"][fid] = 0.0 if not sign else tuning["feeds"].get(fid, 0.0) + sign * TUNE_STEP_FEED
+    return paper_config(models.User(settings={"paper": {**config, "tuning": tuning}}))
+
+
+def tune_summary(config: dict[str, Any], story: dict[str, Any], feed_titles: dict[str, str] | None = None) -> str:
+    """Human line for a story's tuning state, e.g. "AI +2 · Alpha +0.5"; empty when nothing is tuned."""
+    parts = []
+    tags = config["tuning"]["tags"]
+    for tag in story.get("tags") or []:
+        if tags.get(tag):
+            parts.append(f"{section_title(tag)} {tags[tag]:+g}")
+    feeds = config["tuning"]["feeds"]
+    for f in story.get("feeds") or []:
+        w = feeds.get(f["id"])
+        if w:
+            parts.append(f"{(feed_titles or {}).get(f['id'], f.get('title') or 'feed')} {w:+g}")
+    return " · ".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -276,6 +370,7 @@ async def compile_paper(
                 "summary": ai_rows[summary_item.id].summary if summary_item else None,
                 "summary_item_id": str(summary_item.id) if summary_item else None,
                 "read": all(member_read.values()),
+                "boost": 0.0,
                 "members": [
                     {
                         "item_id": str(m.id),
@@ -290,6 +385,9 @@ async def compile_paper(
                 "folded": False,
             }
         )
+
+    for story in stories:
+        story["boost"] = story_boost(story, cfg["tuning"])
 
     # section of a story: its heaviest tag among the enabled sections (tag mode) or its feed's folder
     configured = {s["key"]: s for s in cfg["sections"]}
@@ -313,12 +411,20 @@ async def compile_paper(
     for story in stories:
         by_section[section_of(story)].append(story)
 
+    def effective_sources(story: dict[str, Any]) -> float:
+        return story["sources"] + story["boost"]
+
     def rank(story: dict[str, Any]) -> tuple:
         top = max(story["tag_weight"].values(), default=0.0)
-        return (-story["sources"], -story["copies"], -top, story["published_at"])
+        return (-effective_sources(story), -story["sources"], -story["copies"], -top)
 
+    tag_tuning = cfg["tuning"]["tags"]
     ordered_keys = [k for k in enabled_keys if k in by_section]
-    extra = sorted(k for k in by_section if k not in configured and k != OTHER_KEY)
+    # automatic sections: the ones the reader asked for more of first, then alphabetical
+    extra = sorted(
+        (k for k in by_section if k not in configured and k != OTHER_KEY),
+        key=lambda k: (-tag_tuning.get(k, 0.0), k),
+    )
     if cfg["auto_sections"]:
         ordered_keys += [k for k in extra if k not in ordered_keys]
     else:
@@ -331,12 +437,13 @@ async def compile_paper(
 
     sections: list[dict[str, Any]] = []
     for key in ordered_keys:
-        rows = sorted(by_section.get(key, []), key=rank)
+        # stable sort: ties on every rank key keep the newest story first
+        rows = sorted(sorted(by_section.get(key, []), key=lambda s: s["published_at"], reverse=True), key=rank)
         if not rows:
             continue
         limit = (configured.get(key) or {}).get("limit") or cfg["per_section"]
-        main = [s for s in rows if s["sources"] >= cfg["min_sources"]]
-        brief = [s for s in rows if s["sources"] < cfg["min_sources"]]
+        main = [s for s in rows if effective_sources(s) >= cfg["min_sources"]]
+        brief = [s for s in rows if effective_sources(s) < cfg["min_sources"]]
         for n, s in enumerate(main):
             s["folded"] = n >= limit
         kind = "other" if key == OTHER_KEY else ("folder" if cfg["group_by"] == "folder" else "tag")
@@ -410,7 +517,9 @@ def today(user: models.User | None = None) -> date:
 __all__ = [
     "GROUP_CHOICES",
     "KIND",
+    "TUNE_DIRECTIONS",
     "WINDOW_CHOICES",
+    "apply_tune",
     "compile_paper",
     "config_from_form",
     "daily_paper",
@@ -418,6 +527,8 @@ __all__ = [
     "paper_config",
     "paper_window",
     "section_title",
+    "story_boost",
     "story_key",
     "today",
+    "tune_summary",
 ]

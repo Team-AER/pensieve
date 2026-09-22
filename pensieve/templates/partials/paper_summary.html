@@ -1,0 +1,32 @@
+{% import "_macros.html" as m %}
+{# The summary block of one story of the paper: ready, queued (polling), failed, or none yet. Swapped in place. #}
+{% set sum_id = 'sum-' ~ story.key|replace(':', '-') %}
+{% set show_why = summary_prefs is not defined or summary_prefs.why != 'off' %}
+<div class="pstory-summary" id="{{ sum_id }}">
+{% if story.summary %}
+  {% set blocks = story.summary|summary_blocks %}
+  <ul class="pstory-bullets">{% for b in blocks.bullets %}<li>{{ b }}</li>{% endfor %}</ul>
+  {% if blocks.why and show_why %}
+  <p class="pstory-why"><span class="eyebrow eyebrow-ai">{{ m.icon('sparkle', 12) }} Why it matters</span> {{ blocks.why }}</p>
+  {% endif %}
+  <details class="pstory-feedback">
+    <summary class="btn btn-sm btn-ghost" title="Tell the model what it got wrong and have this summary rewritten">{{ m.icon('refresh', 14) }} Not quite</summary>
+    <form class="pstory-feedback-form" hx-post="/insights/paper/{{ edition.id }}/rewrite" hx-target="#{{ sum_id }}" hx-swap="outerHTML" method="post" action="/insights/paper/{{ edition.id }}/rewrite">
+      {{ m.csrf_field(csrf_token) }}
+      <input type="hidden" name="key" value="{{ story.key }}">
+      <label class="sr-only" for="{{ sum_id }}-note">What was off?</label>
+      <input class="input input-sm" id="{{ sum_id }}-note" type="text" name="note" maxlength="400" placeholder="What was off? e.g. I don't care about funding rounds (optional)">
+      <button class="btn btn-sm btn-ai" type="submit">{{ m.icon('sparkle', 14) }} Rewrite</button>
+    </form>
+    <p class="field-hint">Your note is kept as a correction, so the reader profile and future why-it-matters lines learn from it too.</p>
+  </details>
+{% elif error %}
+  <p class="muted small" role="alert">{{ m.icon('warning', 14) }} {{ error }}</p>
+  <form hx-post="/insights/paper/{{ edition.id }}/summarize" hx-target="#{{ sum_id }}" hx-swap="outerHTML" method="post" action="/insights/paper/{{ edition.id }}/summarize">{{ m.csrf_field(csrf_token) }}<input type="hidden" name="key" value="{{ story.key }}"><button class="btn btn-sm btn-ai" type="submit">{{ m.icon('refresh', 14) }} Retry</button></form>
+{% elif pending %}
+  <p class="muted small ai-pending" hx-get="/insights/paper/{{ edition.id }}/summary?key={{ story.key|urlencode }}&n={{ n or 1 }}" hx-trigger="every 2s" hx-target="#{{ sum_id }}" hx-swap="outerHTML" aria-busy="true"><span class="live-dot"></span> {{ 'Rewriting' if story.rewrite_of else 'Summarizing' }}… the local model usually takes a few seconds.</p>
+{% else %}
+  <p class="muted small">No summary yet{% if summaries_on is defined and not summaries_on %} (summaries are off){% else %}; it is queued, or the model missed it and the half-hourly sweep will retry{% endif %}.
+  <form class="inline" hx-post="/insights/paper/{{ edition.id }}/summarize" hx-target="#{{ sum_id }}" hx-swap="outerHTML" method="post" action="/insights/paper/{{ edition.id }}/summarize">{{ m.csrf_field(csrf_token) }}<input type="hidden" name="key" value="{{ story.key }}"><button class="btn btn-sm btn-ai" type="submit">{{ m.icon('sparkle', 14) }} Summarize now</button></form></p>
+{% endif %}
+</div>

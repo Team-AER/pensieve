@@ -265,6 +265,101 @@ async def test_summarize_items_batches_and_skips_story_duplicates(session, user,
     assert req.headers["X-Workflow"] == "summarize_items" and gateway.chat_calls[0]["model"] == settings.llm_fast_model
 
 
+async def test_summarize_items_retries_entries_the_model_missed(session, user, gateway):
+    feed = make_feed(user, "A")
+    session.add(feed)
+    await session.flush()
+    items = [make_item(feed, f"Item {i}", "text " * 20, age=timedelta(hours=i + 1)) for i in range(4)]
+    session.add_all(items)
+    await session.commit()
+    calls = []
+
+    def side_effect(request):
+        import json
+
+        import httpx
+
+        from tests.test_ai_helpers import chat_response
+
+        body = json.loads(request.content)
+        n = body["messages"][1]["content"].count("### Article ")
+        calls.append(n)
+        if len(calls) == 1:
+            # first batch of 4: index 1 dropped, index 3 malformed (two bullets instead of three)
+            payload = batch_summaries([0, 2])
+            payload["items"].append({"index": 3, "bullets": ["only", "two"], "why_it_matters": "w"})
+            return httpx.Response(200, json=chat_response(payload))
+        return httpx.Response(200, json=chat_response(batch_summaries(range(n))))
+
+    gateway.router.post(f"{settings.llm_base_url.rstrip('/')}/chat/completions").mock(side_effect=side_effect)
+    written = await insights.summarize_items(session, user, items)
+    await session.commit()
+    # one batch of four, then the two missed entries again in one batch of two
+    assert calls == [4, 2] and set(written) == {i.id for i in items}
+    rows = {
+        r.item_id: r
+        for r in (await session.scalars(select(models.ItemAI).where(models.ItemAI.user_id == user.id))).all()
+    }
+    assert rows[items[1].id].summary.startswith("- b0") and rows[items[3].id].summary.startswith("- b1")
+
+
+async def test_summary_prefs_shape_the_prompt_and_the_markdown(session, user, gateway):
+    feed = make_feed(user, "A")
+    session.add(feed)
+    await session.flush()
+    item = make_item(feed, "Item", "text " * 20, age=timedelta(hours=1))
+    session.add(item)
+    user.settings = {"summaries": {"bullets": "5", "why": "off", "focus": "  homelab   and self-hosting "}}
+    await session.commit()
+    assert insights.summary_prefs(user) == {"bullets": 5, "why": "off", "focus": "homelab and self-hosting"}
+    assert insights.summary_prefs(models.User(settings={"summaries": {"bullets": 4, "why": "x"}})) == {
+        "bullets": 3,
+        "why": "personal",
+        "focus": "",
+    }
+    gateway.chat({"items": [{"index": 0, "bullets": ["1", "2", "3", "4", "5"], "why_it_matters": ""}]})
+    written = await insights.summarize_items(session, user, [item])
+    assert written[item.id] == "- 1\n- 2\n- 3\n- 4\n- 5\n" and "Why" not in written[item.id]
+    call = gateway.chat_calls[0]
+    assert "exactly five crisp bullets" in call["messages"][0]["content"]
+    assert "why_it_matters to an empty string" in call["messages"][0]["content"]
+    assert "homelab and self-hosting" in call["messages"][1]["content"]
+    assert call["response_format"]["json_schema"]["schema"]["properties"]["items"]["items"]["properties"]["bullets"]["minItems"] == 5
+    # the general mode ignores the profile for the why, and the why is kept
+    user.settings = {"summaries": {"why": "general"}}
+    gateway.chat({"bullets": ["a", "b", "c"], "why_it_matters": "matters"})
+    md = await insights.summarize_item(session, user, item)
+    assert md.endswith("**Why this matters to you**\n\nmatters\n")
+    assert "technical reader in general (ignore the reader profile" in gateway.chat_calls[-1]["messages"][0]["content"]
+
+
+async def test_items_without_summary_is_story_aware(session, user, gateway):
+    feed_a, feed_b = make_feed(user, "A"), make_feed(user, "B")
+    session.add_all([feed_a, feed_b])
+    await session.flush()
+    done = make_item(feed_a, "Done", "t", age=timedelta(hours=1))
+    twin = make_item(feed_b, "Done twin", "t", age=timedelta(hours=2))
+    open_a = make_item(feed_a, "Open a", "t", age=timedelta(hours=3))
+    open_b = make_item(feed_b, "Open b", "t", age=timedelta(hours=4))
+    old = make_item(feed_a, "Old", "t", age=timedelta(days=5))
+    session.add_all([done, twin, open_a, open_b, old])
+    await session.flush()
+    c1 = models.Cluster(user_id=user.id, headline="d", window_start=now(), window_end=now(), canonical_item_id=done.id, source_count=2, kind="story")  # fmt: skip
+    c2 = models.Cluster(user_id=user.id, headline="o", window_start=now(), window_end=now(), canonical_item_id=open_a.id, source_count=2, kind="story")  # fmt: skip
+    session.add_all([c1, c2])
+    await session.flush()
+    session.add_all([
+        models.ClusterItem(cluster_id=c1.id, item_id=done.id), models.ClusterItem(cluster_id=c1.id, item_id=twin.id),
+        models.ClusterItem(cluster_id=c2.id, item_id=open_a.id), models.ClusterItem(cluster_id=c2.id, item_id=open_b.id),
+    ])  # fmt: skip
+    session.add(models.ItemAI(user_id=user.id, item_id=done.id, summary="- x\n"))
+    await session.commit()
+    ids = await insights.items_without_summary(session, user.id, now() - timedelta(days=1))
+    assert ids == [open_a.id]  # the twin's story is covered; one member per open story; old is out of range
+    assert await insights.items_without_summary(session, user.id, now() - timedelta(days=1), until=now() - timedelta(hours=3, minutes=30)) == [open_b.id]
+    assert await insights.items_without_summary(session, user.id, now() - timedelta(days=1), until=now() - timedelta(hours=4, minutes=30)) == []
+
+
 async def test_digest_without_embeddings_ranks_by_open_rate_and_tags(session, user, gateway):
     """No centroid and no item vectors: affinity comes from feed open-rate + tag overlap, not a constant."""
     w = await seed_digest_world(session, user)

@@ -19,7 +19,7 @@ a straightforward feed reader.
 - Feed discovery, conditional fetches, reader mode, favicon caching, OPML import/export, and adaptive polling
 - Reeder and NetNewsWire support through Google Reader and Fever-compatible sync APIs
 - Per-user folders, tags, rules, saved items, notes, search, and household administration
-- Optional local-model workflows with configurable models and reasoning effort
+- Optional local-model workflows with configurable models and reasoning effort; summaries retry on their own (a half-hourly sweep re-queues what the eager job missed), and the paper learns from "more like this" / "less" and from your notes on a why-it-matters
 - PostgreSQL + pgvector storage, Redis/ARQ jobs, Alembic migrations, and Docker Compose deployment
 - SSRF protections, CSRF protection, Argon2 password hashing, rate limiting, and secure proxy headers
 

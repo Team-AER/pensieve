@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo
 import httpx
 import pytest
 from arq import Retry
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from pensieve import models, queue
 from pensieve.ai import jobs
@@ -69,9 +69,11 @@ def test_function_registry_matches_queue_contract():
         queue.AI_SUMMARIZE_ITEM,
         queue.AI_SUMMARIZE_ITEMS,
         queue.AI_DAILY_PAPER,
+        queue.AI_SUMMARY_SWEEP,
     ]
     names = {c.coroutine.__name__: c for c in CRON_JOBS}
-    assert set(names) == {"ai_dispatch_daily", "ai_dispatch_weekly"}
+    assert set(names) == {"ai_dispatch_daily", "ai_dispatch_weekly", "ai_summary_sweep"}
+    assert names["ai_summary_sweep"].minute == {5, 35} and names["ai_summary_sweep"].hour is None
     assert names["ai_dispatch_weekly"].weekday == 6 and names["ai_dispatch_weekly"].hour == 8
     assert names["ai_dispatch_daily"].minute == {0, 15, 30, 45} and names["ai_dispatch_daily"].hour is None
     from pensieve.worker import AIWorkerSettings, WorkerSettings
@@ -294,6 +296,56 @@ async def test_summarize_items_job(session, user, gateway):
     before = len(gateway.chat_calls)
     await jobs.ai_summarize_items({"job_try": 1, "job_id": "again"}, str(user.id), [str(i.id) for i in items])
     assert len(gateway.chat_calls) == before
+
+
+async def test_summarize_item_job_rewrite_carries_the_readers_note(session, user, gateway):
+    _feed, items = await seed(session, user, n=1)
+    session.add(models.ItemAI(user_id=user.id, item_id=items[0].id, summary="- old\n"))
+    user.settings = {"summaries": {"bullets": 2, "why": "personal", "focus": "self-hosting only"}}
+    await session.commit()
+    gateway.chat({"bullets": ["a", "b"], "why_it_matters": "why"})
+    await jobs.ai_summarize_item(
+        {"job_try": 1, "job_id": "rw"}, str(user.id), str(items[0].id), "I do not care about funding"
+    )
+    row = await ai_job(session, "summarize", items[0].id)
+    assert row.status == "done" and row.last_error == "rewritten on request"
+    ai = await session.scalar(select(models.ItemAI).where(models.ItemAI.item_id == items[0].id))
+    assert ai.summary.startswith("- a\n- b")
+    prompt = gateway.chat_calls[0]["messages"][1]["content"]
+    assert "rejected the previous summary" in prompt and "I do not care about funding" in prompt
+    assert "self-hosting only" in prompt and "exactly two crisp bullets" in gateway.chat_calls[0]["messages"][0]["content"]
+
+
+async def test_summary_sweep_requeues_missed_stories(session, user, gateway):
+    _feed, items = await seed(session, user, n=5)
+    # items[0] has a summary; items[1] is a member of a story that items[0] covers; items[4] is too fresh
+    session.add(models.ItemAI(user_id=user.id, item_id=items[0].id, summary="- s\n"))
+    cluster = models.Cluster(
+        user_id=user.id, headline="h", window_start=now(), window_end=now(), canonical_item_id=items[0].id,
+        source_count=2, kind="story",
+    )  # fmt: skip
+    session.add(cluster)
+    await session.flush()
+    session.add_all([models.ClusterItem(cluster_id=cluster.id, item_id=i.id) for i in items[:2]])
+    for i in items[:4]:
+        i.published_at = now() - timedelta(hours=2)
+    items[4].published_at = now() - timedelta(minutes=5)
+    await session.commit()
+    redis = FakeRedis()
+    at = now()
+    assert await jobs.ai_summary_sweep({"redis": redis}, at=at) == 2
+    assert len(redis.calls) == 1 and redis.calls[0][0] == queue.AI_SUMMARIZE_ITEMS
+    assert set(redis.calls[0][1][1]) == {str(items[2].id), str(items[3].id)}
+    assert redis.calls[0][2] == jobs.sweep_job_id(user.id, at, 0)
+    # a summaries job already queued for the user means the sweep leaves them alone
+    session.add(models.AIJob(kind="summarize_items", user_id=user.id, target_id=items[2].id, status="queued"))
+    await session.commit()
+    assert await jobs.ai_summary_sweep({"redis": FakeRedis()}, at=at) == 0
+    # summaries off: nothing either
+    await session.execute(delete(models.AIJob))
+    user.settings = {"summarize_items": False}
+    await session.commit()
+    assert await jobs.ai_summary_sweep({"redis": FakeRedis()}, at=at) == 0
 
 
 async def test_daily_paper_job(session, user, gateway):

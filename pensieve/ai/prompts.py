@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-PROMPT_VERSION = "2026-09-18.2"
+PROMPT_VERSION = "2026-09-22.1"
 
 CONTENT_TYPES = [
     "article",
@@ -131,35 +131,52 @@ WEEKLY_REVIEW_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
-ITEM_SUMMARY_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        "bullets": {"type": "array", "items": {"type": "string"}, "minItems": 3, "maxItems": 3},
-        "why_it_matters": {"type": "string"},
-    },
-    "required": ["bullets", "why_it_matters"],
-    "additionalProperties": False,
-}
+SUMMARY_BULLET_CHOICES = (2, 3, 5)
+"""How many bullets a summary carries; ``user.settings["summaries"]["bullets"]`` picks one (default 3)."""
+WHY_MODES = ("personal", "general", "off")
+"""Who the why-it-matters is written for: this reader (profile), a technical reader in general, or nobody."""
 
-ITEM_SUMMARY_BATCH_ENTRY_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "properties": {
-        "index": {"type": "integer"},
-        "bullets": {"type": "array", "items": {"type": "string"}, "minItems": 3, "maxItems": 3},
-        "why_it_matters": {"type": "string"},
-    },
-    "required": ["index", "bullets", "why_it_matters"],
-    "additionalProperties": False,
-}
-"""One article's summary in a batch: {index, bullets[3], why_it_matters}. Validated per entry by ``insights``."""
 
-ITEM_SUMMARY_BATCH_SCHEMA: dict[str, Any] = {
-    "type": "object",
-    "properties": {"items": {"type": "array", "items": ITEM_SUMMARY_BATCH_ENTRY_SCHEMA}},
-    "required": ["items"],
-    "additionalProperties": False,
-}
-"""Batch form sent to the model: one entry per input article, keyed by index."""
+def item_summary_schema(bullets: int = 3) -> dict[str, Any]:
+    """Single-article summary: exactly ``bullets`` bullets and a why-it-matters (empty when the why is off)."""
+    return {
+        "type": "object",
+        "properties": {
+            "bullets": {"type": "array", "items": {"type": "string"}, "minItems": bullets, "maxItems": bullets},
+            "why_it_matters": {"type": "string"},
+        },
+        "required": ["bullets", "why_it_matters"],
+        "additionalProperties": False,
+    }
+
+
+def item_summary_entry_schema(bullets: int = 3) -> dict[str, Any]:
+    """One article's summary in a batch: {index, bullets[n], why_it_matters}. Validated per entry by ``insights``."""
+    return {
+        "type": "object",
+        "properties": {
+            "index": {"type": "integer"},
+            "bullets": {"type": "array", "items": {"type": "string"}, "minItems": bullets, "maxItems": bullets},
+            "why_it_matters": {"type": "string"},
+        },
+        "required": ["index", "bullets", "why_it_matters"],
+        "additionalProperties": False,
+    }
+
+
+def item_summary_batch_schema(bullets: int = 3) -> dict[str, Any]:
+    """Batch form sent to the model: one entry per input article, keyed by index."""
+    return {
+        "type": "object",
+        "properties": {"items": {"type": "array", "items": item_summary_entry_schema(bullets)}},
+        "required": ["items"],
+        "additionalProperties": False,
+    }
+
+
+ITEM_SUMMARY_SCHEMA: dict[str, Any] = item_summary_schema()
+ITEM_SUMMARY_BATCH_ENTRY_SCHEMA: dict[str, Any] = item_summary_entry_schema()
+ITEM_SUMMARY_BATCH_SCHEMA: dict[str, Any] = item_summary_batch_schema()
 
 ITEM_SUMMARY_BATCH_LOOSE_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -227,18 +244,43 @@ WEEKLY_REVIEW_SYSTEM = (
     "(e.g. sources to mute or folders to split). Plain sentences, no markdown. " + _JSON_ONLY
 )
 
-ITEM_SUMMARY_SYSTEM = (
-    "Summarise the article in exactly three crisp bullets (facts, not opinions), then one or two sentences on why "
-    "it matters to this specific reader given their profile. If the profile is empty, explain why it matters to "
-    "a technical reader in general. " + _JSON_ONLY
-)
+_WHY_CLAUSE = {
+    "personal": (
+        "then one or two sentences on why it matters to this specific reader given their profile and stated "
+        "focus (or to a technical reader in general when both are empty). Never restate the bullets in the why; "
+        "say what it changes for them, or say plainly that it is routine"
+    ),
+    "general": (
+        "then one sentence on why it matters to a technical reader in general (ignore the reader profile for "
+        "this part)"
+    ),
+    "off": "and set why_it_matters to an empty string",
+}
+_NUMBER_WORDS = {2: "two", 3: "three", 5: "five"}
 
-ITEM_SUMMARY_BATCH_SYSTEM = (
-    "Summarise each article for one reader: exactly three crisp bullets of facts (not opinions), then one or two "
-    "sentences on why it matters to this specific reader given their profile (or to a technical reader in general "
-    "when the profile is empty). Return one entry per article, keyed by its index; never merge articles. "
-    + _JSON_ONLY
-)
+
+def item_summary_system(bullets: int = 3, why: str = "personal") -> str:
+    n = _NUMBER_WORDS.get(bullets, str(bullets))
+    return (
+        f"Summarise the article in exactly {n} crisp bullets (facts, not opinions), "
+        + _WHY_CLAUSE.get(why, _WHY_CLAUSE["personal"])
+        + ". "
+        + _JSON_ONLY
+    )
+
+
+def item_summary_batch_system(bullets: int = 3, why: str = "personal") -> str:
+    n = _NUMBER_WORDS.get(bullets, str(bullets))
+    return (
+        f"Summarise each article for one reader: exactly {n} crisp bullets of facts (not opinions), "
+        + _WHY_CLAUSE.get(why, _WHY_CLAUSE["personal"])
+        + ". Return one entry per article, keyed by its index; never merge articles. "
+        + _JSON_ONLY
+    )
+
+
+ITEM_SUMMARY_SYSTEM = item_summary_system()
+ITEM_SUMMARY_BATCH_SYSTEM = item_summary_batch_system()
 
 ASK_SYSTEM = (
     "Answer the reader's question using ONLY the numbered excerpts from things they have read. Cite sources "
@@ -342,13 +384,24 @@ def weekly_review_user(profile: str, stats: dict[str, Any]) -> str:
     )
 
 
-def item_summary_user(profile: str, title: str, text: str) -> str:
-    return f"Reader profile:\n{profile or '(none)'}\n\nArticle title: {title}\n\nArticle text:\n{text}"
+def _reader_block(profile: str, focus: str = "") -> list[str]:
+    parts = ["Reader profile:", profile or "(none)"]
+    if focus:
+        parts += ["", "What the reader asked the why-it-matters to weigh:", focus]
+    return parts + [""]
 
 
-def item_summary_batch_user(profile: str, items: list[tuple[int, str, str, str]]) -> str:
+def item_summary_user(profile: str, title: str, text: str, *, focus: str = "", hint: str = "") -> str:
+    parts = _reader_block(profile, focus)
+    if hint:
+        parts += ["The reader rejected the previous summary of this article. Their note:", hint, ""]
+    parts += [f"Article title: {title}", "", "Article text:", text]
+    return "\n".join(parts)
+
+
+def item_summary_batch_user(profile: str, items: list[tuple[int, str, str, str]], *, focus: str = "") -> str:
     """``items`` are (index, title, source, text)."""
-    parts = ["Reader profile:", profile or "(none)", ""]
+    parts = _reader_block(profile, focus)
     for index, title, source, text in items:
         parts.append(f"### Article {index}")
         parts.append(f"Title: {title}")
@@ -390,6 +443,13 @@ __all__ = [
     "PROFILE_SCHEMA",
     "PROFILE_SYSTEM",
     "PROMPT_VERSION",
+    "SUMMARY_BULLET_CHOICES",
     "WEEKLY_REVIEW_SCHEMA",
     "WEEKLY_REVIEW_SYSTEM",
+    "WHY_MODES",
+    "item_summary_batch_schema",
+    "item_summary_batch_system",
+    "item_summary_entry_schema",
+    "item_summary_schema",
+    "item_summary_system",
 ]

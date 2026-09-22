@@ -1,6 +1,7 @@
 
 from datetime import timedelta
 
+import pytest
 from sqlalchemy import select
 
 from pensieve import models
@@ -163,3 +164,58 @@ def test_paper_config_normalises_and_reads_forms():
     assert out["sections"] == [{"key": "apple", "on": False, "limit": None}, {"key": "ai", "on": True, "limit": 4}]
     assert out["muted_feeds"] == ["11111111-1111-1111-1111-111111111111"]
     assert paper.section_title("data-engineering") == "Data Engineering" and paper.section_title("ios") == "iOS"
+
+
+async def test_tuning_ranks_briefs_and_orders_auto_sections(session, user):
+    w = await seed_paper_world(session, user)
+    # "less" of the story's second tag, Alpha and Gamma, "more" of Beta: the Beta singles now outrank the
+    # 3-source story, and the Alpha single drops to "In brief"
+    feeds = {str(w["a"].id): -1, str(w["b"].id): 1, str(w["c"].id): -1}
+    user.settings = {"paper": {"tuning": {"tags": {"business": -3}, "feeds": feeds}}}
+    body = await paper.compile_paper(session, user, paper.today())
+    ai = section_map(body)["ai"]
+    story = next(s for s in ai["stories"] if s["key"] == f"c:{w['cluster'].id}")
+    # business carries 0.61 of the story's 1.72 tag weight: -3 * 0.355 + mean(-1, 1, -1)
+    assert story["boost"] == -1.4 and story["sources"] == 3
+    assert [s["item_id"] for s in ai["stories"]][:2] == [str(w["ai2"].id), str(w["ai3"].id)]  # newest first on a tie
+    assert ai["stories"][2]["key"] == f"c:{w['cluster'].id}" and [s["item_id"] for s in ai["brief"]] == [str(w["ai1"].id)]
+    # with min_sources=2 the story's effective 0.44 sources send it to "In brief"; the boosted singles stay out
+    feeds = {str(w["a"].id): -3, str(w["b"].id): 1.5, str(w["c"].id): -3}
+    user.settings = {"paper": {"min_sources": 2, "tuning": {"tags": {"business": -3}, "feeds": feeds}}}
+    body = await paper.compile_paper(session, user, paper.today())
+    ai = section_map(body)["ai"]
+    assert f"c:{w['cluster'].id}" in {s["key"] for s in ai["brief"]}
+    assert {s["item_id"] for s in ai["stories"]} == {str(w["ai2"].id), str(w["ai3"].id)}
+    # a positive tag weight orders the automatic sections: apple before ai
+    user.settings = {"paper": {"tuning": {"tags": {"apple": 1}}}}
+    body = await paper.compile_paper(session, user, paper.today())
+    assert list(section_map(body)) == ["apple", "ai", "other"]
+    assert section_map(body)["apple"]["stories"][0]["boost"] == 1.0
+
+
+def test_tuning_config_apply_and_summary():
+    story = {"title": "t", "item_id": "x", "tag": "ai", "tags": ["ai", "business"],
+             "tag_weight": {"ai": 0.9, "business": 0.3},
+             "feeds": [{"id": "11111111-1111-1111-1111-111111111111", "title": "Alpha"}]}  # fmt: skip
+    cfg = paper.paper_config(models.User(settings={"paper": {"tuning": {"tags": {"AI ": "2.5", "x": "nan", "y": 0}, "feeds": {"bad": 1, "11111111-1111-1111-1111-111111111111": 9}}}}))
+    assert cfg["tuning"] == {"tags": {"ai": 2.5}, "feeds": {"11111111-1111-1111-1111-111111111111": 3.0}}
+    assert paper.story_boost(story, cfg["tuning"]) == 5.5
+    more = paper.apply_tune(cfg, story, "more")
+    assert more["tuning"]["tags"]["ai"] == 3.0 and more["tuning"]["feeds"]["11111111-1111-1111-1111-111111111111"] == 3.0
+    less = paper.apply_tune(paper.paper_config(None), story, "less")
+    assert less["tuning"] == {"tags": {"ai": -1.0}, "feeds": {"11111111-1111-1111-1111-111111111111": -0.5}}
+    assert paper.tune_summary(less, story) == "AI -1 · Alpha -0.5"
+    assert paper.apply_tune(less, story, "reset")["tuning"] == {"tags": {}, "feeds": {}}
+    assert paper.tune_summary(paper.paper_config(None), story) == ""
+    with pytest.raises(ValueError):
+        paper.apply_tune(cfg, story, "sideways")
+
+    class Form(dict):
+        def getlist(self, key):
+            v = self.get(key, [])
+            return v if isinstance(v, list) else [v]
+
+    form = Form(**{"tune_tag:ai": "-1.5", "tune_feed:11111111-1111-1111-1111-111111111111": "0"})
+    out = paper.config_from_form(form, cfg)
+    assert out["tuning"] == {"tags": {"ai": -1.5}, "feeds": {}}
+    assert paper.config_from_form(Form(reset_tuning="1"), cfg)["tuning"] == {"tags": {}, "feeds": {}}

@@ -1,5 +1,6 @@
 {% import "_macros.html" as m %}
 {% if saved %}<div class="flash flash-ok" role="status">{{ m.icon('check', 14) }} Layout saved and the paper recompiled.</div>{% endif %}
+{% if summaries_queued %}<div class="flash flash-ai" role="status">{{ m.icon('sparkle', 14) }} {% if summaries_queued == '0' %}Nothing to write: every story already has a summary or the queue is unavailable.{% else %}Queued summaries for {{ summaries_queued }} stor{{ 'y' if summaries_queued == '1' else 'ies' }}; open a story to watch it land, or refresh in a minute.{% endif %}</div>{% endif %}
 {% if not paper_on %}
 <div class="insights-head">
   <div class="insight-header">
@@ -22,10 +23,11 @@
   <div class="insight-header">
     <div class="eyebrow eyebrow-ai">{{ m.icon('digest', 14) }} The paper{% if not is_today %} · earlier edition{% endif %}</div>
     <h1 class="insight-title">{{ edition.period|date_long }}</h1>
-    <p class="paper-stand">
+    <div class="paper-stand">
       {{ body.story_count }} stor{{ 'y' if body.story_count == 1 else 'ies' }} from {{ body.item_count }} item{{ 's' if body.item_count != 1 }} in the last {{ body.window.hours if body.window and body.window.hours else config.window_hours }} hours{% if body.unread_count is defined %} · {{ body.unread_count }} unread{% endif %}
       · compiled {{ edition.generated_at|timeago }}
-    </p>
+      {% if missing_summaries and summaries_on %} · <form class="inline" method="post" action="/insights/paper/{{ edition.id }}/summaries" hx-boost="false">{{ m.csrf_field(csrf_token) }}<button class="btn-link" type="submit" title="Queue the eager summaries again for every story that has none">{{ missing_summaries }} without a summary · write them now</button></form>{% endif %}
+    </div>
     {% if body.lede %}<p class="insight-summary">{{ body.lede }}</p>{% endif %}
   </div>
   <div class="insight-actions">

@@ -41,6 +41,11 @@ DISPATCH_MINUTES = {0, 15, 30, 45}
 STATUS_DONE = "done"
 STATUS_PARTIAL = "partial"
 STATUS_FAILED = "failed"
+SWEEP_MINUTES = {5, 35}
+SWEEP_GRACE = timedelta(minutes=20)
+"""The sweep leaves items younger than this alone: their eager summary job is most likely still queued."""
+SWEEP_MAX_ITEMS = 200
+SWEEP_CHUNK = 40
 
 
 @dataclass
@@ -450,7 +455,8 @@ async def ai_daily_paper(ctx: dict, user_id: str, day: str | None = None) -> Non
     await _guarded(ctx, "paper", uid, uid, work)
 
 
-async def ai_summarize_item(ctx: dict, user_id: str, item_id: str) -> None:
+async def ai_summarize_item(ctx: dict, user_id: str, item_id: str, hint: str = "") -> None:
+    """One item, one model call: the reader's "Summarize now", or a rewrite carrying their note (``hint``)."""
     uid = uuid.UUID(str(user_id))
     iid = uuid.UUID(str(item_id))
 
@@ -462,10 +468,58 @@ async def ai_summarize_item(ctx: dict, user_id: str, item_id: str) -> None:
         feed = await session.get(models.Feed, item.feed_id)
         if feed is None or feed.user_id != user.id:
             return "item not owned by user"
-        await insights.summarize_item(session, user, item, client)
-        return None
+        await insights.summarize_item(session, user, item, client, hint=hint or "")
+        return "rewritten on request" if hint else None
 
     await _guarded(ctx, "summarize", iid, uid, work)
+
+
+def sweep_job_id(user_id: uuid.UUID | str, at: datetime, n: int) -> str:
+    return queue.job_id_for(queue.AI_SUMMARIZE_ITEMS, f"sweep:{user_id}:{at.strftime('%Y%m%d%H%M')}:{n}")
+
+
+async def _summaries_in_flight(session: AsyncSession, user_id: uuid.UUID) -> bool:
+    """True while a summaries job of this user is queued or running (a retry backlog we must not double)."""
+    row = await session.scalar(
+        select(models.AIJob.id)
+        .where(
+            models.AIJob.user_id == user_id,
+            models.AIJob.kind == "summarize_items",
+            models.AIJob.status.in_(["queued", "running"]),
+        )
+        .limit(1)
+    )
+    return row is not None
+
+
+async def ai_summary_sweep(ctx: dict, at: datetime | None = None) -> int:
+    """Twice an hour: re-queue summaries for stories of the paper window that still have none.
+
+    That is the retry path for everything the eager job could not cover: a gateway down for longer than the
+    job's own retry budget, a worker restart, entries the model dropped, or summaries switched on after the
+    items arrived. Items younger than ``SWEEP_GRACE`` are skipped (their first job is likely still queued), a
+    user with a summaries job already queued or running is skipped, and at most ``SWEEP_MAX_ITEMS`` are queued
+    per user per sweep in chunks of ``SWEEP_CHUNK``. Returns the number of items queued.
+    """
+    now = at or utcnow()
+    queued = 0
+    async with session_scope() as session:
+        for user in await _users_with(session, "summarize_items"):
+            if await _summaries_in_flight(session, user.id):
+                continue
+            hours = paper.paper_config(user)["window_hours"]
+            ids = await insights.items_without_summary(
+                session, user.id, now - timedelta(hours=hours), until=now - SWEEP_GRACE, limit=SWEEP_MAX_ITEMS
+            )
+            for n, start in enumerate(range(0, len(ids), SWEEP_CHUNK)):
+                chunk = [str(i) for i in ids[start : start + SWEEP_CHUNK]]
+                await _enqueue(
+                    ctx, queue.AI_SUMMARIZE_ITEMS, str(user.id), chunk, job_id=sweep_job_id(user.id, now, n)
+                )
+                queued += len(chunk)
+            if ids:
+                log.info("summary sweep: %d items re-queued for %s", len(ids), user.email)
+    return queued
 
 
 # ---------------------------------------------------------------------------
@@ -574,6 +628,7 @@ def _cron_jobs() -> list:
     return [
         cron(ai_dispatch_daily, minute=DISPATCH_MINUTES, unique=True),
         cron(ai_dispatch_weekly, weekday=6, hour=8, minute=0, unique=True),
+        cron(ai_summary_sweep, minute=SWEEP_MINUTES, unique=True),
     ]
 
 
@@ -586,5 +641,6 @@ FUNCTIONS: list = [
     ai_summarize_item,
     ai_summarize_items,
     ai_daily_paper,
+    ai_summary_sweep,
 ]
 CRON_JOBS: list = _cron_jobs()

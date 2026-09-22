@@ -1,7 +1,8 @@
 {% import "_macros.html" as m %}
 {# One story: a <details> row. Summary line = headline + sources; body = the eager summary and every copy. #}
 {% set sid = 'story-' ~ story.key|replace(':', '-') %}
-<details class="pstory{% if story.read %} read{% endif %}{% if story.folded %} folded{% endif %}" id="{{ sid }}" data-key="{{ story.key }}"{% if brief is defined and brief %} data-brief="1"{% endif %}>
+{% set tl = tune_line if tune_line is defined else (tune_lines.get(story.key, '') if tune_lines is defined else '') %}
+<details class="pstory{% if story.read %} read{% endif %}{% if story.folded %} folded{% endif %}" id="{{ sid }}" data-key="{{ story.key }}"{% if brief is defined and brief %} data-brief="1"{% endif %}{% if hx_open is defined and hx_open %} open{% endif %}>
   <summary class="pstory-head">
     <span class="pstory-dot" aria-hidden="true"></span>
     <span class="pstory-main">
@@ -9,26 +10,15 @@
       <span class="pstory-meta">
         {% if story.sources > 1 %}<span class="sources" role="note">{{ story.sources }} sources</span>{% if story.copies > story.sources %}<span class="faint">· {{ story.copies }} copies</span>{% endif %}{% else %}<span class="faint">{{ story.feeds[0].title if story.feeds else '' }}</span>{% endif %}
         {% if story.tag and (section is not defined or section is none or section.kind != 'tag' or story.tag != section.key) %}<span class="chip chip-ai chip-sm">{{ story.tag }}</span>{% endif %}
+        {% if story.boost is defined and story.boost %}<span class="chip chip-sm pstory-boost {{ 'up' if story.boost > 0 else 'down' }}" title="{{ tl or 'Tuned' }}">{{ '+' if story.boost > 0 }}{{ story.boost|round(1) }}</span>{% endif %}
         <time class="faint" datetime="{{ story.published_at }}">{{ story.published_at|timeago }}</time>
-        {% if not story.summary %}<span class="faint pstory-nosum" title="The summary is written when the item arrives; this one is still queued or was disabled.">no summary yet</span>{% endif %}
+        {% if not story.summary %}<span class="faint pstory-nosum" title="The summary is written when the item arrives; this one is still queued or was missed and will be retried.">no summary yet</span>{% endif %}
       </span>
     </span>
     <span class="pstory-chev" aria-hidden="true">{{ m.icon('chevron-down', 16) }}</span>
   </summary>
   <div class="pstory-body">
-    {% if config.show_summaries %}
-    {% if story.summary %}
-    {% set blocks = story.summary|summary_blocks %}
-    <div class="pstory-summary">
-      <ul class="pstory-bullets">{% for b in blocks.bullets %}<li>{{ b }}</li>{% endfor %}</ul>
-      {% if blocks.why %}<p class="pstory-why"><span class="eyebrow eyebrow-ai">{{ m.icon('sparkle', 12) }} Why it matters</span> {{ blocks.why }}</p>{% endif %}
-    </div>
-    {% else %}
-    <div class="pstory-summary muted small" id="summary-{{ story.item_id }}">
-      No summary yet. <button type="button" class="btn btn-sm btn-ai" hx-post="/items/{{ story.item_id }}/summarize" hx-target="#summary-{{ story.item_id }}" hx-swap="innerHTML" hx-indicator="this">{{ m.icon('sparkle', 14) }} Summarize now</button>
-    </div>
-    {% endif %}
-    {% endif %}
+    {% if config.show_summaries %}{% include "partials/paper_summary.html" %}{% endif %}
     <ul class="pstory-sources" aria-label="Copies of this story">
       {% for mbr in story.members %}
       <li class="pstory-source{% if mbr.read %} read{% endif %}">
@@ -43,6 +33,13 @@
       <form hx-post="/insights/paper/{{ edition.id }}/read" hx-target="#{{ sid }}" hx-swap="outerHTML" method="post" action="/insights/paper/{{ edition.id }}/read">{{ m.csrf_field(csrf_token) }}<input type="hidden" name="key" value="{{ story.key }}"><button class="btn btn-sm" type="submit">{{ m.icon('check-circle', 14) }} Mark read</button></form>
       {% endif %}
       <form hx-post="/insights/paper/{{ edition.id }}/hide" hx-target="#{{ sid }}" hx-swap="delete" method="post" action="/insights/paper/{{ edition.id }}/hide">{{ m.csrf_field(csrf_token) }}<input type="hidden" name="key" value="{{ story.key }}"><button class="btn btn-sm btn-ghost" type="submit" title="Drop this story from today's paper">{{ m.icon('close', 14) }} Hide</button></form>
+      <span class="grow"></span>
+      <span class="pstory-tune" role="group" aria-label="Tune the paper">
+        <form hx-post="/insights/paper/{{ edition.id }}/tune" hx-target="#{{ sid }}" hx-swap="outerHTML" method="post" action="/insights/paper/{{ edition.id }}/tune">{{ m.csrf_field(csrf_token) }}<input type="hidden" name="key" value="{{ story.key }}"><input type="hidden" name="direction" value="more"><button class="btn btn-sm btn-ghost{% if story.boost is defined and story.boost > 0 %} on{% endif %}" type="submit" title="Rank stories like this higher: its tag{{ 's' if story.feeds|length > 1 }} and source{{ 's' if story.feeds|length > 1 }} gain weight">{{ m.icon('plus', 14) }} More like this</button></form>
+        <form hx-post="/insights/paper/{{ edition.id }}/tune" hx-target="#{{ sid }}" hx-swap="outerHTML" method="post" action="/insights/paper/{{ edition.id }}/tune">{{ m.csrf_field(csrf_token) }}<input type="hidden" name="key" value="{{ story.key }}"><input type="hidden" name="direction" value="less"><button class="btn btn-sm btn-ghost{% if story.boost is defined and story.boost < 0 %} on{% endif %}" type="submit" title="Rank stories like this lower; keep pressing and they fall into In brief">{{ m.icon('minus', 14) }} Less</button></form>
+        {% if tl %}<form hx-post="/insights/paper/{{ edition.id }}/tune" hx-target="#{{ sid }}" hx-swap="outerHTML" method="post" action="/insights/paper/{{ edition.id }}/tune">{{ m.csrf_field(csrf_token) }}<input type="hidden" name="key" value="{{ story.key }}"><input type="hidden" name="direction" value="reset"><button class="btn btn-sm btn-ghost" type="submit" title="{{ tl }}">Reset</button></form>{% endif %}
+      </span>
     </div>
+    {% if tl %}<p class="pstory-tuned faint small">{{ m.icon('chart', 12) }} Tuned: {{ tl }} · applies when the paper is next compiled</p>{% endif %}
   </div>
 </details>

@@ -409,6 +409,7 @@
     const path = (e.detail.pathInfo && e.detail.pathInfo.requestPath) || '';
     if (xhr.status >= 400) { toast(xhr.status === 403 ? 'Session expired, reload the page' : 'That didn\'t work (' + xhr.status + ')', { kind: 'error' }); return; }
     if (/\/summarize$/.test(path)) toast('Summary requested', { kind: 'ai' });
+    else if (/\/rewrite$/.test(path)) toast('Rewrite requested; your note is kept as a correction', { kind: 'ai' });
     else if (/\/tag$/.test(path)) { const op = elt.querySelector && elt.querySelector('[name="op"]'); toast(op && op.value === 'remove' ? 'Tag removed' : 'Tag added'); }
     else if (/\/note$/.test(path)) { const del = elt.querySelector && elt.querySelector('[name="delete"]'); toast(del ? 'Note deleted' : 'Note saved'); }
     else if (/\/reader-mode$/.test(path)) { const off = elt.querySelector && elt.querySelector('[name="off"]'); toast(off ? 'Showing the feed version' : 'Reader view'); }
@@ -491,6 +492,9 @@
     if (unfold) { const sec = $(unfold.dataset.unfold); if (sec) sec.classList.add('unfolded'); }
   });
   document.body.addEventListener('story-hidden', () => toast('Hidden from today\'s paper'));
+  document.body.addEventListener('paper-tuned-more', () => toast('More like this: its tag and sources gained weight'));
+  document.body.addEventListener('paper-tuned-less', () => toast('Less of this: its tag and sources lost weight'));
+  document.body.addEventListener('paper-tuned-reset', () => toast('Tuning reset for this story'));
 
   document.addEventListener('keydown', (e) => {
     if (e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return;

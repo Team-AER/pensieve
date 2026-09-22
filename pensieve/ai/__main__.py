@@ -1,4 +1,4 @@
-"""Manual runs: ``python -m pensieve.ai digest | paper | profile | tag | backfill | summaries | health``."""
+"""Manual runs: ``python -m pensieve.ai digest|paper|profile|tag|backfill|summaries|sweep|health``."""
 
 from __future__ import annotations
 
@@ -64,47 +64,40 @@ async def cmd_paper(args: argparse.Namespace) -> int:
 
 
 async def cmd_summaries(args: argparse.Namespace) -> int:
-    """Enqueue eager summaries for the user's recent items that have none yet (one job per feed chunk)."""
+    """Enqueue eager summaries for the user's recent stories that have none yet (cluster-aware, in chunks)."""
     from datetime import timedelta
 
     from pensieve import queue
     from pensieve.ai.common import utcnow
 
     cap = get_settings().ai_max_items_per_job
-    since = utcnow() - timedelta(days=args.days)
+    now = utcnow()
     async with session_scope() as session:
         user = await _user_by_email(session, args.email)
-        feeds = list((await session.scalars(select(models.Feed).where(models.Feed.user_id == user.id))).all())
-        total = 0
-        for feed in feeds:
-            stmt = (
-                select(models.Item.id)
-                .where(
-                    models.Item.feed_id == feed.id,
-                    models.Item.published_at >= since,
-                    ~select(models.ItemAI.item_id)
-                    .where(
-                        models.ItemAI.item_id == models.Item.id,
-                        models.ItemAI.user_id == user.id,
-                        models.ItemAI.summary.is_not(None),
-                    )
-                    .exists(),
-                )
-                .order_by(models.Item.published_at.desc())
+        ids = await insights.items_without_summary(
+            session, user.id, now - timedelta(days=args.days), limit=100_000
+        )
+        chunks = [ids[start : start + cap] for start in range(0, len(ids), cap)]
+        for n, chunk in enumerate(chunks):
+            await queue.enqueue(
+                queue.AI_SUMMARIZE_ITEMS,
+                str(user.id),
+                [str(i) for i in chunk],
+                _job_id=f"{queue.job_id_for('summaries', user.id)}:{now:%Y%m%d%H%M%S}:{n}",
             )
-            ids = [str(i) for i in (await session.scalars(stmt)).all()]
-            for n, start in enumerate(range(0, len(ids), cap)):
-                chunk = ids[start : start + cap]
-                await queue.enqueue(
-                    queue.AI_SUMMARIZE_ITEMS,
-                    str(user.id),
-                    chunk,
-                    _job_id=f"{queue.job_id_for('summaries', feed.id)}:{n}",
-                )
-                total += len(chunk)
-            if ids:
-                print(f"{feed.title}: {len(ids)} without a summary -> {(len(ids) + cap - 1) // cap} job(s)")
-        print(f"enqueued {total} items in chunks of {cap}; duplicates within a story are skipped by the job")
+        print(
+            f"{len(ids)} stories without a summary in the last {args.days} day(s) "
+            f"-> {len(chunks)} job(s) of up to {cap}"
+        )
+    return 0
+
+
+async def cmd_sweep(_: argparse.Namespace) -> int:
+    """Run the summary sweep once, now, for every user with summaries on (what the cron does twice an hour)."""
+    from pensieve.ai import jobs
+
+    queued = await jobs.ai_summary_sweep({})
+    print(f"re-queued {queued} items")
     return 0
 
 
@@ -193,6 +186,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("email")
     p.add_argument("--days", type=int, default=2, help="look back this many days (default 2)")
     p.set_defaults(fn=cmd_summaries)
+    p = sub.add_parser("sweep", help="re-queue summaries the eager job missed (all users, once)")
+    p.set_defaults(fn=cmd_sweep)
     p = sub.add_parser("profile", help="refresh the reader profile for a user")
     p.add_argument("email")
     p.set_defaults(fn=cmd_profile)

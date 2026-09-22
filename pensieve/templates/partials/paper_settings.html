@@ -33,6 +33,32 @@
         </div>
       </div>
       <div class="field">
+        <span class="field-label">Summaries and “why it matters”</span>
+        <span class="field-hint">Applies to summaries written from now on; “Not quite” on a story rewrites that one with your note.</span>
+        <div class="field-row">
+          <div class="field"><label for="ps-bullets">Length</label>
+            <select class="input input-sm" id="ps-bullets" name="bullets">{% for n, label in [(2, 'Two bullets'), (3, 'Three bullets'), (5, 'Five bullets')] %}<option value="{{ n }}"{% if summary_prefs.bullets == n %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+          <div class="field"><label for="ps-why">Why it matters</label>
+            <select class="input input-sm" id="ps-why" name="why">{% for v, label in [('personal', 'For me, from my profile'), ('general', 'For a technical reader'), ('off', 'Leave it out')] %}<option value="{{ v }}"{% if summary_prefs.why == v %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+        </div>
+        <div class="field"><label for="ps-focus">What the why should weigh</label>
+          <textarea class="input textarea input-sm" id="ps-focus" name="focus" rows="2" maxlength="400" placeholder="e.g. I run a homelab and care about self-hosting and Apple platforms; skip funding news and vendor marketing.">{{ summary_prefs.focus }}</textarea>
+          <span class="field-hint">Read by the model together with your reader profile (Manage → AI and memory).</span></div>
+      </div>
+      <div class="field">
+        <span class="field-label">Tuning</span>
+        <span class="field-hint">“More like this” and “Less” on a story move these. Weights count like extra or missing sources when ranking (+1 lifts a single-source story above a two-source one); a section the reader asked for more of comes first among the automatic ones.</span>
+        {% if tuned.tags or tuned.feeds %}
+        <div class="tune-rows">
+          {% for row in tuned.tags %}<label class="tune-row"><span class="chip chip-ai chip-sm">{{ row.title }}</span><input class="input input-sm tune-weight" type="number" step="0.5" min="-3" max="3" name="tune_tag:{{ row.key }}" value="{{ row.weight }}" aria-label="Weight for {{ row.title }}"></label>{% endfor %}
+          {% for row in tuned.feeds %}<label class="tune-row"><span class="chip chip-sm">{{ row.title }}</span><input class="input input-sm tune-weight" type="number" step="0.5" min="-3" max="3" name="tune_feed:{{ row.key }}" value="{{ row.weight }}" aria-label="Weight for {{ row.title }}"></label>{% endfor %}
+        </div>
+        <label class="check"><input type="checkbox" class="checkbox" name="reset_tuning" value="1"><span>Reset every weight to zero</span></label>
+        {% else %}
+        <p class="muted small">Nothing tuned yet. Open a story and press “More like this” or “Less”.</p>
+        {% endif %}
+      </div>
+      <div class="field">
         <span class="field-label">Muted sources</span>
         <span class="field-hint">Muted feeds never appear in the paper.</span>
         <div class="muted-feeds">

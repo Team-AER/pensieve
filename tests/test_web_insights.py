@@ -1,5 +1,7 @@
 
-from sqlalchemy import select
+from datetime import UTC, datetime
+
+from sqlalchemy import delete, select
 
 from pensieve import models
 from pensieve.web import insights as insights_mod
@@ -180,3 +182,112 @@ async def test_paper_off_and_other_users_edition(client, session, user):
     assert r.status_code == 404
     r = await client.post(f"/insights/paper/{theirs.id}/hide", data={"key": "x"}, headers=headers)
     assert r.status_code == 404
+
+
+async def test_paper_tune_more_less_reset_records_corrections(client, session, user):
+    w = await seed_paper(session, user)
+    headers = await login(client, user)
+    r = await client.get("/insights")
+    assert "More like this" in r.text and 'name="tune_tag:' not in r.text and "Nothing tuned yet" in r.text
+    edition = await session.scalar(select(models.Insight).where(models.Insight.user_id == user.id, models.Insight.kind == "paper"))
+    key = f"c:{w['cluster'].id}"
+    r = await client.post(f"/insights/paper/{edition.id}/tune", data={"key": key, "direction": "more"}, headers=headers | HX)
+    assert r.status_code == 200 and "paper-tuned-more" in r.headers.get("HX-Trigger", "")
+    assert 'class="chip chip-sm pstory-boost up"' in r.text and "+1.5" in r.text
+    assert "Tuned: AI +1 · Beta +0.5 · Alpha +0.5" in r.text and ">Reset<" in r.text
+    await session.refresh(user)
+    tuning = user.settings["paper"]["tuning"]
+    assert tuning["tags"] == {"ai": 1.0} and tuning["feeds"] == {str(w["a"].id): 0.5, str(w["b"].id): 0.5}
+    # the edition was recompiled with the new weights
+    await session.refresh(edition)
+    story = next(s for sec in edition.body["sections"] for s in sec["stories"] if s["key"] == key)
+    assert story["boost"] == 1.5
+    r = await client.post(f"/insights/paper/{edition.id}/tune", data={"key": key, "direction": "less"}, headers=headers | HX)
+    assert r.status_code == 200 and "pstory-boost" not in r.text  # back to zero: no chip
+    await session.refresh(user)
+    assert user.settings["paper"]["tuning"] == {"tags": {}, "feeds": {}}
+    r = await client.post(f"/insights/paper/{edition.id}/tune", data={"key": key, "direction": "less"}, headers=headers | HX)
+    assert 'pstory-boost down' in r.text and "-1.5" in r.text
+    rows = list(await session.scalars(select(models.Correction).where(models.Correction.user_id == user.id).order_by(models.Correction.created_at)))
+    assert [c.new_value for c in rows] == ["more of: ai, Beta, Alpha", "less of: ai, Beta, Alpha", "less of: ai, Beta, Alpha"]
+    assert rows[0].target_type == "paper_story" and rows[0].field == "preference" and rows[0].old_value == "Big launch everywhere"
+    # the customize panel now lists the weights, and saving it with an edited weight sticks
+    r = await client.get("/insights")
+    assert 'name="tune_tag:ai"' in r.text and f'name="tune_feed:{w["a"].id}"' in r.text
+    r = await client.post("/insights/paper/settings", data={"tune_tag:ai": "2", f"tune_feed:{w['a'].id}": "0", "section": ["ai"], "section_on": ["ai"]}, headers=headers)
+    assert r.status_code == 303
+    await session.refresh(user)
+    assert user.settings["paper"]["tuning"] == {"tags": {"ai": 2.0}, "feeds": {str(w["b"].id): -0.5}}
+    r = await client.post(f"/insights/paper/{edition.id}/tune", data={"key": key, "direction": "reset"}, headers=headers | HX)
+    assert r.status_code == 200 and "paper-tuned-reset" in r.headers.get("HX-Trigger", "")
+    await session.refresh(user)
+    assert user.settings["paper"]["tuning"] == {"tags": {}, "feeds": {}}
+    r = await client.post(f"/insights/paper/{edition.id}/tune", data={"key": key, "direction": "sideways"}, headers=headers | HX)
+    assert r.status_code == 400
+    r = await client.post(f"/insights/paper/{edition.id}/tune", data={"key": "i:nope", "direction": "more"}, headers=headers | HX)
+    assert r.status_code == 404
+
+
+async def test_paper_summary_prefs_rewrite_and_missing(client, session, user, monkeypatch):
+    calls = []
+
+    async def enqueue(function, *args, **kwargs):
+        calls.append((function, args, kwargs.get("_job_id")))
+
+    monkeypatch.setattr(insights_mod.queue, "enqueue", enqueue)
+    w = await seed_paper(session, user)
+    headers = await login(client, user)
+    r = await client.get("/insights")
+    assert "2 without a summary" in r.text and "write them now" in r.text and "Not quite" in r.text
+    edition = await session.scalar(select(models.Insight).where(models.Insight.user_id == user.id, models.Insight.kind == "paper"))
+    # summary preferences ride on the customize form
+    r = await client.post("/insights/paper/settings", data={"bullets": "5", "why": "general", "focus": " homelab  stuff ", "show_summaries": "1", "section": ["ai"], "section_on": ["ai"]}, headers=headers)
+    assert r.status_code == 303
+    await session.refresh(user)
+    assert user.settings["summaries"] == {"bullets": 5, "why": "general", "focus": "homelab stuff"}
+    r = await client.get("/insights")
+    assert 'value="5" selected' in r.text and 'value="general" selected' in r.text and "homelab stuff" in r.text
+    # "Not quite" on the story's why: a correction and a rewrite job carrying the note
+    key = f"c:{w['cluster'].id}"
+    r = await client.post(f"/insights/paper/{edition.id}/rewrite", data={"key": key, "note": "no funding talk"}, headers=headers | HX)
+    assert r.status_code == 200 and "Rewriting" in r.text and f"/insights/paper/{edition.id}/summary?key=" in r.text
+    assert calls[-1][0] == "ai_summarize_item" and calls[-1][1] == (str(user.id), str(w["s1"].id), "no funding talk")
+    corr = await session.scalar(select(models.Correction).where(models.Correction.user_id == user.id))
+    assert corr.target_type == "item_summary" and corr.field == "why_it_matters" and corr.new_value == "no funding talk"
+    assert corr.old_value.startswith("- Launch bullet")
+    # polling: still the old text -> pending; a new summary -> rendered, edition updated
+    r = await client.get(f"/insights/paper/{edition.id}/summary", params={"key": key, "n": 1}, headers=headers | HX)
+    assert r.status_code == 200 and "Rewriting" in r.text and "n=2" in r.text
+    ai = await session.get(models.ItemAI, (user.id, w["s1"].id))
+    ai.summary = "- New bullet\n\n**Why this matters to you**\n\nBetter why.\n"
+    await session.commit()
+    r = await client.get(f"/insights/paper/{edition.id}/summary", params={"key": key, "n": 2}, headers=headers | HX)
+    assert "New bullet" in r.text and "Better why." in r.text and "Rewriting" not in r.text
+    await session.refresh(edition)
+    story = next(s for sec in edition.body["sections"] for s in sec["stories"] if s["key"] == key)
+    assert story["summary"].startswith("- New bullet") and "rewrite_of" not in story
+    # a failed job within the last minutes surfaces as an error with a retry
+    single_key = f"i:{w['single'].id}"
+    r = await client.post(f"/insights/paper/{edition.id}/summarize", data={"key": single_key}, headers=headers | HX)
+    assert r.status_code == 200 and "Summarizing" in r.text and calls[-1][1] == (str(user.id), str(w["single"].id))
+    session.add(models.AIJob(kind="summarize", user_id=user.id, target_id=w["single"].id, status="failed", last_error="boom", finished_at=datetime.now(UTC)))
+    await session.commit()
+    r = await client.get(f"/insights/paper/{edition.id}/summary", params={"key": single_key, "n": 1}, headers=headers | HX)
+    assert "The summary failed: boom" in r.text and ">Retry" in r.text or "Retry</button>" in r.text
+    # after too many polls it gives up politely
+    await session.execute(delete(models.AIJob))
+    await session.commit()
+    r = await client.get(f"/insights/paper/{edition.id}/summary", params={"key": single_key, "n": 40}, headers=headers | HX)
+    assert "taking longer than usual" in r.text
+    # "write them now" queues one summaries job for the stories without one
+    n_before = len(calls)
+    r = await client.post(f"/insights/paper/{edition.id}/summaries", headers=headers)
+    assert r.status_code == 303 and r.headers["location"] == f"/insights/{edition.id}?summaries=2"
+    assert calls[n_before][0] == "ai_summarize_items" and set(calls[n_before][1][1]) == {str(w["single"].id), str(w["phone"].id)}
+    r = await client.get(f"/insights/{edition.id}?summaries=2", headers=headers)
+    assert "Queued summaries for 2 stories" in r.text
+    # why "off" hides the why paragraph even when the stored summary carries one
+    user.settings = dict(user.settings, summaries={"why": "off"})
+    await session.commit()
+    r = await client.get("/insights?refresh=1")
+    assert "New bullet" in r.text and "Better why." not in r.text
