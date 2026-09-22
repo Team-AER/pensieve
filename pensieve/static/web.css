@@ -790,14 +790,17 @@
    shown: either would trap the menus' fixed bottom sheets inside the bar. */
 @layer layout {
   @media (max-width: 899.98px) {
-    .app { height: auto; min-height: 100dvh; overflow: visible; padding-top: var(--bar-top, 56px); padding-bottom: var(--bar-bottom, 64px); }
+    .app { height: auto; min-height: 100dvh; overflow: visible; padding-top: var(--bar-top, 56px); padding-bottom: var(--bar-bottom, 0px); }
     .panes, .manage { flex: 1 0 auto; min-height: 0; }
     .app[data-pane="nav"] .pane-nav, .app[data-pane="list"] .pane-list, .app[data-pane="article"] .pane-article { flex: 1 0 auto; min-height: 0; overflow: visible; }
     .pane-body, .page-body, .manage-body, .app[data-pane="nav"] .pane-nav { flex: 1 0 auto; min-height: 0; overflow: visible; }
+    .app[data-pane="nav"] .pane-nav { width: 100%; }
     .topbar, .pane-head { position: fixed; top: 0; left: 0; right: 0; z-index: 31; }
     .tabbar, .article-foot { position: fixed; bottom: 0; left: 0; right: 0; z-index: 30; }
-    .tabbar { height: 64px; padding: 6px 12px; }
-    .toasts { bottom: calc(var(--bar-bottom, 64px) + var(--space-3)); }
+    /* No tab bar on phones: Search, Insights and Manage live in the drawer and the account menu. */
+    .tabbar { display: none !important; }
+    .nav-apps { display: flex; flex-direction: column; }
+    .toasts { bottom: calc(var(--bar-bottom, 0px) + var(--space-3)); }
     .topbar, .pane-head, .tabbar, .article-foot { transition: transform 0.32s cubic-bezier(0.2, 0.7, 0.2, 1); }
     .app[data-bars] :is(.topbar, .pane-head) { transform: translateY(-100%); }
     .app[data-bars] :is(.tabbar, .article-foot) { transform: translateY(100%); }
@@ -812,6 +815,9 @@
     .item { scroll-margin-top: 140px; scroll-margin-bottom: 80px; }
   }
 }
+
+@layer layout { .nav-apps { display: none; } }
+@layer layout { @media (max-width: 899.98px) { .nav-apps { display: flex; flex-direction: column; } } }
 
 /* ---- Keyboard hints: out of the way until Ctrl or ⌘ is held (reader.js toggles html.keys-shown) ---- */
 @layer layout {

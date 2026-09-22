@@ -7,6 +7,9 @@
   <div class="menu-body" role="menu" aria-label="Account">
     <div class="menu-user"><strong>{{ user.display_name or user.email }}</strong><span>{{ user.email }}</span></div>
     <div class="menu-sep"></div>
+    <a class="menu-item mobile-only" role="menuitem" href="/">{{ m.icon('list', 14) }} Reader</a>
+    <a class="menu-item mobile-only" role="menuitem" href="/search">{{ m.icon('search', 14) }} Search</a>
+    <a class="menu-item mobile-only" role="menuitem" href="/insights">{{ m.icon('chart', 14) }} Insights</a>
     <a class="menu-item" role="menuitem" href="/manage/account">{{ m.icon('user', 14) }} Profile and password</a>
     <a class="menu-item" role="menuitem" href="/manage/tokens">{{ m.icon('key', 14) }} API tokens</a>
     <a class="menu-item" role="menuitem" href="/manage/feeds">{{ m.icon('gear', 14) }} Manage</a>
