@@ -23,7 +23,9 @@ async def get_pool() -> ArqRedis:
 # Two queues so a burst of long AI jobs can never hold every worker slot and starve feed polling.
 FETCH_QUEUE = "arq:queue"  # arq's default; fetch/reader-mode/prune jobs and their crons
 AI_QUEUE = "pensieve:ai"  # everything named ai_*; served by pensieve.worker.AIWorkerSettings
-CAPTURE_QUEUE = "pensieve:capture"  # everything named capture_*; pensieve.worker.CaptureWorkerSettings (browser)
+CAPTURE_QUEUE = (
+    "pensieve:capture"  # everything named capture_*; pensieve.worker.CaptureWorkerSettings (browser)
+)
 
 
 def queue_for(function: str) -> str:
@@ -47,7 +49,9 @@ AI_FILE_FEED = "ai_file_feed"  # (feed_id: str) -> suggest folder
 AI_DAILY_DIGEST = "ai_daily_digest"  # (user_id: str)
 AI_WEEKLY_REVIEW = "ai_weekly_review"  # (user_id: str)
 AI_REFRESH_PROFILE = "ai_refresh_profile"  # (user_id: str)
-AI_SUMMARIZE_ITEM = "ai_summarize_item"  # (user_id: str, item_id: str, hint: str = "") -> one call, or a rewrite
+AI_SUMMARIZE_ITEM = (
+    "ai_summarize_item"  # (user_id: str, item_id: str, hint: str = "") -> one call, or a rewrite
+)
 AI_SUMMARIZE_ITEMS = "ai_summarize_items"  # (user_id: str, item_ids: list[str]) -> eager batch, one per story
 AI_DAILY_PAPER = "ai_daily_paper"  # (user_id: str, day: str | None) -> compile today's paper (no LLM)
 AI_SUMMARY_SWEEP = "ai_summary_sweep"  # cron: re-queue summaries the eager job could not write

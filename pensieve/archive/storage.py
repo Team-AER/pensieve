@@ -19,7 +19,9 @@ log = logging.getLogger(__name__)
 
 
 class Storage(Protocol):
-    async def put(self, key: str, data: bytes, content_type: str, content_encoding: str | None = None) -> None: ...
+    async def put(
+        self, key: str, data: bytes, content_type: str, content_encoding: str | None = None
+    ) -> None: ...
 
     async def get(self, key: str) -> bytes | None: ...
 
@@ -45,7 +47,9 @@ class MemoryStorage:
     def __init__(self) -> None:
         self.objects: dict[str, tuple[bytes, str, str | None]] = {}
 
-    async def put(self, key: str, data: bytes, content_type: str, content_encoding: str | None = None) -> None:
+    async def put(
+        self, key: str, data: bytes, content_type: str, content_encoding: str | None = None
+    ) -> None:
         self.objects[key] = (bytes(data), content_type, content_encoding)
 
     async def get(self, key: str) -> bytes | None:
@@ -100,7 +104,9 @@ class S3Storage:
         ) as client:
             yield client
 
-    async def put(self, key: str, data: bytes, content_type: str, content_encoding: str | None = None) -> None:
+    async def put(
+        self, key: str, data: bytes, content_type: str, content_encoding: str | None = None
+    ) -> None:
         extra = {"ContentEncoding": content_encoding} if content_encoding else {}
         async with self._client() as client:
             await client.put_object(Bucket=self.bucket, Key=key, Body=data, ContentType=content_type, **extra)
@@ -170,7 +176,11 @@ def get_storage() -> Storage | None:
     if not (settings.s3_access_key and settings.s3_secret_key and settings.s3_endpoint):
         return None
     return S3Storage(
-        settings.s3_endpoint, settings.s3_bucket, settings.s3_access_key, settings.s3_secret_key, settings.s3_region
+        settings.s3_endpoint,
+        settings.s3_bucket,
+        settings.s3_access_key,
+        settings.s3_secret_key,
+        settings.s3_region,
     )
 
 

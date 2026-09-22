@@ -15,7 +15,13 @@ from pensieve.fetch.parse import ParsedFeed, ParseError, parse_feed
 log = logging.getLogger(__name__)
 
 FEED_LINK_TYPES = frozenset(
-    {"application/rss+xml", "application/atom+xml", "application/feed+json", "application/json", "application/rdf+xml"}
+    {
+        "application/rss+xml",
+        "application/atom+xml",
+        "application/feed+json",
+        "application/json",
+        "application/rdf+xml",
+    }
 )
 WELL_KNOWN_PATHS = ("/feed", "/rss", "/atom.xml", "/feed.xml", "/index.xml", "/rss.xml")
 ICON_RELS = ("icon", "shortcut icon", "apple-touch-icon", "apple-touch-icon-precomposed")
@@ -154,7 +160,11 @@ async def discover(url: str, *, client: httpx.AsyncClient | None = None) -> Disc
             return result
 
         page_url = str(response.url)
-        hints = extract_html_hints(response.content, page_url) if _is_html(response) else HtmlHints([], None, None)
+        hints = (
+            extract_html_hints(response.content, page_url)
+            if _is_html(response)
+            else HtmlHints([], None, None)
+        )
         candidates = list(hints.feeds)
         for path in WELL_KNOWN_PATHS:
             candidate = urljoin(page_url, path)

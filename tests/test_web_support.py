@@ -55,7 +55,11 @@ async def make_user(session: AsyncSession, role: models.UserRole = models.UserRo
 
 
 async def seed_feed(
-    session: AsyncSession, user: models.User, title: str = "Example", folder: models.Folder | None = None, **kw
+    session: AsyncSession,
+    user: models.User,
+    title: str = "Example",
+    folder: models.Folder | None = None,
+    **kw,
 ) -> models.Feed:
     feed = models.Feed(
         user_id=user.id,

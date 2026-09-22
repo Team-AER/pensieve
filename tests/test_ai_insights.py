@@ -205,7 +205,9 @@ async def test_summarize_item_stores_markdown(session, user, gateway):
 
 
 def batch_summaries(indexes):
-    return {"items": [{"index": i, "bullets": [f"b{i}", "x", "y"], "why_it_matters": f"why {i}"} for i in indexes]}
+    return {
+        "items": [{"index": i, "bullets": [f"b{i}", "x", "y"], "why_it_matters": f"why {i}"} for i in indexes]
+    }
 
 
 async def test_summarize_items_batches_and_skips_story_duplicates(session, user, gateway):
@@ -252,7 +254,9 @@ async def test_summarize_items_batches_and_skips_story_duplicates(session, user,
         for r in (await session.scalars(select(models.ItemAI).where(models.ItemAI.user_id == user.id))).all()
     }
     assert dupe_b.id not in rows and rows[already.id].summary == "- old\n"
-    assert rows[dupe_a.id].summary.startswith("- b") and "**Why this matters to you**" in rows[dupe_a.id].summary
+    assert (
+        rows[dupe_a.id].summary.startswith("- b") and "**Why this matters to you**" in rows[dupe_a.id].summary
+    )
     assert rows[solo[0].id].tags == [] and rows[solo[0].id].prompt_version == ""
     # the story is covered now: a member arriving later is not summarised again
     late = make_item(feed_b, "Same story, third copy", "text", age=timedelta(hours=6))
@@ -262,7 +266,10 @@ async def test_summarize_items_batches_and_skips_story_duplicates(session, user,
     await session.commit()
     assert await insights.summarize_items(session, user, [late]) == {} and calls == [4, 2]
     req = gateway.chat_requests[0]
-    assert req.headers["X-Workflow"] == "summarize_items" and gateway.chat_calls[0]["model"] == settings.llm_fast_model
+    assert (
+        req.headers["X-Workflow"] == "summarize_items"
+        and gateway.chat_calls[0]["model"] == settings.llm_fast_model
+    )
 
 
 async def test_summarize_items_retries_entries_the_model_missed(session, user, gateway):
@@ -324,13 +331,21 @@ async def test_summary_prefs_shape_the_prompt_and_the_markdown(session, user, ga
     assert "exactly five crisp bullets" in call["messages"][0]["content"]
     assert "why_it_matters to an empty string" in call["messages"][0]["content"]
     assert "homelab and self-hosting" in call["messages"][1]["content"]
-    assert call["response_format"]["json_schema"]["schema"]["properties"]["items"]["items"]["properties"]["bullets"]["minItems"] == 5
+    assert (
+        call["response_format"]["json_schema"]["schema"]["properties"]["items"]["items"]["properties"][
+            "bullets"
+        ]["minItems"]
+        == 5
+    )
     # the general mode ignores the profile for the why, and the why is kept
     user.settings = {"summaries": {"why": "general"}}
     gateway.chat({"bullets": ["a", "b", "c"], "why_it_matters": "matters"})
     md = await insights.summarize_item(session, user, item)
     assert md.endswith("**Why this matters to you**\n\nmatters\n")
-    assert "technical reader in general (ignore the reader profile" in gateway.chat_calls[-1]["messages"][0]["content"]
+    assert (
+        "technical reader in general (ignore the reader profile"
+        in gateway.chat_calls[-1]["messages"][0]["content"]
+    )
 
 
 async def test_items_without_summary_is_story_aware(session, user, gateway):
@@ -356,8 +371,15 @@ async def test_items_without_summary_is_story_aware(session, user, gateway):
     await session.commit()
     ids = await insights.items_without_summary(session, user.id, now() - timedelta(days=1))
     assert ids == [open_a.id]  # the twin's story is covered; one member per open story; old is out of range
-    assert await insights.items_without_summary(session, user.id, now() - timedelta(days=1), until=now() - timedelta(hours=3, minutes=30)) == [open_b.id]
-    assert await insights.items_without_summary(session, user.id, now() - timedelta(days=1), until=now() - timedelta(hours=4, minutes=30)) == []
+    assert await insights.items_without_summary(
+        session, user.id, now() - timedelta(days=1), until=now() - timedelta(hours=3, minutes=30)
+    ) == [open_b.id]
+    assert (
+        await insights.items_without_summary(
+            session, user.id, now() - timedelta(days=1), until=now() - timedelta(hours=4, minutes=30)
+        )
+        == []
+    )
 
 
 async def test_digest_without_embeddings_ranks_by_open_rate_and_tags(session, user, gateway):
@@ -380,7 +402,10 @@ async def test_digest_without_embeddings_ranks_by_open_rate_and_tags(session, us
     row = await insights.daily_digest(session, user, today())
     body = row.body
     skipped = set(body["safe_to_skip"]["item_ids"])
-    assert {str(w["fresh_noise"].id), str(dull_fresh.id)} <= skipped  # low open-rate feeds land in safe_to_skip
+    assert {
+        str(w["fresh_noise"].id),
+        str(dull_fresh.id),
+    } <= skipped  # low open-rate feeds land in safe_to_skip
     top_ids = [s["item_id"] for s in body["top_stories"]]
     assert top_ids[0] == str(w["fresh_good"].id) and str(dull_fresh.id) not in top_ids
     affinities = {s["item_id"]: s["affinity"] for s in body["top_stories"]}

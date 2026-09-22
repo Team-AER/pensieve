@@ -96,7 +96,9 @@ async def import_opml(session: AsyncSession, user: User, xml: bytes) -> ImportRe
     settings = get_settings()
 
     existing_urls = set((await session.scalars(select(Feed.url).where(Feed.user_id == user.id))).all())
-    folders = {f.name: f for f in (await session.scalars(select(Folder).where(Folder.user_id == user.id))).all()}
+    folders = {
+        f.name: f for f in (await session.scalars(select(Folder).where(Folder.user_id == user.id))).all()
+    }
     next_position = max((f.position for f in folders.values()), default=-1) + 1
 
     for outline in outlines:
@@ -143,7 +145,12 @@ async def import_opml(session: AsyncSession, user: User, xml: bytes) -> ImportRe
 
 
 def _feed_outline(parent: ET.Element, feed: Feed) -> None:
-    attrs = {"type": "rss", "text": feed.title or feed.url, "title": feed.title or feed.url, "xmlUrl": feed.url}
+    attrs = {
+        "type": "rss",
+        "text": feed.title or feed.url,
+        "title": feed.title or feed.url,
+        "xmlUrl": feed.url,
+    }
     if feed.site_url:
         attrs["htmlUrl"] = feed.site_url
     ET.SubElement(parent, "outline", attrs)

@@ -202,13 +202,20 @@ async def file_feed(
         if target is None and confidence >= AUTO_FILE_CONFIDENCE:
             try:
                 async with session.begin_nested():
-                    target = models.Folder(user_id=user.id, name=name, position=len(folders), ai_suggested=True)
+                    target = models.Folder(
+                        user_id=user.id, name=name, position=len(folders), ai_suggested=True
+                    )
                     session.add(target)
                     await session.flush()
             except IntegrityError:
                 target = await _folder_named(session, user.id, name)
         elif target is None:
-            log.info("file_feed: proposed new folder %r for feed %s at %.2f; not created", name, feed.id, confidence)
+            log.info(
+                "file_feed: proposed new folder %r for feed %s at %.2f; not created",
+                name,
+                feed.id,
+                confidence,
+            )
     if target is None:
         feed.suggested_folder_id = None
         feed.suggested_folder_confidence = confidence
@@ -225,7 +232,9 @@ async def file_feed(
 
 async def _folder_named(session: AsyncSession, user_id: uuid.UUID, name: str) -> models.Folder | None:
     return await session.scalar(
-        select(models.Folder).where(models.Folder.user_id == user_id, func.lower(models.Folder.name) == name.lower())
+        select(models.Folder).where(
+            models.Folder.user_id == user_id, func.lower(models.Folder.name) == name.lower()
+        )
     )
 
 
@@ -392,7 +401,10 @@ async def tag_items(
         rows = (
             await session.scalars(
                 select(models.ItemAI)
-                .where(models.ItemAI.user_id == user.id, models.ItemAI.item_id.in_([v["item_id"] for v in values]))
+                .where(
+                    models.ItemAI.user_id == user.id,
+                    models.ItemAI.item_id.in_([v["item_id"] for v in values]),
+                )
                 .execution_options(populate_existing=True)
             )
         ).all()

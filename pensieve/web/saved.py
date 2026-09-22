@@ -46,8 +46,19 @@ ARCHIVE_CSP = (
     "sandbox allow-same-origin allow-popups allow-popups-to-escape-sandbox"
 )
 #: For single blobs (images, fonts, screenshots): never executable, even an SVG opened on its own.
-BLOB_CSP = "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; frame-ancestors 'self'; sandbox"
+BLOB_CSP = (
+    "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; frame-ancestors 'self'; sandbox"
+)
 VIEW_MODES = ("article", "page", "shot", "file")
+
+
+def public_base(request: Request) -> str:
+    """The origin the user reached Pensieve on (behind the proxy), for links they copy into other apps.
+
+    ``PENSIEVE_BASE_URL`` is often the LAN address; a bookmarklet or Shortcut built from it would not work
+    away from home. uvicorn's proxy headers make ``request.base_url`` the public scheme and host.
+    """
+    return str(request.base_url).rstrip("/")
 
 
 def parse_tags(raw: str | list[str] | None) -> list[str]:
@@ -81,7 +92,9 @@ async def save_from_dialog(
     headers = hx_trigger(
         "counts-changed", **{"link-saved": {"id": str(result.item.id), "created": result.created}}
     )
-    return render(request, "partials/save_result.html", {"result": result, "error": None}, user=user, headers=headers)
+    return render(
+        request, "partials/save_result.html", {"result": result, "error": None}, user=user, headers=headers
+    )
 
 
 @router.get("/save")
@@ -134,7 +147,9 @@ async def api_user(request: Request, session: AsyncSession) -> User:
         token = header.split("=", 1)[1].strip()
     user = await user_from_api_token(token, session) if token else None
     if user is None:
-        raise HTTPException(status_code=401, detail="A valid API token is required (Authorization: Bearer <token>)")
+        raise HTTPException(
+            status_code=401, detail="A valid API token is required (Authorization: Bearer <token>)"
+        )
     return user
 
 
@@ -172,7 +187,7 @@ async def api_save(request: Request, session: DB):
         )
     except SaveError as exc:
         return JSONResponse({"error": str(exc)}, status_code=422)
-    base = get_settings().base_url.rstrip("/")
+    base = public_base(request)
     return JSONResponse(
         {
             "id": str(result.item.id),
@@ -200,7 +215,9 @@ async def _owned_item(session: AsyncSession, user: User, item_id: uuid.UUID) -> 
     return pair
 
 
-async def _body(request: Request, session: AsyncSession, user: User, item: Item, feed: Feed, mode: str, **extra):
+async def _body(
+    request: Request, session: AsyncSession, user: User, item: Item, feed: Feed, mode: str, **extra
+):
     from pensieve.web.items import article_context
 
     ctx = await article_context(session, user, item, feed)
@@ -220,7 +237,9 @@ async def archive_view(request: Request, item_id: uuid.UUID, mode: str, user: Cu
 async def capture_poll(request: Request, item_id: uuid.UUID, user: CurrentUser, session: DB):
     """Polled while a capture runs: 204 (keep polling) until it settles, then the refreshed article."""
     item, feed = await _owned_item(session, user, item_id)
-    snap = await session.scalar(select(Snapshot).where(Snapshot.user_id == user.id, Snapshot.item_id == item.id))
+    snap = await session.scalar(
+        select(Snapshot).where(Snapshot.user_id == user.id, Snapshot.item_id == item.id)
+    )
     if snap is not None and snap.status in {"queued", "rendering"}:
         return Response(status_code=204)
     from pensieve.web.items import article_context
@@ -238,7 +257,9 @@ async def recapture(request: Request, item_id: uuid.UUID, user: CsrfUser, sessio
 
     item, feed = await _owned_item(session, user, item_id)
     if not item.url:
-        return await _body(request, session, user, item, feed, "article", error="This item has no link to archive.")
+        return await _body(
+            request, session, user, item, feed, "article", error="This item has no link to archive."
+        )
     try:
         url = normalize_url(item.url)
     except SaveError as exc:
@@ -263,7 +284,9 @@ async def save_item_link(request: Request, item_id: uuid.UUID, user: CsrfUser, s
         return Response(status_code=204, headers=hx_trigger(toast={"text": str(exc)}))
     return Response(
         status_code=204,
-        headers=hx_trigger("counts-changed", **{"link-saved": {"id": str(result.item.id), "created": result.created}}),
+        headers=hx_trigger(
+            "counts-changed", **{"link-saved": {"id": str(result.item.id), "created": result.created}}
+        ),
     )
 
 
@@ -293,7 +316,9 @@ async def _blob(key: str | None) -> bytes:
 
 def _gzip_html(request: Request, data: bytes, headers: dict[str, str]) -> Response:
     if "gzip" in request.headers.get("accept-encoding", "").lower():
-        return Response(data, media_type="text/html; charset=utf-8", headers=headers | {"Content-Encoding": "gzip"})
+        return Response(
+            data, media_type="text/html; charset=utf-8", headers=headers | {"Content-Encoding": "gzip"}
+        )
     return Response(gzip.decompress(data), media_type="text/html; charset=utf-8", headers=headers)
 
 
@@ -304,7 +329,11 @@ PRIVATE_CACHE = {"Cache-Control": "private, max-age=86400", "Vary": "Cookie, Acc
 async def archived_page(request: Request, snapshot_id: uuid.UUID, user: CurrentUser, session: DB):
     snap = await _owned_snapshot(session, user, snapshot_id)
     data = await _blob(snap.page_key)
-    headers = {"Content-Security-Policy": ARCHIVE_CSP, "X-Frame-Options": "SAMEORIGIN", "Referrer-Policy": "no-referrer"}
+    headers = {
+        "Content-Security-Policy": ARCHIVE_CSP,
+        "X-Frame-Options": "SAMEORIGIN",
+        "Referrer-Policy": "no-referrer",
+    }
     return _gzip_html(request, data, headers | PRIVATE_CACHE)
 
 
@@ -313,14 +342,20 @@ async def archived_source(request: Request, snapshot_id: uuid.UUID, user: Curren
     """The server HTML as fetched, shown as text (never rendered)."""
     snap = await _owned_snapshot(session, user, snapshot_id)
     data = gzip.decompress(await _blob(snap.raw_key))
-    return Response(data, media_type="text/plain; charset=utf-8", headers={"Content-Security-Policy": BLOB_CSP} | PRIVATE_CACHE)
+    return Response(
+        data,
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Security-Policy": BLOB_CSP} | PRIVATE_CACHE,
+    )
 
 
 @router.get("/archive/s/{snapshot_id}/shot")
 async def archived_shot(snapshot_id: uuid.UUID, user: CurrentUser, session: DB):
     snap = await _owned_snapshot(session, user, snapshot_id)
     data = await _blob(snap.shot_key)
-    return Response(data, media_type="image/jpeg", headers={"Content-Security-Policy": BLOB_CSP} | PRIVATE_CACHE)
+    return Response(
+        data, media_type="image/jpeg", headers={"Content-Security-Policy": BLOB_CSP} | PRIVATE_CACHE
+    )
 
 
 @router.get("/archive/s/{snapshot_id}/file")
@@ -369,18 +404,22 @@ SAVING_FLASH = {
 
 async def saving_stats(session: AsyncSession, user: User) -> dict:
     saved = await session.scalar(
-        select(func.count(Item.id)).join(Feed, Feed.id == Item.feed_id).where(
-            Feed.user_id == user.id, Feed.kind == FEED_KIND_SAVED
-        )
+        select(func.count(Item.id))
+        .join(Feed, Feed.id == Item.feed_id)
+        .where(Feed.user_id == user.id, Feed.kind == FEED_KIND_SAVED)
     )
     by_status = dict(
         (
             await session.execute(
-                select(Snapshot.status, func.count()).where(Snapshot.user_id == user.id).group_by(Snapshot.status)
+                select(Snapshot.status, func.count())
+                .where(Snapshot.user_id == user.id)
+                .group_by(Snapshot.status)
             )
         ).all()
     )
-    snap_bytes = await session.scalar(select(func.coalesce(func.sum(Snapshot.bytes_total), 0)).where(Snapshot.user_id == user.id))
+    snap_bytes = await session.scalar(
+        select(func.coalesce(func.sum(Snapshot.bytes_total), 0)).where(Snapshot.user_id == user.id)
+    )
     return {
         "saved": int(saved or 0),
         "done": int(by_status.get("done", 0)),
@@ -398,15 +437,24 @@ def bookmarklet(base_url: str) -> str:
     )
 
 
-async def _saving_page(request: Request, session: AsyncSession, user: User, new_token: str | None = None, error: str | None = None):
+async def _saving_page(
+    request: Request,
+    session: AsyncSession,
+    user: User,
+    new_token: str | None = None,
+    error: str | None = None,
+):
     from pensieve.archive.storage import get_storage
     from pensieve.web.manage import page
 
     settings = get_settings()
-    base = str(request.base_url).rstrip("/") if settings.debug else settings.base_url.rstrip("/")
+    base = public_base(request)
     failed = list(
         await session.scalars(
-            select(Snapshot).where(Snapshot.user_id == user.id, Snapshot.status == "failed").order_by(Snapshot.updated_at.desc()).limit(8)
+            select(Snapshot)
+            .where(Snapshot.user_id == user.id, Snapshot.status == "failed")
+            .order_by(Snapshot.updated_at.desc())
+            .limit(8)
         )
     )
     ctx = {
@@ -447,7 +495,12 @@ async def saving_settings(
 async def saving_token(request: Request, user: CsrfUser, session: DB, label: Annotated[str, Form()] = ""):
     plaintext = generate_api_token()
     session.add(
-        ApiToken(user_id=user.id, label=(label.strip() or "Save from my phone")[:120], kind="web", token_hash=hash_api_token(plaintext))
+        ApiToken(
+            user_id=user.id,
+            label=(label.strip() or "Save from my phone")[:120],
+            kind="web",
+            token_hash=hash_api_token(plaintext),
+        )
     )
     await session.commit()
     return await _saving_page(request, session, user, new_token=plaintext)
@@ -467,14 +520,18 @@ async def saving_import(request: Request, user: CsrfUser, session: DB, file: Ann
         links = []
     if not links:
         return await _saving_page(
-            request, session, user,
+            request,
+            session,
+            user,
             error="No links found. Use Pocket's export (HTML or CSV), Instapaper's CSV, or a browser bookmarks file.",
         )
     try:
         await queue.enqueue(queue.CAPTURE_IMPORT, str(user.id), [link.as_job() for link in links])
     except Exception as exc:  # noqa: BLE001
         log.warning("could not enqueue import: %s", exc)
-        return await _saving_page(request, session, user, error="The background queue is unavailable right now.")
+        return await _saving_page(
+            request, session, user, error="The background queue is unavailable right now."
+        )
     return RedirectResponse("/manage/saving?msg=import_started", status_code=303)
 
 

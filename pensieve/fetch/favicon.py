@@ -35,7 +35,12 @@ def _candidates(feed: Feed) -> list[str]:
 
 
 def _looks_like_image(content_type: str, body: bytes) -> bool:
-    if body[:4] == b"\x89PNG" or body[:3] == b"GIF" or body[:2] == b"\xff\xd8" or body[:4] == b"\x00\x00\x01\x00":
+    if (
+        body[:4] == b"\x89PNG"
+        or body[:3] == b"GIF"
+        or body[:2] == b"\xff\xd8"
+        or body[:4] == b"\x00\x00\x01\x00"
+    ):
         return True
     if body[:4] == b"RIFF" and body[8:12] == b"WEBP":
         return True
@@ -67,7 +72,9 @@ async def fetch_favicon(feed: Feed, *, client: httpx.AsyncClient | None = None) 
     return None
 
 
-async def refresh_feed_icon(session: AsyncSession, feed: Feed, *, client: httpx.AsyncClient | None = None) -> bool:
+async def refresh_feed_icon(
+    session: AsyncSession, feed: Feed, *, client: httpx.AsyncClient | None = None
+) -> bool:
     """Best effort: store the feed's favicon bytes on the row. Never raises."""
     try:
         found = await fetch_favicon(feed, client=client)

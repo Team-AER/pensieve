@@ -31,7 +31,9 @@ def test_parse_rss():
     assert first.published_at.tzinfo is not None
     assert "<script" not in first.content_html and "onclick" not in first.content_html
     assert 'href="https://example.com/x"' in first.content_html
-    assert 'rel="noopener noreferrer nofollow"' in first.content_html and 'target="_blank"' in first.content_html
+    assert (
+        'rel="noopener noreferrer nofollow"' in first.content_html and 'target="_blank"' in first.content_html
+    )
     assert first.content_text == "Hello link"
     assert first.summary == "Short summary"
     assert first.enclosure_url == "https://example.com/ep1.mp3" and first.enclosure_type == "audio/mpeg"
@@ -94,7 +96,9 @@ def test_parse_rss10_rdf():
 
 def test_published_falls_back_to_now():
     before = datetime.now(UTC)
-    feed = parse_feed(b'<rss version="2.0"><channel><title>t</title><item><title>x</title></item></channel></rss>')
+    feed = parse_feed(
+        b'<rss version="2.0"><channel><title>t</title><item><title>x</title></item></channel></rss>'
+    )
     entry = feed.entries[0]
     assert entry.published_at.tzinfo is UTC
     assert entry.published_at >= before
@@ -117,7 +121,7 @@ def test_sanitizer_strips_dangerous_content():
         '<a href="https://ok.example/">ok</a>'
         '<img src="data:image/png;base64,AAAA"><img src="data:text/html;base64,AAAA">'
         '<img src="https://ok.example/a.png" onerror="x()">'
-        "<pre><code>x &lt; y</code></pre><table><tr><td colspan=\"2\">c</td></tr></table>"
+        '<pre><code>x &lt; y</code></pre><table><tr><td colspan="2">c</td></tr></table>'
         '<video controls src="https://ok.example/v.mp4"></video></div>'
     )
     out = sanitize_html(raw)

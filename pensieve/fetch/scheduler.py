@@ -69,7 +69,9 @@ def _prunable_items(cutoff: datetime):
     noted = exists().where(Note.item_id == Item.id)
     canonical = exists().where(Cluster.canonical_item_id == Item.id)
     in_insight = exists().where(Item.id == any_(Insight.item_refs))
-    saved = exists().where(Feed.id == Item.feed_id, Feed.kind == FEED_KIND_SAVED)  # saved links are kept for good
+    saved = exists().where(
+        Feed.id == Item.feed_id, Feed.kind == FEED_KIND_SAVED
+    )  # saved links are kept for good
     return Item.published_at < cutoff, ~starred, ~noted, ~canonical, ~in_insight, ~saved
 
 

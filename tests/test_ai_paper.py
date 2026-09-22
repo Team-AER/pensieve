@@ -1,4 +1,3 @@
-
 from datetime import timedelta
 
 import pytest
@@ -74,7 +73,10 @@ async def test_compile_groups_stories_into_tag_sections(session, user):
     assert story["summary"].startswith("- s3") and story["summary_item_id"] == str(w["s3"].id)
     assert story["tags"][0] == "ai" and {f["title"] for f in story["feeds"]} == {"Alpha", "Beta", "Gamma"}
     assert [s["read"] for s in ai["stories"]].count(True) == 1
-    assert secs["other"]["stories"][0]["item_id"] == str(w["untagged"].id) and secs["other"]["title"] == "Everything else"
+    assert (
+        secs["other"]["stories"][0]["item_id"] == str(w["untagged"].id)
+        and secs["other"]["title"] == "Everything else"
+    )
     assert all(not s["folded"] for s in ai["stories"]) and ai["brief"] == []
 
 
@@ -120,7 +122,10 @@ async def test_compile_folder_sections_window_and_muted(session, user):
     body = await paper.compile_paper(session, user, paper.today())
     secs = section_map(body)
     assert secs["tech"]["title"] == "Tech" and secs["tech"]["kind"] == "folder"
-    assert {s["item_id"] for s in secs["tech"]["stories"]} >= {str(w["ai1"].id), str(w["old"].id)}  # 48h window
+    assert {s["item_id"] for s in secs["tech"]["stories"]} >= {
+        str(w["ai1"].id),
+        str(w["old"].id),
+    }  # 48h window
     assert body["window"]["hours"] == 48
     user.settings = {"paper": {"muted_feeds": [str(w["c"].id)]}}
     body = await paper.compile_paper(session, user, paper.today())
@@ -145,8 +150,20 @@ async def test_daily_paper_stores_edition_and_keeps_prunes(session, user):
 
 
 def test_paper_config_normalises_and_reads_forms():
-    cfg = paper.paper_config(models.User(settings={"paper": {"window_hours": "50", "per_section": 999, "sections": [{"key": "AI", "limit": "3"}, {"key": "ai"}, "junk"]}}))
-    assert cfg["window_hours"] == 48 and cfg["per_section"] == paper.MAX_PER_SECTION and cfg["min_sources"] == 1
+    cfg = paper.paper_config(
+        models.User(
+            settings={
+                "paper": {
+                    "window_hours": "50",
+                    "per_section": 999,
+                    "sections": [{"key": "AI", "limit": "3"}, {"key": "ai"}, "junk"],
+                }
+            }
+        )
+    )
+    assert (
+        cfg["window_hours"] == 48 and cfg["per_section"] == paper.MAX_PER_SECTION and cfg["min_sources"] == 1
+    )
     assert cfg["sections"] == [{"key": "ai", "on": True, "limit": 3}] and cfg["group_by"] == "tag"
     assert paper.paper_config(None)["show_summaries"] is True
 
@@ -161,9 +178,14 @@ def test_paper_config_normalises_and_reads_forms():
     out = paper.config_from_form(form, paper.paper_config(None))
     assert out["group_by"] == "folder" and out["window_hours"] == 72 and out["per_section"] == 5
     assert out["hide_read"] is True and out["show_summaries"] is False and out["auto_sections"] is False
-    assert out["sections"] == [{"key": "apple", "on": False, "limit": None}, {"key": "ai", "on": True, "limit": 4}]
+    assert out["sections"] == [
+        {"key": "apple", "on": False, "limit": None},
+        {"key": "ai", "on": True, "limit": 4},
+    ]
     assert out["muted_feeds"] == ["11111111-1111-1111-1111-111111111111"]
-    assert paper.section_title("data-engineering") == "Data Engineering" and paper.section_title("ios") == "iOS"
+    assert (
+        paper.section_title("data-engineering") == "Data Engineering" and paper.section_title("ios") == "iOS"
+    )
 
 
 async def test_tuning_ranks_briefs_and_orders_auto_sections(session, user):
@@ -177,8 +199,13 @@ async def test_tuning_ranks_briefs_and_orders_auto_sections(session, user):
     story = next(s for s in ai["stories"] if s["key"] == f"c:{w['cluster'].id}")
     # business carries 0.61 of the story's 1.72 tag weight: -3 * 0.355 + mean(-1, 1, -1)
     assert story["boost"] == -1.4 and story["sources"] == 3
-    assert [s["item_id"] for s in ai["stories"]][:2] == [str(w["ai2"].id), str(w["ai3"].id)]  # newest first on a tie
-    assert ai["stories"][2]["key"] == f"c:{w['cluster'].id}" and [s["item_id"] for s in ai["brief"]] == [str(w["ai1"].id)]
+    assert [s["item_id"] for s in ai["stories"]][:2] == [
+        str(w["ai2"].id),
+        str(w["ai3"].id),
+    ]  # newest first on a tie
+    assert ai["stories"][2]["key"] == f"c:{w['cluster'].id}" and [s["item_id"] for s in ai["brief"]] == [
+        str(w["ai1"].id)
+    ]
     # with min_sources=2 the story's effective 0.44 sources send it to "In brief"; the boosted singles stay out
     feeds = {str(w["a"].id): -3, str(w["b"].id): 1.5, str(w["c"].id): -3}
     user.settings = {"paper": {"min_sources": 2, "tuning": {"tags": {"business": -3}, "feeds": feeds}}}
@@ -197,11 +224,25 @@ def test_tuning_config_apply_and_summary():
     story = {"title": "t", "item_id": "x", "tag": "ai", "tags": ["ai", "business"],
              "tag_weight": {"ai": 0.9, "business": 0.3},
              "feeds": [{"id": "11111111-1111-1111-1111-111111111111", "title": "Alpha"}]}  # fmt: skip
-    cfg = paper.paper_config(models.User(settings={"paper": {"tuning": {"tags": {"AI ": "2.5", "x": "nan", "y": 0}, "feeds": {"bad": 1, "11111111-1111-1111-1111-111111111111": 9}}}}))
+    cfg = paper.paper_config(
+        models.User(
+            settings={
+                "paper": {
+                    "tuning": {
+                        "tags": {"AI ": "2.5", "x": "nan", "y": 0},
+                        "feeds": {"bad": 1, "11111111-1111-1111-1111-111111111111": 9},
+                    }
+                }
+            }
+        )
+    )
     assert cfg["tuning"] == {"tags": {"ai": 2.5}, "feeds": {"11111111-1111-1111-1111-111111111111": 3.0}}
     assert paper.story_boost(story, cfg["tuning"]) == 5.5
     more = paper.apply_tune(cfg, story, "more")
-    assert more["tuning"]["tags"]["ai"] == 3.0 and more["tuning"]["feeds"]["11111111-1111-1111-1111-111111111111"] == 3.0
+    assert (
+        more["tuning"]["tags"]["ai"] == 3.0
+        and more["tuning"]["feeds"]["11111111-1111-1111-1111-111111111111"] == 3.0
+    )
     less = paper.apply_tune(paper.paper_config(None), story, "less")
     assert less["tuning"] == {"tags": {"ai": -1.0}, "feeds": {"11111111-1111-1111-1111-111111111111": -0.5}}
     assert paper.tune_summary(less, story) == "AI -1 · Alpha -0.5"

@@ -46,6 +46,7 @@ def static_url(path: str) -> str:
     """``/static/<path>?v=<STATIC_VERSION>`` so the browser and the service worker pick up new builds."""
     return f"/static/{path.lstrip('/')}?v={STATIC_VERSION}"
 
+
 # ---------------------------------------------------------------------------
 # Filters and helpers
 # ---------------------------------------------------------------------------
@@ -184,13 +185,15 @@ def highlight(text: str | None, query: str | None) -> Markup:
     escaped = escape(text or "")
     tokens: list[str] = []
     for raw in re.findall(r'"([^"]+)"|(\S+)', query or ""):
-        term = (raw[0] or raw[1]).strip('"\'')
+        term = (raw[0] or raw[1]).strip("\"'")
         if not term or term.startswith("-") or term.lower() in _QUERY_NOISE:
             continue
         tokens.extend(t for t in term.split() if len(t) > 1)
     if not tokens:
         return Markup(escaped)
-    pattern = re.compile("|".join(re.escape(t) for t in sorted(set(tokens), key=len, reverse=True)), re.IGNORECASE)
+    pattern = re.compile(
+        "|".join(re.escape(t) for t in sorted(set(tokens), key=len, reverse=True)), re.IGNORECASE
+    )
     marked = pattern.sub(lambda m: f"<mark>{m.group(0)}</mark>", str(escaped))
     return Markup(marked)
 

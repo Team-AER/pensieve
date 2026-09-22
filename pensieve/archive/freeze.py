@@ -23,9 +23,34 @@ ASSET_PREFIX = "/archive/a/"
 
 _CSS_URL_RE = re.compile(r"""url\(\s*(['"]?)([^'")]+?)\1\s*\)""", re.IGNORECASE)
 _CSS_IMPORT_RE = re.compile(r"""@import\s+(?:url\(\s*)?['"]?([^'")\s;]+)['"]?\s*\)?([^;]*);""", re.IGNORECASE)
-_STRIP_TAGS = ("script", "noscript", "template", "object", "embed", "applet", "frameset", "frame", "base", "portal")
-_DROP_LINK_RELS = {"preload", "prefetch", "modulepreload", "preconnect", "dns-prefetch", "manifest", "prerender",
-                   "icon", "shortcut", "apple-touch-icon", "mask-icon", "alternate", "canonical", "amphtml"}
+_STRIP_TAGS = (
+    "script",
+    "noscript",
+    "template",
+    "object",
+    "embed",
+    "applet",
+    "frameset",
+    "frame",
+    "base",
+    "portal",
+)
+_DROP_LINK_RELS = {
+    "preload",
+    "prefetch",
+    "modulepreload",
+    "preconnect",
+    "dns-prefetch",
+    "manifest",
+    "prerender",
+    "icon",
+    "shortcut",
+    "apple-touch-icon",
+    "mask-icon",
+    "alternate",
+    "canonical",
+    "amphtml",
+}
 _URL_ATTRS = ("href", "src", "action", "formaction", "poster", "cite", "background")
 IMAGE_TYPES = ("image/",)
 FONT_TYPES = ("font/", "application/font", "application/x-font", "application/vnd.ms-fontobject")
@@ -66,7 +91,11 @@ def _srcset_best(value: str | None, base: str) -> str | None:
 def css_refs(css: str, base: str) -> tuple[list[str], list[str]]:
     """(url() references, @import targets) of a stylesheet, absolute."""
     imports = [u for u in (absolute(m.group(1), base) for m in _CSS_IMPORT_RE.finditer(css)) if u]
-    urls = [u for u in (absolute(m.group(2), base) for m in _CSS_URL_RE.finditer(_CSS_IMPORT_RE.sub("", css))) if u]
+    urls = [
+        u
+        for u in (absolute(m.group(2), base) for m in _CSS_URL_RE.finditer(_CSS_IMPORT_RE.sub("", css)))
+        if u
+    ]
     return urls, imports
 
 
@@ -124,7 +153,11 @@ def collect_refs(dom_html: str, base: str, resources: dict[str, Resource]) -> li
 
 def _is_asset(resource: Resource) -> bool:
     ct = resource.content_type
-    return ct.startswith(IMAGE_TYPES) or ct.startswith(FONT_TYPES) or ct in {"application/octet-stream", "binary/octet-stream"}
+    return (
+        ct.startswith(IMAGE_TYPES)
+        or ct.startswith(FONT_TYPES)
+        or ct in {"application/octet-stream", "binary/octet-stream"}
+    )
 
 
 class Freezer:
@@ -161,7 +194,9 @@ class Freezer:
 
         def _url(m: re.Match) -> str:
             raw = m.group(2)
-            if raw.startswith(("data:", ASSET_PREFIX)):  # already local (a <link> turned <style>, or inline data)
+            if raw.startswith(
+                ("data:", ASSET_PREFIX)
+            ):  # already local (a <link> turned <style>, or inline data)
                 return m.group(0)
             local = self.asset_url(absolute(raw, base))
             return f'url("{local}")' if local else "url()"
@@ -208,7 +243,14 @@ class Freezer:
         for el in tree.iter(etree.Element):
             for attr in list(el.attrib):
                 lower = attr.lower()
-                if lower.startswith("on") or lower in {"srcset", "sizes", "integrity", "nonce", "ping", "autofocus"}:
+                if lower.startswith("on") or lower in {
+                    "srcset",
+                    "sizes",
+                    "integrity",
+                    "nonce",
+                    "ping",
+                    "autofocus",
+                }:
                     del el.attrib[attr]
             if "style" in el.attrib:
                 el.set("style", self.rewrite_css(el.get("style"), base))

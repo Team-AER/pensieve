@@ -35,12 +35,19 @@ def test_find_url_reads_share_sheet_payloads():
 def test_freeze_strips_active_content_and_inlines_styles():
     base = "https://s.example.com/p/1"
     resources = {
-        "https://s.example.com/a.css": Resource("https://s.example.com/a.css", "text/css",
-                                                b"@import url(b.css) screen; .x{background:url('../img/bg.png')}"),
-        "https://s.example.com/b.css": Resource("https://s.example.com/b.css", "text/css", b".b{color:blue;src:url(f.woff2)}"),
+        "https://s.example.com/a.css": Resource(
+            "https://s.example.com/a.css",
+            "text/css",
+            b"@import url(b.css) screen; .x{background:url('../img/bg.png')}",
+        ),
+        "https://s.example.com/b.css": Resource(
+            "https://s.example.com/b.css", "text/css", b".b{color:blue;src:url(f.woff2)}"
+        ),
         "https://s.example.com/img/bg.png": Resource("https://s.example.com/img/bg.png", "image/png", PNG),
         "https://s.example.com/f.woff2": Resource("https://s.example.com/f.woff2", "font/woff2", b"wOF2..."),
-        "https://s.example.com/p/pic.jpg": Resource("https://s.example.com/p/pic.jpg", "image/jpeg", b"\xff\xd8jpeg"),
+        "https://s.example.com/p/pic.jpg": Resource(
+            "https://s.example.com/p/pic.jpg", "image/jpeg", b"\xff\xd8jpeg"
+        ),
     }
     dom = """<html><head><link rel="stylesheet" href="/a.css"><script>x()</script><meta http-equiv="refresh" content="0;url=/">
     <base href="https://evil.example/"></head><body onclick="y()"><img src="pic.jpg" srcset="pic-2x.jpg 2x">
@@ -49,7 +56,16 @@ def test_freeze_strips_active_content_and_inlines_styles():
     </body></html>"""
     f = Freezer(resources)
     out = f.freeze(dom, base, original_url=base, captured_at=datetime(2026, 9, 23, tzinfo=UTC))
-    for bad in ("<script", "onclick", "onfocus", "http-equiv", "<base", "<object", 'action="/login"', "srcset"):
+    for bad in (
+        "<script",
+        "onclick",
+        "onfocus",
+        "http-equiv",
+        "<base",
+        "<object",
+        'action="/login"',
+        "srcset",
+    ):
         assert bad not in out, bad
     assert ".b{color:blue" in out and "@media screen" in out  # @import inlined with its media query
     assert 'href="https://s.example.com/p/rel/link"' in out and 'target="_blank"' in out
@@ -61,7 +77,12 @@ def test_freeze_strips_active_content_and_inlines_styles():
 def test_collect_refs_finds_what_the_browser_missed():
     dom = '<html><head><link rel="stylesheet" href="/s.css"><style>@import "t.css"; a{b:url(i.png)}</style></head><body><img src="p.png"><div style="background:url(q.png)"></div></body></html>'
     wanted = collect_refs(dom, "https://e.org/x/", {"https://e.org/x/p.png": Resource("", "image/png", b"")})
-    assert set(wanted) == {"https://e.org/s.css", "https://e.org/x/t.css", "https://e.org/x/i.png", "https://e.org/x/q.png"}
+    assert set(wanted) == {
+        "https://e.org/s.css",
+        "https://e.org/x/t.css",
+        "https://e.org/x/i.png",
+        "https://e.org/x/q.png",
+    }
     assert css_refs("a{b:url(data:image/png;base64,xx)}", "https://e.org/") == ([], [])
 
 
@@ -77,13 +98,24 @@ def test_parse_pocket_instapaper_and_bookmarks_exports():
     assert links["https://b.org/1"].tags == ["a", "b"] and links["https://b.org/2"].read
     insta = b"URL,Title,Selection,Folder,Timestamp\nhttps://c.org/1,C,,Unread,1700000000\nhttps://c.org/2,D,,Archive,1700000002\nhttps://c.org/3,E,,Starred,1\n"
     links = {link.url: link for link in parse_export("instapaper-export.csv", insta)}
-    assert not links["https://c.org/1"].read and links["https://c.org/2"].read and links["https://c.org/3"].starred
+    assert (
+        not links["https://c.org/1"].read
+        and links["https://c.org/2"].read
+        and links["https://c.org/3"].starred
+    )
     netscape = b'<!DOCTYPE NETSCAPE-Bookmark-file-1><DL><DT><A HREF="https://d.org/" ADD_DATE="1700000000" TAGS="x">D</A><DT><A HREF="place:x">no</A></DL>'
     assert [link.url for link in parse_export("bookmarks.html", netscape)] == ["https://d.org/"]
 
 
 async def test_save_link_is_idempotent_and_scoped(session, user, fake_queue):
-    first = await save.save_link(session, user, "https://example.com/a?utm_medium=rss", title="A", tags=["Rust", " rust "], note="for later")
+    first = await save.save_link(
+        session,
+        user,
+        "https://example.com/a?utm_medium=rss",
+        title="A",
+        tags=["Rust", " rust "],
+        note="for later",
+    )
     assert first.created and first.item.url == "https://example.com/a" and first.item.title == "A"
     feed = await session.get(models.Feed, first.item.feed_id)
     assert feed.kind == models.FEED_KIND_SAVED and feed.paused and feed.next_fetch_at is None
@@ -95,7 +127,10 @@ async def test_save_link_is_idempotent_and_scoped(session, user, fake_queue):
     assert not again.created and again.item.id == first.item.id
     await session.refresh(state)
     assert state.tags == ["later", "rust"] and not state.is_read  # back on My list
-    assert await session.scalar(select(func.count()).select_from(models.Feed).where(models.Feed.kind == "saved")) == 1
+    assert (
+        await session.scalar(select(func.count()).select_from(models.Feed).where(models.Feed.kind == "saved"))
+        == 1
+    )
     assert await session.scalar(select(func.count()).select_from(models.Note)) == 1
     # Still queued: re-saving hands arq the same job id again (it keeps one), never a second capture.
     assert {c[2] for c in fake_queue if c[0] == "capture_page"} == {f"capture_page:{first.snapshot.id}"}
@@ -118,7 +153,9 @@ async def test_save_link_refuses_private_addresses(session, user, fake_queue, mo
 async def test_saved_links_survive_retention_and_join_the_history_pool(session, user, fake_queue):
     from pensieve.ai.memory import _history_pool
 
-    result = await save.save_link(session, user, "https://example.com/old", saved_at=datetime.now(UTC) - timedelta(days=3000))
+    result = await save.save_link(
+        session, user, "https://example.com/old", saved_at=datetime.now(UTC) - timedelta(days=3000)
+    )
     assert result.item.published_at < datetime.now(UTC) - timedelta(days=2000)
     assert await prune_old_items(session) == 0
     assert result.item.id in await _history_pool(session, user.id)  # unread, but deliberately saved
@@ -131,7 +168,9 @@ async def test_sweep_trickles_waiting_captures(session, user, fake_queue):
     table = models.Snapshot.__table__
     await session.execute(table.update().values(updated_at=old))
     stuck_id = await session.scalar(select(models.Snapshot.id).limit(1))
-    await session.execute(table.update().where(table.c.id == stuck_id).values(status="rendering", attempts=3, updated_at=old))
+    await session.execute(
+        table.update().where(table.c.id == stuck_id).values(status="rendering", attempts=3, updated_at=old)
+    )
     await session.commit()
     retry, failed = await save.stale_captures(session, room=2)
     assert failed == 1 and len(retry) == 2

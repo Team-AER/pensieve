@@ -88,7 +88,9 @@ def _uuid7() -> uuid.UUID:
 
 
 class TimestampMixin:
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
     )
@@ -111,7 +113,9 @@ class User(TimestampMixin, Base):
     email: Mapped[str] = mapped_column(String(320), unique=True, nullable=False)
     display_name: Mapped[str] = mapped_column(String(120), nullable=False, default="")
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-    role: Mapped[UserRole] = mapped_column(Enum(UserRole, name="user_role"), default=UserRole.reader, nullable=False)
+    role: Mapped[UserRole] = mapped_column(
+        Enum(UserRole, name="user_role"), default=UserRole.reader, nullable=False
+    )
     ai_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     settings: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     """Free-form per-user settings: theme, density, digest_time, keyboard layout, ai toggles."""
@@ -126,7 +130,9 @@ class ApiToken(TimestampMixin, Base):
     __tablename__ = "api_tokens"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     label: Mapped[str] = mapped_column(String(120), nullable=False)
     token_hash: Mapped[str] = mapped_column(String(128), unique=True, nullable=False)
     """SHA-256 hex of the plaintext token (kind greader/web). For kind 'fever' it is md5("email:plaintext"),
@@ -149,7 +155,9 @@ class Folder(TimestampMixin, Base):
     __table_args__ = (UniqueConstraint("user_id", "name", name="uq_folder_user_name"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     ai_suggested: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
@@ -173,8 +181,12 @@ class Feed(TimestampMixin, Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    folder_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("folders.id", ondelete="SET NULL"), index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    folder_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("folders.id", ondelete="SET NULL"), index=True
+    )
     url: Mapped[str] = mapped_column(String(2048), nullable=False)
     site_url: Mapped[str | None] = mapped_column(String(2048))
     title: Mapped[str] = mapped_column(String(300), nullable=False, default="")
@@ -186,7 +198,9 @@ class Feed(TimestampMixin, Base):
     position: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     # AI folder suggestion for feeds still in Inbox (folder_id NULL)
-    suggested_folder_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("folders.id", ondelete="SET NULL"))
+    suggested_folder_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("folders.id", ondelete="SET NULL")
+    )
     suggested_folder_name: Mapped[str | None] = mapped_column(String(120))
     """A brand-new folder the filer proposes (no Folder row yet); accepting it creates the folder."""
     suggested_folder_confidence: Mapped[float | None] = mapped_column(Float)
@@ -202,7 +216,9 @@ class Feed(TimestampMixin, Base):
     last_error: Mapped[str | None] = mapped_column(Text)
     paused: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     websub_hub: Mapped[str | None] = mapped_column(String(2048))
-    kind: Mapped[str] = mapped_column(String(16), nullable=False, default=FEED_KIND_RSS, server_default=FEED_KIND_RSS)
+    kind: Mapped[str] = mapped_column(
+        String(16), nullable=False, default=FEED_KIND_RSS, server_default=FEED_KIND_RSS
+    )
     """'rss' (a subscription) or 'saved' (the user's saved links; see pensieve/archive)."""
 
     user: Mapped[User] = relationship(back_populates="feeds")
@@ -216,9 +232,13 @@ class FeedRule(TimestampMixin, Base):
     __tablename__ = "feed_rules"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     feed_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("feeds.id", ondelete="CASCADE"), index=True)
-    field: Mapped[str] = mapped_column(String(20), nullable=False, default="title")  # title | body | author | url
+    field: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="title"
+    )  # title | body | author | url
     pattern: Mapped[str] = mapped_column(String(500), nullable=False)
     is_regex: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     action: Mapped[str] = mapped_column(String(20), nullable=False)  # hide | star | tag | mark_read
@@ -250,7 +270,9 @@ class Item(Base):
     title: Mapped[str] = mapped_column(String(1000), nullable=False, default="")
     author: Mapped[str | None] = mapped_column(String(300))
     published_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     """Set when a known guid's content hash changes and the row is updated in place."""
     content_html: Mapped[str] = mapped_column(Text, nullable=False, default="")
@@ -319,7 +341,9 @@ class Tag(TimestampMixin, Base):
     __table_args__ = (UniqueConstraint("user_id", "name", name="uq_tag_user_name"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     kind: Mapped[str] = mapped_column(String(10), nullable=False, default="ai")  # ai | user
     description: Mapped[str] = mapped_column(String(300), nullable=False, default="")
@@ -330,8 +354,12 @@ class Note(TimestampMixin, Base):
     __tablename__ = "notes"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    item_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("items.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("items.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     quote: Mapped[str] = mapped_column(Text, nullable=False, default="")
     body: Mapped[str] = mapped_column(Text, nullable=False, default="")
 
@@ -353,8 +381,12 @@ class Snapshot(TimestampMixin, Base):
     __table_args__ = (UniqueConstraint("user_id", "item_id", name="uq_snapshot_user_item"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    item_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("items.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("items.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="queued")
     """queued | rendering | done | failed"""
     generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -390,7 +422,9 @@ class ArchiveAsset(Base):
     sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
     content_type: Mapped[str] = mapped_column(String(120), nullable=False)
     size: Mapped[int] = mapped_column(Integer, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class SnapshotAsset(Base):
@@ -398,8 +432,12 @@ class SnapshotAsset(Base):
 
     __tablename__ = "snapshot_assets"
 
-    snapshot_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("snapshots.id", ondelete="CASCADE"), primary_key=True)
-    sha256: Mapped[str] = mapped_column(ForeignKey("archive_assets.sha256", ondelete="CASCADE"), primary_key=True, index=True)
+    snapshot_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("snapshots.id", ondelete="CASCADE"), primary_key=True
+    )
+    sha256: Mapped[str] = mapped_column(
+        ForeignKey("archive_assets.sha256", ondelete="CASCADE"), primary_key=True, index=True
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -422,7 +460,9 @@ class ItemAI(Base):
     """On-demand 3-bullet summary + why-it-matters; never generated eagerly."""
     model: Mapped[str] = mapped_column(String(120), nullable=False, default="")
     prompt_version: Mapped[str] = mapped_column(String(40), nullable=False, default="")
-    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    generated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class Embedding(Base):
@@ -439,7 +479,9 @@ class Embedding(Base):
     item_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("items.id", ondelete="CASCADE"), primary_key=True)
     vector = mapped_column(Vector(EMBEDDING_DIMS), nullable=False)
     model: Mapped[str] = mapped_column(String(120), nullable=False)
-    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    generated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class Cluster(TimestampMixin, Base):
@@ -453,7 +495,9 @@ class Cluster(TimestampMixin, Base):
     window_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     canonical_item_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("items.id", ondelete="SET NULL"))
     source_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
-    kind: Mapped[str] = mapped_column(String(20), nullable=False, default="story")  # story | duplicate | series
+    kind: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="story"
+    )  # story | duplicate | series
 
     items: Mapped[list[ClusterItem]] = relationship(back_populates="cluster", cascade="all, delete-orphan")
 
@@ -461,8 +505,12 @@ class Cluster(TimestampMixin, Base):
 class ClusterItem(Base):
     __tablename__ = "cluster_items"
 
-    cluster_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("clusters.id", ondelete="CASCADE"), primary_key=True)
-    item_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("items.id", ondelete="CASCADE"), primary_key=True, index=True)
+    cluster_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("clusters.id", ondelete="CASCADE"), primary_key=True
+    )
+    item_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("items.id", ondelete="CASCADE"), primary_key=True, index=True
+    )
     similarity: Mapped[float] = mapped_column(Float, default=1.0, nullable=False)
 
     cluster: Mapped[Cluster] = relationship(back_populates="items")
@@ -474,11 +522,15 @@ class ClusterOverride(Base):
     __tablename__ = "cluster_overrides"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     item_a: Mapped[uuid.UUID] = mapped_column(ForeignKey("items.id", ondelete="CASCADE"), nullable=False)
     item_b: Mapped[uuid.UUID] = mapped_column(ForeignKey("items.id", ondelete="CASCADE"), nullable=False)
     action: Mapped[str] = mapped_column(String(10), nullable=False)  # merge | split
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class Correction(Base):
@@ -487,13 +539,19 @@ class Correction(Base):
     __tablename__ = "corrections"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    target_type: Mapped[str] = mapped_column(String(20), nullable=False)  # item_tag | feed_folder | content_type | cluster
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    target_type: Mapped[str] = mapped_column(
+        String(20), nullable=False
+    )  # item_tag | feed_folder | content_type | cluster
     target_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
     field: Mapped[str] = mapped_column(String(40), nullable=False)
     old_value: Mapped[str | None] = mapped_column(Text)
     new_value: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class Profile(Base):
@@ -502,12 +560,16 @@ class Profile(Base):
     __tablename__ = "profiles"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     body_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
     diff_from_previous: Mapped[str | None] = mapped_column(Text)
     edited_by_user: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    generated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class Insight(Base):
@@ -517,15 +579,21 @@ class Insight(Base):
     __table_args__ = (UniqueConstraint("user_id", "kind", "period", name="uq_insight_user_kind_period"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
-    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     kind: Mapped[str] = mapped_column(String(20), nullable=False)  # daily | weekly | trend | source_signals
     period: Mapped[str] = mapped_column(String(20), nullable=False)  # 2026-09-18 | 2026-W38
     title: Mapped[str] = mapped_column(String(300), nullable=False, default="")
     body: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     """Structured payload: {summary, top_stories:[{cluster_id, title, why, sources, affinity}], safe_to_skip, ...}"""
-    item_refs: Mapped[list[uuid.UUID]] = mapped_column(ARRAY(UUID(as_uuid=True)), default=list, nullable=False)
+    item_refs: Mapped[list[uuid.UUID]] = mapped_column(
+        ARRAY(UUID(as_uuid=True)), default=list, nullable=False
+    )
     opened_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    generated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class AppSetting(Base):
@@ -550,19 +618,25 @@ class AIJob(Base):
     __table_args__ = (Index("ix_ai_jobs_status_run_after", "status", "run_after"),)
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
-    kind: Mapped[str] = mapped_column(String(30), nullable=False)  # embed | tag | cluster | digest | profile | file_feed
+    kind: Mapped[str] = mapped_column(
+        String(30), nullable=False
+    )  # embed | tag | cluster | digest | profile | file_feed
     target_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
     user_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     status: Mapped[str] = mapped_column(String(20), nullable=False, default="queued")
     """queued|running|done|failed|partial (partial: some steps failed on the last attempt)."""
     attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     last_error: Mapped[str | None] = mapped_column(Text)
-    run_after: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    run_after: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     tokens_in: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     tokens_out: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 __all__ = [

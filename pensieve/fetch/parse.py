@@ -261,7 +261,9 @@ def _cleaner(base_url: str | None) -> Cleaner:
     )
 
 
-_SCRIPT_STYLE_RE = re.compile(r"<(script|style|object|embed|noscript)\b.*?</\1\s*>", re.IGNORECASE | re.DOTALL)
+_SCRIPT_STYLE_RE = re.compile(
+    r"<(script|style|object|embed|noscript)\b.*?</\1\s*>", re.IGNORECASE | re.DOTALL
+)
 #: An iframe element, closed or not (an unclosed one swallows nothing: only the open tag is matched then).
 _IFRAME_RE = re.compile(r"<iframe\b([^>]*)>(?:.*?</iframe\s*>)?", re.IGNORECASE | re.DOTALL)
 _SRC_ATTR_RE = re.compile(r"""\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))""", re.IGNORECASE)
@@ -437,7 +439,9 @@ def parse_json_feed(data: dict, url: str | None, now: datetime) -> ParsedFeed:
             continue
         link = _absolute(raw.get("url") or raw.get("external_url"), site_url or url)
         title = strip_to_text(str(raw.get("title") or ""))
-        published = parse_datetime(raw.get("date_published")) or parse_datetime(raw.get("date_modified")) or now
+        published = (
+            parse_datetime(raw.get("date_published")) or parse_datetime(raw.get("date_modified")) or now
+        )
         if raw.get("content_html"):
             content_html = sanitize_html(str(raw["content_html"]), base_url=link or site_url)
         elif raw.get("content_text"):

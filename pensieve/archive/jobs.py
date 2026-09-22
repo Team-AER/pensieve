@@ -116,7 +116,8 @@ async def collect_garbage(ctx: dict | None = None) -> int:
             removed += len(orphans)
         live = {str(row) for row in (await session.scalars(select(Snapshot.id))).all()}
         generations = {
-            str(sid): gen for sid, gen in (await session.execute(select(Snapshot.id, Snapshot.generation))).all()
+            str(sid): gen
+            for sid, gen in (await session.execute(select(Snapshot.id, Snapshot.generation))).all()
         }
     stale: list[str] = []
     async for key in storage.list_prefix("snap/"):

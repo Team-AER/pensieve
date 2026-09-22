@@ -63,16 +63,28 @@ async def test_state_endpoints_update_item_states(client, session, user):
 async def test_notes_and_tags(client, session, user):
     feed = await seed_feed(session, user, "Feed")
     item = await seed_item(session, feed, "Annotated")
-    session.add(models.ItemAI(user_id=user.id, item_id=item.id, tags=["ai-tag"], confidences={"ai-tag": 0.77}, content_type="tutorial"))
+    session.add(
+        models.ItemAI(
+            user_id=user.id,
+            item_id=item.id,
+            tags=["ai-tag"],
+            confidences={"ai-tag": 0.77},
+            content_type="tutorial",
+        )
+    )
     await session.commit()
     headers = await login(client, user)
     r = await client.get(f"/items/{item.id}", headers=HX)
     assert "ai-tag" in r.text and "77%" in r.text and "tutorial" in r.text
-    r = await client.post(f"/items/{item.id}/note", data={"body": "Follow up", "quote": "a line"}, headers=headers | HX)
+    r = await client.post(
+        f"/items/{item.id}/note", data={"body": "Follow up", "quote": "a line"}, headers=headers | HX
+    )
     assert r.status_code == 200 and "Follow up" in r.text
     note = await session.scalar(select(models.Note).where(models.Note.item_id == item.id))
     assert note.body == "Follow up" and note.quote == "a line" and note.user_id == user.id
-    r = await client.post(f"/items/{item.id}/note", data={"body": "Edited", "note_id": str(note.id)}, headers=headers | HX)
+    r = await client.post(
+        f"/items/{item.id}/note", data={"body": "Edited", "note_id": str(note.id)}, headers=headers | HX
+    )
     await session.refresh(note)
     assert note.body == "Edited"
     r = await client.post(f"/items/{item.id}/tag", data={"name": "mine", "op": "add"}, headers=headers | HX)
@@ -84,9 +96,15 @@ async def test_notes_and_tags(client, session, user):
     async def record_correction(session_, user_, target_type, target_id, field, old, new):
         recorded.append((target_type, target_id, field, old, new))
 
-    fake_module(pytest_monkeypatch := __import__("pytest").MonkeyPatch(), "pensieve.ai.service", record_correction=record_correction)
+    fake_module(
+        pytest_monkeypatch := __import__("pytest").MonkeyPatch(),
+        "pensieve.ai.service",
+        record_correction=record_correction,
+    )
     try:
-        r = await client.post(f"/items/{item.id}/tag", data={"name": "ai-tag", "op": "remove"}, headers=headers | HX)
+        r = await client.post(
+            f"/items/{item.id}/tag", data={"name": "ai-tag", "op": "remove"}, headers=headers | HX
+        )
         assert r.status_code == 200 and "ai-tag" not in r.text
     finally:
         pytest_monkeypatch.undo()
@@ -108,7 +126,13 @@ async def test_summarize_enqueues_and_polls(client, session, user, monkeypatch):
     r = await client.post(f"/items/{item.id}/summarize", headers=headers | HX)
     assert r.status_code == 200 and "Summarizing" in r.text and f"/items/{item.id}/summary" in r.text
     assert calls == [("ai_summarize_item", (str(user.id), str(item.id)), f"ai_summarize_item:{item.id}")]
-    session.add(models.ItemAI(user_id=user.id, item_id=item.id, summary="- One\n- Two\n\n**Why this matters to you**\n\nIt fits your rack.\n"))
+    session.add(
+        models.ItemAI(
+            user_id=user.id,
+            item_id=item.id,
+            summary="- One\n- Two\n\n**Why this matters to you**\n\nIt fits your rack.\n",
+        )
+    )
     await session.commit()
     r = await client.get(f"/items/{item.id}/summary", headers=HX)
     assert "every 2s" not in r.text
@@ -140,10 +164,21 @@ async def test_unmerge_calls_ai_service(client, session, user, monkeypatch):
     a = await seed_item(session, feed, "A")
     b = await seed_item(session, feed, "B")
     now = datetime.now(UTC)
-    cluster = models.Cluster(user_id=user.id, window_start=now - timedelta(days=1), window_end=now, canonical_item_id=a.id, source_count=2)
+    cluster = models.Cluster(
+        user_id=user.id,
+        window_start=now - timedelta(days=1),
+        window_end=now,
+        canonical_item_id=a.id,
+        source_count=2,
+    )
     session.add(cluster)
     await session.flush()
-    session.add_all([models.ClusterItem(cluster_id=cluster.id, item_id=a.id), models.ClusterItem(cluster_id=cluster.id, item_id=b.id)])
+    session.add_all(
+        [
+            models.ClusterItem(cluster_id=cluster.id, item_id=a.id),
+            models.ClusterItem(cluster_id=cluster.id, item_id=b.id),
+        ]
+    )
     await session.commit()
     called = []
 
@@ -186,7 +221,9 @@ async def test_boosted_deep_link_renders_the_whole_reader(client, session, user)
 async def test_thin_items_open_reader_view_automatically(client, session, user, monkeypatch):
     """A link post (short body + URL) triggers Reader view on first render; a real article does not."""
     feed = await seed_feed(session, user, "HN")
-    thin = await seed_item(session, feed, "Link post", text="Article URL: https://x.test/a Points: 17", url="https://x.test/a")
+    thin = await seed_item(
+        session, feed, "Link post", text="Article URL: https://x.test/a Points: 17", url="https://x.test/a"
+    )
     full = await seed_item(session, feed, "Essay", text="word " * 400, url="https://x.test/essay")
     await login(client, user)
     r = await client.get(f"/items/{thin.id}?keep_unread=1", headers=HX)
@@ -208,7 +245,9 @@ async def test_auto_reader_falls_back_to_the_web_page(client, session, user, mon
     import pensieve.fetch.reader_mode as rm
 
     feed = await seed_feed(session, user, "HN")
-    item = await seed_item(session, feed, "JS-only page", text="Article URL: https://x.test/app", url="https://x.test/app")
+    item = await seed_item(
+        session, feed, "JS-only page", text="Article URL: https://x.test/app", url="https://x.test/app"
+    )
     headers = await login(client, user)
 
     async def nothing(_url):
@@ -217,7 +256,11 @@ async def test_auto_reader_falls_back_to_the_web_page(client, session, user, mon
     monkeypatch.setattr(rm, "extract_reader_html", nothing)
     r = await client.post(f"/items/{item.id}/reader-mode", data={"auto": "1"}, headers={**headers, **HX})
     assert r.status_code == 200
-    assert "Open web page" in r.text and 'data-embed-toggle="#embed-' in r.text and 'href="https://x.test/app"' in r.text
+    assert (
+        "Open web page" in r.text
+        and 'data-embed-toggle="#embed-' in r.text
+        and 'href="https://x.test/app"' in r.text
+    )
     assert "flash-error" not in r.text and '"auto": 1' not in r.text  # no banner, no re-trigger loop
     r = await client.post(f"/items/{item.id}/reader-mode", headers={**headers, **HX})
     assert "flash-error" in r.text and "Open web page" in r.text

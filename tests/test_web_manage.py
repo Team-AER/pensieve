@@ -1,4 +1,3 @@
-
 import uuid
 
 from sqlalchemy import select
@@ -27,7 +26,11 @@ async def test_add_feed_uses_fetch_package(client, session, user, monkeypatch):
 
     fake_module(monkeypatch, "pensieve.fetch.subscribe", add_feed=add_feed, FeedError=FeedError)
     headers = await login(client, user)
-    r = await client.post("/manage/feeds", data={"url": "https://good.example/feed", "folder_id": str(folder.id)}, headers=headers)
+    r = await client.post(
+        "/manage/feeds",
+        data={"url": "https://good.example/feed", "folder_id": str(folder.id)},
+        headers=headers,
+    )
     assert r.status_code == 303 and r.headers["location"].endswith("msg=feed_added")
     assert seen == [("https://good.example/feed", folder.id)]
     feed = await session.scalar(select(models.Feed).where(models.Feed.url == "https://good.example/feed"))
@@ -64,7 +67,9 @@ async def test_accept_ai_folder_suggestion(client, session, user, monkeypatch):
     other = models.Folder(user_id=user.id, name="Other")
     session.add_all([suggested, other])
     await session.commit()
-    feed = await seed_feed(session, user, "Inbox feed", suggested_folder_id=suggested.id, suggested_folder_confidence=0.8)
+    feed = await seed_feed(
+        session, user, "Inbox feed", suggested_folder_id=suggested.id, suggested_folder_confidence=0.8
+    )
     corrections = []
 
     async def record_correction(session_, user_, target_type, target_id, field, old, new):
@@ -81,7 +86,9 @@ async def test_accept_ai_folder_suggestion(client, session, user, monkeypatch):
     # Picking a different folder records a correction.
     feed.folder_id = None
     await session.commit()
-    await client.post(f"/manage/feeds/{feed.id}/accept-suggestion", data={"folder_id": str(other.id)}, headers=headers)
+    await client.post(
+        f"/manage/feeds/{feed.id}/accept-suggestion", data={"folder_id": str(other.id)}, headers=headers
+    )
     await session.refresh(feed)
     assert feed.folder_id == other.id
     assert corrections == [("feed_folder", feed.id, "folder_id", str(suggested.id), str(other.id))]
@@ -92,14 +99,23 @@ async def test_folder_crud_and_reorder(client, session, user):
     r = await client.post("/manage/folders", data={"name": "Alpha"}, headers=headers)
     assert r.status_code == 303
     await client.post("/manage/folders", data={"name": "Beta"}, headers=headers)
-    folders = {f.name: f for f in await session.scalars(select(models.Folder).where(models.Folder.user_id == user.id))}
+    folders = {
+        f.name: f
+        for f in await session.scalars(select(models.Folder).where(models.Folder.user_id == user.id))
+    }
     assert set(folders) == {"Alpha", "Beta"}
     r = await client.post("/manage/folders", data={"name": "Alpha"}, headers=headers)
     assert "already+exists" in r.headers["location"]
-    await client.post(f"/manage/folders/{folders['Alpha'].id}/rename", data={"name": "Alpha2"}, headers=headers)
+    await client.post(
+        f"/manage/folders/{folders['Alpha'].id}/rename", data={"name": "Alpha2"}, headers=headers
+    )
     await session.refresh(folders["Alpha"])
     assert folders["Alpha"].name == "Alpha2"
-    await client.post("/manage/folders/reorder", data={"order": f"{folders['Beta'].id},{folders['Alpha'].id}"}, headers=headers)
+    await client.post(
+        "/manage/folders/reorder",
+        data={"order": f"{folders['Beta'].id},{folders['Alpha'].id}"},
+        headers=headers,
+    )
     await session.refresh(folders["Beta"])
     await session.refresh(folders["Alpha"])
     assert folders["Beta"].position == 0 and folders["Alpha"].position == 1
@@ -121,21 +137,44 @@ async def test_folder_crud_and_reorder(client, session, user):
 async def test_tags_and_rules(client, session, user):
     feed = await seed_feed(session, user, "Feed")
     headers = await login(client, user)
-    await client.post("/manage/tags", data={"name": "kubernetes", "kind": "ai", "description": "Container orchestration"}, headers=headers)
+    await client.post(
+        "/manage/tags",
+        data={"name": "kubernetes", "kind": "ai", "description": "Container orchestration"},
+        headers=headers,
+    )
     tag = await session.scalar(select(models.Tag).where(models.Tag.user_id == user.id))
     assert tag.kind == "ai" and tag.description == "Container orchestration"
-    await client.post(f"/manage/tags/{tag.id}/update", data={"name": "k8s", "kind": "user", "description": ""}, headers=headers)
+    await client.post(
+        f"/manage/tags/{tag.id}/update",
+        data={"name": "k8s", "kind": "user", "description": ""},
+        headers=headers,
+    )
     await session.refresh(tag)
     assert tag.name == "k8s" and tag.kind == "user"
     await client.post(f"/manage/tags/{tag.id}/delete", headers=headers)
     tid = tag.id
     session.expire(tag)
     assert await session.get(models.Tag, tid) is None
-    r = await client.post("/manage/rules", data={"feed_id": str(feed.id), "field": "title", "pattern": "sponsored", "action": "hide"}, headers=headers)
+    r = await client.post(
+        "/manage/rules",
+        data={"feed_id": str(feed.id), "field": "title", "pattern": "sponsored", "action": "hide"},
+        headers=headers,
+    )
     assert r.status_code == 303
     rule = await session.scalar(select(models.FeedRule).where(models.FeedRule.user_id == user.id))
     assert rule.feed_id == feed.id and rule.action == "hide" and rule.enabled and not rule.is_regex
-    await client.post(f"/manage/rules/{rule.id}/update", data={"feed_id": "", "field": "body", "pattern": "^Ad:", "is_regex": "1", "action": "tag", "action_value": "ads"}, headers=headers)
+    await client.post(
+        f"/manage/rules/{rule.id}/update",
+        data={
+            "feed_id": "",
+            "field": "body",
+            "pattern": "^Ad:",
+            "is_regex": "1",
+            "action": "tag",
+            "action_value": "ads",
+        },
+        headers=headers,
+    )
     await session.refresh(rule)
     assert rule.feed_id is None and rule.is_regex and rule.action == "tag" and rule.action_value == "ads"
     await client.post(f"/manage/rules/{rule.id}/toggle", headers=headers)
@@ -153,13 +192,23 @@ async def test_ai_settings_and_profile(client, session, user):
     headers = await login(client, user)
     r = await client.get("/manage/ai")
     assert r.status_code == 200 and "Reader profile" in r.text and "/manage/ai/gateway" in r.text
-    r = await client.post("/manage/ai/settings", data={"auto_file": "1", "digest": "1", "digest_time": "08:15"}, headers=headers)
+    r = await client.post(
+        "/manage/ai/settings", data={"auto_file": "1", "digest": "1", "digest_time": "08:15"}, headers=headers
+    )
     assert r.status_code == 303
     await session.refresh(user)
-    assert user.settings["auto_file"] is True and user.settings["tag_items"] is False and user.settings["digest_time"] == "08:15"
+    assert (
+        user.settings["auto_file"] is True
+        and user.settings["tag_items"] is False
+        and user.settings["digest_time"] == "08:15"
+    )
     await client.post("/manage/ai/profile", data={"body_text": "Likes databases."}, headers=headers)
     await client.post("/manage/ai/profile", data={"body_text": "Likes databases and Rust."}, headers=headers)
-    profiles = list(await session.scalars(select(models.Profile).where(models.Profile.user_id == user.id).order_by(models.Profile.version)))
+    profiles = list(
+        await session.scalars(
+            select(models.Profile).where(models.Profile.user_id == user.id).order_by(models.Profile.version)
+        )
+    )
     assert [p.version for p in profiles] == [1, 2] and all(p.edited_by_user for p in profiles)
     r = await client.get("/manage/ai")
     assert "Likes databases and Rust." in r.text and "v2" in r.text
@@ -201,7 +250,11 @@ async def test_household_users_admin_only(client, session, user):
     headers = await login(client, user)  # admin
     r = await client.get("/manage/users")
     assert r.status_code == 200 and reader.email in r.text
-    r = await client.post("/manage/users", data={"email": "new@example.com", "display_name": "New", "role": "reader"}, headers=headers)
+    r = await client.post(
+        "/manage/users",
+        data={"email": "new@example.com", "display_name": "New", "role": "reader"},
+        headers=headers,
+    )
     assert r.status_code == 200 and "temporary password" in r.text
     new = await session.scalar(select(models.User).where(models.User.email == "new@example.com"))
     assert new is not None and new.role == models.UserRole.reader
@@ -219,14 +272,32 @@ async def test_household_users_admin_only(client, session, user):
 
 async def test_account_profile_and_password(client, session, user):
     headers = await login(client, user)
-    await client.post("/manage/account/profile", data={"display_name": "Renamed", "theme": "sepia"}, headers=headers)
+    await client.post(
+        "/manage/account/profile", data={"display_name": "Renamed", "theme": "sepia"}, headers=headers
+    )
     await session.refresh(user)
     assert user.display_name == "Renamed" and user.settings["theme"] == "sepia"
     r = await client.get("/manage/account")
     assert 'data-theme="sepia"' in r.text
-    r = await client.post("/manage/account/password", data={"current_password": "wrong", "new_password": "newpassword1", "confirm_password": "newpassword1"}, headers=headers)
+    r = await client.post(
+        "/manage/account/password",
+        data={
+            "current_password": "wrong",
+            "new_password": "newpassword1",
+            "confirm_password": "newpassword1",
+        },
+        headers=headers,
+    )
     assert "wrong" in r.headers["location"]
-    r = await client.post("/manage/account/password", data={"current_password": "password123", "new_password": "newpassword1", "confirm_password": "newpassword1"}, headers=headers)
+    r = await client.post(
+        "/manage/account/password",
+        data={
+            "current_password": "password123",
+            "new_password": "newpassword1",
+            "confirm_password": "newpassword1",
+        },
+        headers=headers,
+    )
     assert r.headers["location"].endswith("password_changed")
     await client.post("/logout", headers=headers)
     await login(client, user, password="newpassword1")
@@ -249,11 +320,17 @@ async def test_opml_import_and_export(client, session, user, monkeypatch):
 
     fake_module(monkeypatch, "pensieve.fetch.opml", import_opml=import_opml, export_opml=export_opml)
     headers = await login(client, user)
-    r = await client.post("/manage/import/opml", files={"file": ("subs.opml", b"<opml><body/></opml>", "text/xml")}, headers=headers)
+    r = await client.post(
+        "/manage/import/opml",
+        files={"file": ("subs.opml", b"<opml><body/></opml>", "text/xml")},
+        headers=headers,
+    )
     assert r.status_code == 200 and "Added 3 feeds, skipped 1, created 2 folders" in r.text
     assert received == [b"<opml><body/></opml>"]
     r = await client.get("/manage/export/opml")
-    assert r.status_code == 200 and r.content == b"<opml/>" and "attachment" in r.headers["content-disposition"]
+    assert (
+        r.status_code == 200 and r.content == b"<opml/>" and "attachment" in r.headers["content-disposition"]
+    )
     await seed_feed(session, user, "Exported")
     r = await client.get("/manage/export/json")
     assert r.status_code == 200
@@ -275,13 +352,22 @@ async def test_gateway_models_are_admin_editable(client, session, user, monkeypa
 
         r = await client.post(
             "/manage/ai/models",
-            data={"fast": "Qwen/Qwen3.8-Flash-Next", "long": "__default__", "fast_reasoning": "2", "long_reasoning": "3"},
+            data={
+                "fast": "Qwen/Qwen3.8-Flash-Next",
+                "long": "__default__",
+                "fast_reasoning": "2",
+                "long_reasoning": "3",
+            },
             headers=headers,
         )
         assert r.status_code in (200, 303)
         row = await session.scalar(select(models.AppSetting).where(models.AppSetting.key == "llm"))
         assert row is not None
-        assert row.value == {"fast": "Qwen/Qwen3.8-Flash-Next", "fast_reasoning": "low", "long_reasoning": "medium"}
+        assert row.value == {
+            "fast": "Qwen/Qwen3.8-Flash-Next",
+            "fast_reasoning": "low",
+            "long_reasoning": "medium",
+        }
         assert model_choice.effective()["fast"] == "Qwen/Qwen3.8-Flash-Next"
 
         reader = await make_user(session)

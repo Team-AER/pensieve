@@ -100,7 +100,9 @@ def create_app() -> FastAPI:
         # Rendered by the web package's Jinja environment; anonymous so a broken session can't break the page.
         from pensieve.web.templating import render
 
-        return render(request, "error.html", {"status_code": status_code}, status_code=status_code, headers=headers)
+        return render(
+            request, "error.html", {"status_code": status_code}, status_code=status_code, headers=headers
+        )
 
     return app
 

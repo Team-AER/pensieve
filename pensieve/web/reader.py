@@ -376,11 +376,15 @@ async def nav_data(session: AsyncSession, user: User, view: View) -> NavData:
     for f in feeds:
         by_folder.setdefault(f.folder_id, []).append((f, unread_by_feed.get(f.id, 0)))
     folder_navs = [
-        FolderNav(folder=fo, feeds=by_folder.get(fo.id, []), count=sum(n for _, n in by_folder.get(fo.id, [])))
+        FolderNav(
+            folder=fo, feeds=by_folder.get(fo.id, []), count=sum(n for _, n in by_folder.get(fo.id, []))
+        )
         for fo in folders
     ]
     inbox = by_folder.get(None, [])
-    tags = list(await session.scalars(select(Tag).where(Tag.user_id == user.id).order_by(Tag.position, Tag.name)))
+    tags = list(
+        await session.scalars(select(Tag).where(Tag.user_id == user.id).order_by(Tag.position, Tag.name))
+    )
     user_tags = sorted({t.name for t in tags if t.kind == "user"} | set(user_tag_counts))
     ai_tags = sorted({t.name for t in tags if t.kind == "ai"} | set(ai_tag_counts))
     return NavData(
@@ -420,7 +424,12 @@ async def mark_view_read(
 
 
 async def render_reader(
-    request: Request, session: AsyncSession, user: User, view: View, *, article_html: str | None = None,
+    request: Request,
+    session: AsyncSession,
+    user: User,
+    view: View,
+    *,
+    article_html: str | None = None,
 ):
     opts = list_options(request)
     rows, has_more = await list_rows(session, user, view, opts)
@@ -466,7 +475,10 @@ async def nav_partial(
 
 @router.get("/reader/{kind}")
 async def reader_simple(
-    request: Request, kind: str, user: CurrentUser, session: DB,
+    request: Request,
+    kind: str,
+    user: CurrentUser,
+    session: DB,
 ):
     if kind in {"folder", "feed", "tag"}:
         raise HTTPException(status_code=404)
@@ -476,7 +488,10 @@ async def reader_simple(
 
 @router.get("/reader/{kind}/list")
 async def reader_simple_list(
-    request: Request, kind: str, user: CurrentUser, session: DB,
+    request: Request,
+    kind: str,
+    user: CurrentUser,
+    session: DB,
 ):
     view = await resolve_view(session, user, kind, None)
     return await render_list(request, session, user, view)
@@ -508,7 +523,9 @@ async def reader_keyed_list(
     return await render_list(request, session, user, view)
 
 
-async def render_list(request: Request, session: AsyncSession, user: User, view: View, extra: dict | None = None):
+async def render_list(
+    request: Request, session: AsyncSession, user: User, view: View, extra: dict | None = None
+):
     opts = list_options(request)
     rows, has_more = await list_rows(session, user, view, opts)
     ctx = {
@@ -586,7 +603,9 @@ async def undo_read_route(
     if not item_ids and ids:
         from pensieve.config import get_settings
 
-        item_ids = [u for u in (parse_uuid(p) for p in ids.split(",")) if u][: get_settings().undo_batch_max_ids]
+        item_ids = [u for u in (parse_uuid(p) for p in ids.split(",")) if u][
+            : get_settings().undo_batch_max_ids
+        ]
     await undo_read(session, user.id, item_ids)
     await session.commit()
     kind, _, key = view.partition("/")

@@ -41,9 +41,10 @@ async def load_item(session: AsyncSession, user: User, item_id: uuid.UUID) -> tu
     return pair
 
 
-
 READER_MIN_CHARS = 120  # an extraction shorter than this is nav/boilerplate, not the article
-THIN_TEXT_CHARS = 700  # a feed body shorter than this is a link post (HN, link blogs): open Reader view for it
+THIN_TEXT_CHARS = (
+    700  # a feed body shorter than this is a link post (HN, link blogs): open Reader view for it
+)
 
 
 def strip_tags(html: str) -> str:
@@ -60,6 +61,7 @@ def is_thin(item) -> bool:
 
 def wants_auto_reader(user) -> bool:
     return bool((user.settings or {}).get("auto_reader", True))
+
 
 async def article_context(session: AsyncSession, user: User, item: Item, feed: Feed) -> dict:
     state = await get_state(session, user, item.id)
@@ -338,7 +340,13 @@ async def summary_poll(
             error = "The summary failed: " + (job.last_error or "the AI gateway did not answer.")[:160]
         elif n >= SUMMARY_MAX_POLLS:
             error = "The summary is taking longer than usual."
-    ctx = {"item": item, "ai": ai, "pending": not (ai and ai.summary) and not error, "error": error, "n": n + 1}
+    ctx = {
+        "item": item,
+        "ai": ai,
+        "pending": not (ai and ai.summary) and not error,
+        "error": error,
+        "n": n + 1,
+    }
     return render(request, "partials/summary.html", ctx, user=user)
 
 
@@ -364,7 +372,9 @@ async def note(
             existing = None
     if existing is None and not delete:
         existing = await session.scalar(
-            select(Note).where(Note.user_id == user.id, Note.item_id == item.id).order_by(Note.created_at.desc())
+            select(Note)
+            .where(Note.user_id == user.id, Note.item_id == item.id)
+            .order_by(Note.created_at.desc())
         )
     if delete:
         if existing:
@@ -465,9 +475,13 @@ async def cluster_items(
         )
     ).all()
     members = [
-        {"item": i, "feed": f, "is_read": bool(s and s.is_read), "is_starred": bool(s and s.is_starred), "sim": sim}
+        {
+            "item": i,
+            "feed": f,
+            "is_read": bool(s and s.is_read),
+            "is_starred": bool(s and s.is_starred),
+            "sim": sim,
+        }
         for i, f, s, sim in rows
     ]
     return render(request, "partials/cluster.html", {"cluster": cluster, "members": members}, user=user)
-
-

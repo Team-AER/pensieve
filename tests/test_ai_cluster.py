@@ -312,7 +312,9 @@ async def test_load_overrides_latest_action_wins(session, user, gateway):
     await session.flush()
     t0 = now()
     # deliberately insert the *later* split first so insertion/uuid order would give the wrong answer
-    session.add(models.ClusterOverride(user_id=user.id, item_a=x.id, item_b=y.id, action="split", created_at=t0))
+    session.add(
+        models.ClusterOverride(user_id=user.id, item_a=x.id, item_b=y.id, action="split", created_at=t0)
+    )
     session.add(
         models.ClusterOverride(
             user_id=user.id, item_a=y.id, item_b=x.id, action="merge", created_at=t0 - timedelta(days=1)

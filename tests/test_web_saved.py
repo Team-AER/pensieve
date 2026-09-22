@@ -33,7 +33,11 @@ async def _done_snapshot(session, bucket, item, user, *, page=b"<html><body><p>f
     await session.flush()
     session.add(models.SnapshotAsset(snapshot_id=snap.id, sha256=sha))
     snap.status, snap.generation, snap.captured_at = "done", 1, datetime.now(UTC)
-    snap.page_key, snap.shot_key, snap.render_mode = f"snap/{snap.id}/1/page.html.gz", f"snap/{snap.id}/1/shot.jpg", "browser"
+    snap.page_key, snap.shot_key, snap.render_mode = (
+        f"snap/{snap.id}/1/page.html.gz",
+        f"snap/{snap.id}/1/shot.jpg",
+        "browser",
+    )
     item.content_html = f'<p>The archived article.</p><p><img src="/archive/a/{sha}"></p>'
     item.content_text = "The archived article."
     await session.commit()
@@ -44,7 +48,11 @@ async def test_save_dialog_saves_and_lists_under_saved_not_unread(client, sessio
     feed = await seed_feed(session, user, "Feed")
     await seed_item(session, feed, "A feed item")
     headers = await login(client, user)
-    r = await client.post("/saved", data={"url": "https://example.com/post?utm_source=tw", "tags": "Later, rust"}, headers=headers | HX)
+    r = await client.post(
+        "/saved",
+        data={"url": "https://example.com/post?utm_source=tw", "tags": "Later, rust"},
+        headers=headers | HX,
+    )
     assert r.status_code == 200 and "Saved" in r.text and "link-saved" in r.headers["HX-Trigger"]
     assert any(c[0] == queue.CAPTURE_PAGE for c in fake_queue)
     item = await session.scalar(select(models.Item).where(models.Item.url == "https://example.com/post"))
@@ -67,14 +75,27 @@ async def test_save_dialog_saves_and_lists_under_saved_not_unread(client, sessio
 
 async def test_bookmarklet_page_confirms_before_saving(client, session, user, fake_queue):
     await login(client, user)
-    r = await client.get("/save", params={"text": "Worth a read https://blog.example.com/p/1", "title": "Blog"}, headers=HTML)
-    assert r.status_code == 200 and 'value="https://blog.example.com/p/1"' in r.text and "Save to Pensieve" in r.text
-    assert await session.scalar(select(models.Item.id).where(models.Item.url == "https://blog.example.com/p/1")) is None
+    r = await client.get(
+        "/save", params={"text": "Worth a read https://blog.example.com/p/1", "title": "Blog"}, headers=HTML
+    )
+    assert (
+        r.status_code == 200
+        and 'value="https://blog.example.com/p/1"' in r.text
+        and "Save to Pensieve" in r.text
+    )
+    assert (
+        await session.scalar(select(models.Item.id).where(models.Item.url == "https://blog.example.com/p/1"))
+        is None
+    )
     from pensieve.web.templating import make_csrf
 
-    r = await client.post("/save", data={"url": "https://blog.example.com/p/1", "csrf_token": make_csrf(user.id)}, headers=HTML)
+    r = await client.post(
+        "/save", data={"url": "https://blog.example.com/p/1", "csrf_token": make_csrf(user.id)}, headers=HTML
+    )
     assert r.status_code == 200 and "Saved" in r.text and "Read it now" in r.text
-    assert await session.scalar(select(models.Item.id).where(models.Item.url == "https://blog.example.com/p/1"))
+    assert await session.scalar(
+        select(models.Item.id).where(models.Item.url == "https://blog.example.com/p/1")
+    )
 
 
 async def test_login_redirect_keeps_the_shared_link(client):
@@ -87,17 +108,35 @@ async def test_token_api_saves_and_rejects_bad_tokens(client, session, user, fak
     token = generate_api_token()
     session.add(models.ApiToken(user_id=user.id, label="phone", kind="web", token_hash=hash_api_token(token)))
     await session.commit()
-    r = await client.post("/api/v1/save", json={"url": "https://news.example.com/a", "tags": ["x"]}, headers={"Authorization": f"Bearer {token}"})
+    r = await client.post(
+        "/api/v1/save",
+        json={"url": "https://news.example.com/a", "tags": ["x"]},
+        headers={"Authorization": f"Bearer {token}"},
+    )
     assert r.status_code == 201 and r.json()["created"] is True and r.json()["status"] == "queued"
-    r = await client.post("/api/v1/save", data={"url": "https://news.example.com/a"}, headers={"Authorization": f"Bearer {token}"})
+    assert r.json()["open"].startswith(
+        "http://test/items/"
+    )  # the origin the client used, not PENSIEVE_BASE_URL
+    r = await client.post(
+        "/api/v1/save",
+        data={"url": "https://news.example.com/a"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
     assert r.status_code == 200 and r.json()["created"] is False
-    r = await client.post("/api/v1/save", json={"url": "https://news.example.com/b", "html": "<html><body>mine</body></html>"},
-                          headers={"Authorization": f"Bearer {token}"})
+    r = await client.post(
+        "/api/v1/save",
+        json={"url": "https://news.example.com/b", "html": "<html><body>mine</body></html>"},
+        headers={"Authorization": f"Bearer {token}"},
+    )
     assert r.status_code == 201
     assert any(c[0] == queue.CAPTURE_PAGE and c[1] for c in fake_queue)
-    r = await client.post("/api/v1/save", json={"url": "https://news.example.com/c"}, headers={"Authorization": "Bearer nope"})
+    r = await client.post(
+        "/api/v1/save", json={"url": "https://news.example.com/c"}, headers={"Authorization": "Bearer nope"}
+    )
     assert r.status_code == 401
-    r = await client.post("/api/v1/save", json={"url": "javascript:alert(1)"}, headers={"Authorization": f"Bearer {token}"})
+    r = await client.post(
+        "/api/v1/save", json={"url": "javascript:alert(1)"}, headers={"Authorization": f"Bearer {token}"}
+    )
     assert r.status_code == 422
 
 
@@ -114,10 +153,19 @@ async def test_archive_views_serve_with_locked_down_headers(client, session, use
     r = await client.get(f"/archive/s/{snap.id}/page", headers={"Accept-Encoding": "identity"})
     csp = r.headers["content-security-policy"]
     assert r.status_code == 200 and b"frozen" in r.content
-    assert "default-src 'none'" in csp and "sandbox" in csp and "script-src" not in csp and "allow-scripts" not in csp
+    assert (
+        "default-src 'none'" in csp
+        and "sandbox" in csp
+        and "script-src" not in csp
+        and "allow-scripts" not in csp
+    )
     assert r.headers["x-frame-options"] == "SAMEORIGIN"
     r = await client.get(f"/archive/s/{snap.id}/shot")
-    assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg" and "sandbox" in r.headers["content-security-policy"]
+    assert (
+        r.status_code == 200
+        and r.headers["content-type"] == "image/jpeg"
+        and "sandbox" in r.headers["content-security-policy"]
+    )
     r = await client.get(f"/archive/a/{sha}")
     assert r.status_code == 200 and r.content == PNG and "immutable" in r.headers["cache-control"]
     r = await client.get("/archive/a/" + "b" * 64)
@@ -126,7 +174,12 @@ async def test_archive_views_serve_with_locked_down_headers(client, session, use
     other = await make_user(session)
     client.cookies.clear()
     await login(client, other)
-    for path in (f"/archive/s/{snap.id}/page", f"/archive/s/{snap.id}/shot", f"/archive/a/{sha}", f"/items/{result.item.id}/view/page"):
+    for path in (
+        f"/archive/s/{snap.id}/page",
+        f"/archive/s/{snap.id}/shot",
+        f"/archive/a/{sha}",
+        f"/items/{result.item.id}/view/page",
+    ):
         assert (await client.get(path)).status_code == 404, path
 
 
@@ -139,7 +192,9 @@ async def test_capture_poll_and_recapture(client, session, user, fake_queue, buc
     assert "Waiting to capture the page" in r.text and f"/items/{result.item.id}/capture" in r.text
     await _done_snapshot(session, bucket, result.item, user)
     r = await client.get(f"/items/{result.item.id}/capture", headers=HX)
-    assert r.status_code == 200 and r.headers["HX-Retarget"] == "#article" and "The archived article." in r.text
+    assert (
+        r.status_code == 200 and r.headers["HX-Retarget"] == "#article" and "The archived article." in r.text
+    )
     fake_queue.clear()
     r = await client.post(f"/items/{result.item.id}/recapture", headers=headers | HX)
     assert r.status_code == 200 and "Waiting to capture" in r.text
@@ -165,14 +220,21 @@ async def test_feed_item_save_link_and_star_archives(client, session, user, fake
 async def test_saving_page_token_and_import(client, session, user, fake_queue, no_bucket):
     headers = await login(client, user)
     r = await client.get("/manage/saving", headers=HTML)
-    assert r.status_code == 200 and "Bookmarklet" in r.text and "javascript:" in r.text and "Text only" in r.text
+    assert (
+        r.status_code == 200 and "Bookmarklet" in r.text and "javascript:" in r.text and "Text only" in r.text
+    )
+    assert "window.open(&#39;http://test/save?url=" in r.text
     r = await client.post("/manage/saving/token", data={"label": "iPhone"}, headers=headers | HTML)
     assert "Bearer " in r.text and "/api/v1/save" in r.text
     csv = b"title,url,time_added,tags,status\nOne,https://b.org/1,1700000000,a|b,unread\n"
-    r = await client.post("/manage/saving/import", files={"file": ("pocket.csv", csv, "text/csv")}, headers=headers)
+    r = await client.post(
+        "/manage/saving/import", files={"file": ("pocket.csv", csv, "text/csv")}, headers=headers
+    )
     assert r.status_code == 303 and "import_started" in r.headers["location"]
     assert fake_queue[-1][0] == queue.CAPTURE_IMPORT and fake_queue[-1][1][1][0]["url"] == "https://b.org/1"
-    r = await client.post("/manage/saving/import", files={"file": ("x.txt", b"nothing", "text/plain")}, headers=headers)
+    r = await client.post(
+        "/manage/saving/import", files={"file": ("x.txt", b"nothing", "text/plain")}, headers=headers
+    )
     assert "No links found" in r.text
     r = await client.post("/manage/saving/settings", data={}, headers=headers)
     await session.refresh(user)
@@ -183,12 +245,35 @@ async def test_import_job_saves_links_without_capturing(session, user, fake_queu
     from pensieve.archive.jobs import import_links
 
     links = [
-        {"url": "https://b.org/1", "title": "One", "tags": ["a"], "saved_at": 1700000000, "read": False, "starred": False},
-        {"url": "https://b.org/2", "title": "Two", "tags": [], "saved_at": 1600000000, "read": True, "starred": True},
-        {"url": "not a url at all", "title": "", "tags": [], "saved_at": None, "read": False, "starred": False},
+        {
+            "url": "https://b.org/1",
+            "title": "One",
+            "tags": ["a"],
+            "saved_at": 1700000000,
+            "read": False,
+            "starred": False,
+        },
+        {
+            "url": "https://b.org/2",
+            "title": "Two",
+            "tags": [],
+            "saved_at": 1600000000,
+            "read": True,
+            "starred": True,
+        },
+        {
+            "url": "not a url at all",
+            "title": "",
+            "tags": [],
+            "saved_at": None,
+            "read": False,
+            "starred": False,
+        },
     ]
     assert await import_links({}, str(user.id), links) == 2
-    items = (await session.scalars(select(models.Item).join(models.Feed).where(models.Feed.kind == "saved"))).all()
+    items = (
+        await session.scalars(select(models.Item).join(models.Feed).where(models.Feed.kind == "saved"))
+    ).all()
     by_url = {i.url: i for i in items}
     assert set(by_url) >= {"https://b.org/1", "https://b.org/2"}
     assert by_url["https://b.org/2"].published_at.year == 2020
@@ -201,7 +286,9 @@ async def test_sync_clients_cannot_unsubscribe_saved(client, session, user, fake
     await save.save_link(session, user, "https://news.example.com/keep")
     feed = await session.scalar(select(models.Feed).where(models.Feed.kind == "saved"))
     token = generate_api_token()
-    session.add(models.ApiToken(user_id=user.id, label="reeder", kind="greader", token_hash=hash_api_token(token)))
+    session.add(
+        models.ApiToken(user_id=user.id, label="reeder", kind="greader", token_hash=hash_api_token(token))
+    )
     await session.commit()
     r = await client.post(
         "/reader/api/0/subscription/edit",

@@ -21,7 +21,9 @@ PAGE = b"""<html><head><title>T</title></head><body><nav>menu menu</nav><article
 
 async def test_extract_reader_html_sanitised():
     with respx.mock() as router:
-        router.get("https://example.com/story").respond(200, content=PAGE, headers={"content-type": "text/html"})
+        router.get("https://example.com/story").respond(
+            200, content=PAGE, headers={"content-type": "text/html"}
+        )
         html = await extract_reader_html("https://example.com/story")
     assert html is not None
     assert "Big story" in html and "Third paragraph" in html
@@ -34,27 +36,43 @@ async def test_extract_reader_html_never_raises():
     with respx.mock(assert_all_called=False) as router:
         router.get("https://example.com/404").respond(404)
         router.get("https://example.com/boom").mock(side_effect=httpx.ConnectError("x"))
-        router.get("https://example.com/pdf").respond(200, content=b"%PDF", headers={"content-type": "application/pdf"})
-        router.get("https://example.com/empty").respond(200, content=b"<html><body></body></html>", headers={"content-type": "text/html"})
-        for url in ("https://example.com/404", "https://example.com/boom", "https://example.com/pdf", "https://example.com/empty"):
+        router.get("https://example.com/pdf").respond(
+            200, content=b"%PDF", headers={"content-type": "application/pdf"}
+        )
+        router.get("https://example.com/empty").respond(
+            200, content=b"<html><body></body></html>", headers={"content-type": "text/html"}
+        )
+        for url in (
+            "https://example.com/404",
+            "https://example.com/boom",
+            "https://example.com/pdf",
+            "https://example.com/empty",
+        ):
             assert await extract_reader_html(url) is None
     assert await extract_reader_html("http://127.0.0.1/secret") is None
     assert await extract_reader_html("not a url") is None
 
 
 async def test_fetch_feed_and_reader_mode_jobs(session, user, fake_queue):
-    feed = models.Feed(user_id=user.id, url="https://example.com/feed.xml", title="t", next_fetch_at=datetime.now(UTC))
+    feed = models.Feed(
+        user_id=user.id, url="https://example.com/feed.xml", title="t", next_fetch_at=datetime.now(UTC)
+    )
     session.add(feed)
     await session.commit()
 
     with respx.mock(assert_all_called=False) as router:
         router.get("https://example.com/feed.xml").respond(200, content=RSS)
-        router.get("https://example.com/posts/1").respond(200, content=PAGE, headers={"content-type": "text/html"})
+        router.get("https://example.com/posts/1").respond(
+            200, content=PAGE, headers={"content-type": "text/html"}
+        )
         router.get("https://example.com/posts/2").respond(500)
         assert await jobs.fetch_feed({}, str(feed.id)) == 2
         assert await jobs.fetch_feed({}, str(uuid.uuid4())) == 0
 
-        items = {i.guid: i for i in (await session.scalars(select(models.Item).where(models.Item.feed_id == feed.id))).all()}
+        items = {
+            i.guid: i
+            for i in (await session.scalars(select(models.Item).where(models.Item.feed_id == feed.id))).all()
+        }
         assert await jobs.fetch_reader_mode({}, str(items["post-1"].id)) is True
         assert await jobs.fetch_reader_mode({}, str(items["https://example.com/posts/2"].id)) is False
         assert await jobs.fetch_reader_mode({}, str(uuid.uuid4())) is False
@@ -64,7 +82,9 @@ async def test_fetch_feed_and_reader_mode_jobs(session, user, fake_queue):
     ok = await session.get(models.Item, ok_id)
     assert ok.reader_html and "Big story" in ok.reader_html and ok.reader_fetched_at is not None
     failed = await session.get(models.Item, failed_id)
-    assert failed.reader_html is None and failed.reader_fetched_at is not None  # attempted, not retried forever
+    assert (
+        failed.reader_html is None and failed.reader_fetched_at is not None
+    )  # attempted, not retried forever
     row = await session.get(models.Feed, feed_id)
     assert row.last_success_at is not None and row.error_count == 0
     assert fake_queue[0][0] == "ai_process_new_items"

@@ -60,7 +60,9 @@ async def test_add_feed_direct_feed_url(session, user, fake_queue):
     assert feed.icon_url == "https://example.com/logo.png"
     assert feed.websub_hub == "https://hub.example.com/"
     assert feed.etag == '"abc"' and feed.last_modified == "x"
-    assert feed.error_count == 0 and feed.last_success_at is not None and feed.next_fetch_at > feed.last_fetch_at
+    assert (
+        feed.error_count == 0 and feed.last_success_at is not None and feed.next_fetch_at > feed.last_fetch_at
+    )
     items = await _items(session, feed)
     assert {i.guid for i in items} == {"post-1", "https://example.com/posts/2"}
 
@@ -85,7 +87,9 @@ async def test_add_feed_with_folder_skips_filing(session, user, fake_queue):
 
 async def test_add_feed_autodiscovers_from_html(session, user, fake_queue):
     with _router() as router:
-        router.get("https://example.com/").respond(200, content=HTML_WITH_LINKS, headers={"content-type": "text/html"})
+        router.get("https://example.com/").respond(
+            200, content=HTML_WITH_LINKS, headers={"content-type": "text/html"}
+        )
         router.get("https://example.com/feeds/all.rss").respond(200, content=ATOM)
         feed = await add_feed(session, user, "example.com")
     assert feed.url == "https://example.com/feeds/all.rss"
@@ -98,7 +102,9 @@ async def test_add_feed_autodiscovers_from_html(session, user, fake_queue):
 async def test_add_feed_uses_page_hub_and_icon_when_feed_has_none(session, user, fake_queue):
     plain = b'<rss version="2.0"><channel><title>Plain</title><item><title>a</title><link>https://example.com/a</link></item></channel></rss>'
     with _router() as router:
-        router.get("https://example.com/blog").respond(200, content=HTML_WITH_LINKS, headers={"content-type": "text/html"})
+        router.get("https://example.com/blog").respond(
+            200, content=HTML_WITH_LINKS, headers={"content-type": "text/html"}
+        )
         router.get("https://example.com/feeds/all.rss").respond(200, content=plain)
         feed = await add_feed(session, user, "https://example.com/blog")
     assert feed.websub_hub == "https://hub.example.com/"
@@ -108,10 +114,16 @@ async def test_add_feed_uses_page_hub_and_icon_when_feed_has_none(session, user,
 
 async def test_add_feed_well_known_fallback_and_favicon(session, user, fake_queue):
     with _router() as router:
-        router.get("https://example.com/").respond(200, content=HTML_NO_LINKS, headers={"content-type": "text/html"})
+        router.get("https://example.com/").respond(
+            200, content=HTML_NO_LINKS, headers={"content-type": "text/html"}
+        )
         router.get("https://example.com/feed").respond(404)
-        router.get("https://example.com/rss").respond(200, content=RSS.replace(b"<image>", b"<x>").replace(b"</image>", b"</x>"))
-        router.get("https://example.com/favicon.ico").respond(200, content=b"\x00\x00\x01\x00", headers={"content-type": "image/x-icon"})
+        router.get("https://example.com/rss").respond(
+            200, content=RSS.replace(b"<image>", b"<x>").replace(b"</image>", b"</x>")
+        )
+        router.get("https://example.com/favicon.ico").respond(
+            200, content=b"\x00\x00\x01\x00", headers={"content-type": "image/x-icon"}
+        )
         feed = await add_feed(session, user, "https://example.com/")
     assert feed.url == "https://example.com/rss"
     assert feed.icon_url == "https://example.com/favicon.ico"
@@ -124,7 +136,9 @@ async def test_add_feed_duplicate_raises(session, user, fake_queue):
         with pytest.raises(FeedError, match="already subscribed"):
             await add_feed(session, user, FEED_URL)
         # Discovered URL differs from the pasted one but is already stored
-        router.get("https://example.com/").respond(200, content=HTML_NO_LINKS, headers={"content-type": "text/html"})
+        router.get("https://example.com/").respond(
+            200, content=HTML_NO_LINKS, headers={"content-type": "text/html"}
+        )
         router.get("https://example.com/feed").respond(301, headers={"Location": FEED_URL})
         with pytest.raises(FeedError, match="already subscribed"):
             await add_feed(session, user, "https://example.com/")
@@ -132,7 +146,9 @@ async def test_add_feed_duplicate_raises(session, user, fake_queue):
 
 async def test_add_feed_failures_raise_feed_error(session, user, fake_queue):
     with _router() as router:
-        router.get("https://example.com/").respond(200, content=HTML_NO_LINKS, headers={"content-type": "text/html"})
+        router.get("https://example.com/").respond(
+            200, content=HTML_NO_LINKS, headers={"content-type": "text/html"}
+        )
         router.get(url__regex=r"https://example\.com/.+").respond(404)
         with pytest.raises(FeedError, match="no feed found"):
             await add_feed(session, user, "https://example.com/")
@@ -157,7 +173,10 @@ async def test_refresh_conditional_get_304(session, user, fake_queue):
         route = router.get(FEED_URL).respond(304)
         assert await refresh_feed(session, feed) == []
     req = route.calls.last.request
-    assert req.headers["if-none-match"] == '"e1"' and req.headers["if-modified-since"] == "Mon, 01 Jan 2024 00:00:00 GMT"
+    assert (
+        req.headers["if-none-match"] == '"e1"'
+        and req.headers["if-modified-since"] == "Mon, 01 Jan 2024 00:00:00 GMT"
+    )
     assert feed.last_success_at is not None and feed.error_count == 0
     assert feed.fetch_interval_min > interval_before
     assert feed.etag == '"e1"'
@@ -289,12 +308,34 @@ async def test_rules_hide_star_tag_mark_read(session, user, fake_queue):
     session.add_all(
         [
             models.FeedRule(user_id=user.id, feed_id=feed.id, field="title", pattern="first", action="hide"),
-            models.FeedRule(user_id=user.id, feed_id=None, field="body", pattern=r"body\s+two", is_regex=True, action="star"),
-            models.FeedRule(user_id=user.id, feed_id=None, field="url", pattern="/posts/2", action="tag", action_value="two"),
-            models.FeedRule(user_id=user.id, feed_id=None, field="author", pattern="alice", action="mark_read"),
-            models.FeedRule(user_id=user.id, feed_id=other.id, field="title", pattern="second", action="hide"),
-            models.FeedRule(user_id=user.id, feed_id=None, field="title", pattern="second", action="hide", enabled=False),
-            models.FeedRule(user_id=user.id, feed_id=None, field="title", pattern="[", is_regex=True, action="hide"),
+            models.FeedRule(
+                user_id=user.id,
+                feed_id=None,
+                field="body",
+                pattern=r"body\s+two",
+                is_regex=True,
+                action="star",
+            ),
+            models.FeedRule(
+                user_id=user.id,
+                feed_id=None,
+                field="url",
+                pattern="/posts/2",
+                action="tag",
+                action_value="two",
+            ),
+            models.FeedRule(
+                user_id=user.id, feed_id=None, field="author", pattern="alice", action="mark_read"
+            ),
+            models.FeedRule(
+                user_id=user.id, feed_id=other.id, field="title", pattern="second", action="hide"
+            ),
+            models.FeedRule(
+                user_id=user.id, feed_id=None, field="title", pattern="second", action="hide", enabled=False
+            ),
+            models.FeedRule(
+                user_id=user.id, feed_id=None, field="title", pattern="[", is_regex=True, action="hide"
+            ),
         ]
     )
     await session.commit()
@@ -304,7 +345,9 @@ async def test_rules_hide_star_tag_mark_read(session, user, fake_queue):
     by_guid = {i.guid: i for i in items}
     states = {
         s.item_id: s
-        for s in (await session.scalars(select(models.ItemState).where(models.ItemState.user_id == user.id))).all()
+        for s in (
+            await session.scalars(select(models.ItemState).where(models.ItemState.user_id == user.id))
+        ).all()
     }
     s1 = states[by_guid["post-1"].id]
     assert s1.hidden is True and s1.is_read is True and s1.read_at is not None
@@ -327,7 +370,9 @@ async def test_permanent_redirect_updates_feed_url(session, user, fake_queue):
     # temporary redirects leave the URL alone
     feed2 = await _make_feed(session, user, url="https://example.com/tmp")
     with _router() as router:
-        router.get("https://example.com/tmp").respond(302, headers={"Location": "https://example.com/new-feed.xml"})
+        router.get("https://example.com/tmp").respond(
+            302, headers={"Location": "https://example.com/new-feed.xml"}
+        )
         router.get("https://example.com/new-feed.xml").respond(200, content=RSS)
         await refresh_feed(session, feed2)
     assert feed2.url == "https://example.com/tmp" and feed2.error_count == 0

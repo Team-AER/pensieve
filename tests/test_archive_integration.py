@@ -30,7 +30,9 @@ def real_stack():
         "garage",
     )
     storage_mod.set_storage(store)
-    render_mod.set_renderer(render_mod.PlaywrightRenderer(os.environ.get("PENSIEVE_IT_BROWSER", "ws://localhost:3000/")))
+    render_mod.set_renderer(
+        render_mod.PlaywrightRenderer(os.environ.get("PENSIEVE_IT_BROWSER", "ws://localhost:3000/"))
+    )
     yield store
     storage_mod.reset_storage()
     render_mod.set_renderer(None)
@@ -46,7 +48,11 @@ async def test_real_capture_of_a_public_page(session, user, fake_queue, real_sta
     assert shot[:3] == b"\xff\xd8\xff"
     item = await session.get(models.Item, result.item.id)
     assert item.content_text and item.title != item.url
-    assets = (await session.scalars(select(models.SnapshotAsset.sha256).where(models.SnapshotAsset.snapshot_id == snap.id))).all()
+    assets = (
+        await session.scalars(
+            select(models.SnapshotAsset.sha256).where(models.SnapshotAsset.snapshot_id == snap.id)
+        )
+    ).all()
     for sha in assets:
         assert await real_stack.exists(storage_mod.asset_key(sha))
 

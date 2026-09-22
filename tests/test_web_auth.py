@@ -15,7 +15,12 @@ async def test_setup_creates_first_admin(client, session):
     assert r.status_code == 200 and "Create your account" in r.text
     r = await client.post(
         "/setup",
-        data={"email": "Admin@Example.com", "display_name": "Admin", "password": "hunter2hunter2", "password_confirm": "hunter2hunter2"},
+        data={
+            "email": "Admin@Example.com",
+            "display_name": "Admin",
+            "password": "hunter2hunter2",
+            "password_confirm": "hunter2hunter2",
+        },
     )
     assert r.status_code == 303 and r.headers["location"] == "/"
     assert "pensieve_session" in r.cookies
@@ -107,7 +112,9 @@ async def test_login_rate_limit_blocks_after_failures(client, user, memory_limit
 async def test_security_headers_present(client, user):
     r = await client.get("/login")
     csp = r.headers["content-security-policy"]
-    assert "default-src 'self'" in csp and "frame-ancestors 'none'" in csp and "frame-src 'self' https:" in csp
+    assert (
+        "default-src 'self'" in csp and "frame-ancestors 'none'" in csp and "frame-src 'self' https:" in csp
+    )
     assert r.headers["x-content-type-options"] == "nosniff"
     assert r.headers["referrer-policy"] == "strict-origin-when-cross-origin"
     assert r.headers["x-frame-options"] == "DENY"

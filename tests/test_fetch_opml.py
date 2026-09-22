@@ -68,9 +68,15 @@ async def test_import_opml_creates_folders_and_skips_duplicates(session, user, f
     # "News" only held the duplicate BBC feed, so no empty folder is created for it
     assert [f.name for f in result.folders_created] == ["Tech"]
 
-    folders = {f.name: f for f in (await session.scalars(select(models.Folder).where(models.Folder.user_id == user.id))).all()}
+    folders = {
+        f.name: f
+        for f in (await session.scalars(select(models.Folder).where(models.Folder.user_id == user.id))).all()
+    }
     assert set(folders) == {"Tech"}
-    feeds = {f.url: f for f in (await session.scalars(select(models.Feed).where(models.Feed.user_id == user.id))).all()}
+    feeds = {
+        f.url: f
+        for f in (await session.scalars(select(models.Feed).where(models.Feed.user_id == user.id))).all()
+    }
     assert len(feeds) == 4
     assert feeds["https://top.example.com/rss"].folder_id is None
     assert feeds["https://top.example.com/rss"].title == "Top Feed Title"
@@ -92,7 +98,9 @@ async def test_export_opml_roundtrip(session, user):
     result = await import_opml(session, user, OPML)
     await session.commit()
     feeds = list((await session.scalars(select(models.Feed).where(models.Feed.user_id == user.id))).all())
-    folders = list((await session.scalars(select(models.Folder).where(models.Folder.user_id == user.id))).all())
+    folders = list(
+        (await session.scalars(select(models.Folder).where(models.Folder.user_id == user.id))).all()
+    )
     assert len(feeds) == 4 and len(folders) == 2
 
     xml = export_opml(user, feeds, folders)

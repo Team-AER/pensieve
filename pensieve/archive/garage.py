@@ -48,7 +48,9 @@ async def init_storage() -> str:
     """Make the bucket usable with the configured key. Returns a one-line summary."""
     s = get_settings()
     if not (s.garage_admin_token and s.s3_access_key and s.s3_secret_key):
-        raise GarageError("set PENSIEVE_GARAGE_ADMIN_TOKEN, PENSIEVE_S3_ACCESS_KEY and PENSIEVE_S3_SECRET_KEY")
+        raise GarageError(
+            "set PENSIEVE_GARAGE_ADMIN_TOKEN, PENSIEVE_S3_ACCESS_KEY and PENSIEVE_S3_SECRET_KEY"
+        )
     headers = {"Authorization": f"Bearer {s.garage_admin_token}"}
     done: list[str] = []
     async with httpx.AsyncClient(base_url=s.garage_admin_url, headers=headers, timeout=15) as client:
@@ -56,9 +58,16 @@ async def init_storage() -> str:
         layout = (await _call(client, "GET", "/v2/GetClusterLayout")).json()
         if not layout.get("roles"):
             node_id = status["nodes"][0]["id"]
-            role = {"id": node_id, "zone": ZONE, "capacity": s.garage_capacity_gb * 1_000_000_000, "tags": ["pensieve"]}
+            role = {
+                "id": node_id,
+                "zone": ZONE,
+                "capacity": s.garage_capacity_gb * 1_000_000_000,
+                "tags": ["pensieve"],
+            }
             await _call(client, "POST", "/v2/UpdateClusterLayout", json={"roles": [role]})
-            await _call(client, "POST", "/v2/ApplyClusterLayout", json={"version": int(layout.get("version", 0)) + 1})
+            await _call(
+                client, "POST", "/v2/ApplyClusterLayout", json={"version": int(layout.get("version", 0)) + 1}
+            )
             done.append(f"layout applied ({s.garage_capacity_gb} GB)")
 
         key = await _call(client, "GET", "/v2/GetKeyInfo", params={"id": s.s3_access_key})

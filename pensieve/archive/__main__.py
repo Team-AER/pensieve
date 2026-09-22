@@ -1,10 +1,10 @@
 """Archive CLI.
 
-  python -m pensieve.archive init-storage          bootstrap Garage (layout, key, bucket); idempotent
-  python -m pensieve.archive check                 put/get/delete a probe object through the S3 API
-  python -m pensieve.archive recapture <email>     re-queue every failed capture for a user
-  python -m pensieve.archive archive-starred <email>  archive every starred item that has no snapshot yet
-  python -m pensieve.archive gc                    delete blobs no snapshot references
+python -m pensieve.archive init-storage          bootstrap Garage (layout, key, bucket); idempotent
+python -m pensieve.archive check                 put/get/delete a probe object through the S3 API
+python -m pensieve.archive recapture <email>     re-queue every failed capture for a user
+python -m pensieve.archive archive-starred <email>  archive every starred item that has no snapshot yet
+python -m pensieve.archive gc                    delete blobs no snapshot references
 """
 
 from __future__ import annotations

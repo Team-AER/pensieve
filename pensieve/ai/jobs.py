@@ -256,7 +256,9 @@ async def _enqueue_remainder(ctx: dict, feed_id: uuid.UUID, rest: list[models.It
     jobs = 0
     for n, start in enumerate(range(0, len(ids), cap), start=1):
         chunk = ids[start : start + cap]
-        await _enqueue(ctx, queue.AI_PROCESS_NEW_ITEMS, str(feed_id), chunk, job_id=remainder_job_id(feed_id, n, chunk))
+        await _enqueue(
+            ctx, queue.AI_PROCESS_NEW_ITEMS, str(feed_id), chunk, job_id=remainder_job_id(feed_id, n, chunk)
+        )
         jobs += 1
     return jobs
 
@@ -329,7 +331,9 @@ async def ai_process_new_items(ctx: dict, feed_id: str, item_ids: list[str]) -> 
                 )
             except Exception as exc:  # noqa: BLE001 - a Redis hiccup must not fail the tagging we did
                 log.warning("could not enqueue summaries for feed %s: %s", fid, exc)
-                notes.append(f"summaries not queued ({exc.__class__.__name__}); run `python -m pensieve.ai summaries`")
+                notes.append(
+                    f"summaries not queued ({exc.__class__.__name__}); run `python -m pensieve.ai summaries`"
+                )
         note = "; ".join(notes)[:2000] or None
         if errors and int(ctx.get("job_try") or 1) < MAX_TRIES:
             raise errors[0]

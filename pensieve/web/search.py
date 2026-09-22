@@ -84,7 +84,9 @@ async def search(
         ]
     feeds = list(await session.scalars(select(Feed).where(Feed.user_id == user.id).order_by(Feed.title)))
     folders = list(
-        await session.scalars(select(Folder).where(Folder.user_id == user.id).order_by(Folder.position, Folder.name))
+        await session.scalars(
+            select(Folder).where(Folder.user_id == user.id).order_by(Folder.position, Folder.name)
+        )
     )
     params = {"q": q, "feed": feed, "folder": folder, "state": state, "since": since, "until": until}
     view = View("search", title="Search")

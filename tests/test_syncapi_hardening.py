@@ -71,7 +71,9 @@ async def test_subscription_list_has_sortid_and_firstitemmsec(client, session, u
     assert a["firstitemmsec"] == str(to_msec(d.a1.published_at))
     # Deterministic across calls, and distinct per feed.
     r2 = await client.get(f"{API}/subscription/list", headers=auth(d.token))
-    assert {s["id"]: s["sortid"] for s in r2.json()["subscriptions"]} == {k: v["sortid"] for k, v in subs.items()}
+    assert {s["id"]: s["sortid"] for s in r2.json()["subscriptions"]} == {
+        k: v["sortid"] for k, v in subs.items()
+    }
     assert len({s["sortid"] for s in subs.values()}) == 3
     # A feed with no items reports 0.
     empty = models.Feed(user_id=user.id, url="https://e.example.com/rss", title="Empty")

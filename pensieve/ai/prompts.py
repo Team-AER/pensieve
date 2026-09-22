@@ -142,7 +142,12 @@ def item_summary_schema(bullets: int = 3) -> dict[str, Any]:
     return {
         "type": "object",
         "properties": {
-            "bullets": {"type": "array", "items": {"type": "string"}, "minItems": bullets, "maxItems": bullets},
+            "bullets": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": bullets,
+                "maxItems": bullets,
+            },
             "why_it_matters": {"type": "string"},
         },
         "required": ["bullets", "why_it_matters"],
@@ -156,7 +161,12 @@ def item_summary_entry_schema(bullets: int = 3) -> dict[str, Any]:
         "type": "object",
         "properties": {
             "index": {"type": "integer"},
-            "bullets": {"type": "array", "items": {"type": "string"}, "minItems": bullets, "maxItems": bullets},
+            "bullets": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": bullets,
+                "maxItems": bullets,
+            },
             "why_it_matters": {"type": "string"},
         },
         "required": ["index", "bullets", "why_it_matters"],

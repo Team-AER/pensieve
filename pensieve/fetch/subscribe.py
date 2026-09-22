@@ -145,7 +145,9 @@ async def load_rules(session: AsyncSession, user_id: uuid.UUID, feed_id: uuid.UU
     return list((await session.scalars(stmt)).all())
 
 
-def apply_rules(rules: list[FeedRule], user_id: uuid.UUID, items: list[Item], now: datetime) -> list[ItemState]:
+def apply_rules(
+    rules: list[FeedRule], user_id: uuid.UUID, items: list[Item], now: datetime
+) -> list[ItemState]:
     """Build ``ItemState`` rows for items matching any rule (hide/star/tag/mark_read). Not persisted here."""
     states: list[ItemState] = []
     for item in items:
@@ -214,7 +216,9 @@ def _update_item_in_place(item: Item, entry: ParsedEntry, now: datetime) -> None
     item.updated_at = now
 
 
-async def ingest(session: AsyncSession, feed: Feed, parsed: ParsedFeed, *, now: datetime | None = None) -> list[Item]:
+async def ingest(
+    session: AsyncSession, feed: Feed, parsed: ParsedFeed, *, now: datetime | None = None
+) -> list[Item]:
     """Insert entries not yet stored for this feed, apply rules, return the new ``Item`` rows.
 
     Dedupe order: by guid (a known guid whose content hash changed is updated in place, stamping
@@ -357,7 +361,9 @@ def _conditional_headers(feed: Feed) -> dict[str, str]:
     return headers
 
 
-async def _maybe_follow_permanent_redirect(session: AsyncSession, feed: Feed, response: httpx.Response) -> None:
+async def _maybe_follow_permanent_redirect(
+    session: AsyncSession, feed: Feed, response: httpx.Response
+) -> None:
     if not response.history:
         return
     if not all(r.status_code in PERMANENT_REDIRECTS for r in response.history):

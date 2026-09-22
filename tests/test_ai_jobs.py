@@ -166,7 +166,9 @@ async def test_mirror_rows_keyed_by_arq_job_id(session, user, gateway):
     await jobs.ai_process_new_items({"job_try": 1, "job_id": "backfill:x:1"}, str(feed.id), b)
     rows = (
         await session.scalars(
-            select(models.AIJob).where(models.AIJob.kind == "process_items", models.AIJob.target_id == feed.id)
+            select(models.AIJob).where(
+                models.AIJob.kind == "process_items", models.AIJob.target_id == feed.id
+            )
         )
     ).all()
     assert len(rows) == 2 and {r.id for r in rows} == {
@@ -198,18 +200,25 @@ async def test_cap_remainder_is_requeued_in_chunks(session, user, gateway, monke
     process = [c for c in redis.calls if c[0] == queue.AI_PROCESS_NEW_ITEMS]
     assert len(process) == 2 and [c[0] for c in redis.calls][-1] == queue.AI_SUMMARIZE_ITEMS
     assert [list(c[1][1]) for c in process] == expected
-    assert [c[2] for c in process] == [jobs.remainder_job_id(feed.id, n, ch) for n, ch in enumerate(expected, 1)]
+    assert [c[2] for c in process] == [
+        jobs.remainder_job_id(feed.id, n, ch) for n, ch in enumerate(expected, 1)
+    ]
     assert all(c[2].startswith(f"process:{feed.id}:") for c in process)
     # summaries are queued for the two items this job actually processed
     assert sorted(redis.calls[-1][1][1]) == sorted(str(i.id) for i in newest_first[:2])
     # only the newest two were tagged by this job
-    tagged = (await session.scalars(select(models.ItemAI.item_id).where(models.ItemAI.user_id == user.id))).all()
+    tagged = (
+        await session.scalars(select(models.ItemAI.item_id).where(models.ItemAI.user_id == user.id))
+    ).all()
     assert set(tagged) == {i.id for i in newest_first[:2]}
 
 
 async def test_reaper_fails_stale_running_rows(session, user, gateway):
     stale = models.AIJob(
-        kind="digest", user_id=user.id, status="running", started_at=now() - timedelta(seconds=jobs.JOB_TIMEOUT_S + 5)
+        kind="digest",
+        user_id=user.id,
+        status="running",
+        started_at=now() - timedelta(seconds=jobs.JOB_TIMEOUT_S + 5),
     )
     fresh = models.AIJob(kind="digest", user_id=user.id, status="running", started_at=now())
     session.add_all([stale, fresh])
@@ -280,7 +289,9 @@ async def test_process_new_items_respects_summaries_toggle(session, user, gatewa
 
 
 def summaries(n):
-    return {"items": [{"index": i, "bullets": ["a", "b", "c"], "why_it_matters": f"why {i}"} for i in range(n)]}
+    return {
+        "items": [{"index": i, "bullets": ["a", "b", "c"], "why_it_matters": f"why {i}"} for i in range(n)]
+    }
 
 
 async def test_summarize_items_job(session, user, gateway):
@@ -313,7 +324,10 @@ async def test_summarize_item_job_rewrite_carries_the_readers_note(session, user
     assert ai.summary.startswith("- a\n- b")
     prompt = gateway.chat_calls[0]["messages"][1]["content"]
     assert "rejected the previous summary" in prompt and "I do not care about funding" in prompt
-    assert "self-hosting only" in prompt and "exactly two crisp bullets" in gateway.chat_calls[0]["messages"][0]["content"]
+    assert (
+        "self-hosting only" in prompt
+        and "exactly two crisp bullets" in gateway.chat_calls[0]["messages"][0]["content"]
+    )
 
 
 async def test_summary_sweep_requeues_missed_stories(session, user, gateway):
@@ -377,7 +391,9 @@ class FakeRedis:
 
 
 def at_local(hour: int, minute: int) -> datetime:
-    return datetime.now(ZoneInfo(settings.timezone)).replace(hour=hour, minute=minute, second=0, microsecond=0)
+    return datetime.now(ZoneInfo(settings.timezone)).replace(
+        hour=hour, minute=minute, second=0, microsecond=0
+    )
 
 
 async def test_dispatchers_enqueue_per_user(session, user):

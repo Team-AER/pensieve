@@ -95,7 +95,11 @@ async def test_tag_items_skips_already_tagged_unless_forced(session, user, gatew
         )
     )
     session.add(models.ItemAI(user_id=user.id, item_id=items[1].id, tags=["ai"], prompt_version="old"))
-    session.add(models.ItemAI(user_id=user.id, item_id=items[2].id, summary="- s", prompt_version=prompts.PROMPT_VERSION))
+    session.add(
+        models.ItemAI(
+            user_id=user.id, item_id=items[2].id, summary="- s", prompt_version=prompts.PROMPT_VERSION
+        )
+    )
     await session.commit()
     gateway.chat(tagging_payload([(0, [("web", 0.9)], "article"), (1, [("web", 0.9)], "article")]))
     rows = await categorize.tag_items(session, user, items)
@@ -111,7 +115,9 @@ async def test_tag_items_skips_already_tagged_unless_forced(session, user, gatew
 async def test_off_list_content_type_and_malformed_entry_do_not_fail_batch(session, user, gateway):
     _, items = await seed_items(session, user, n=3)
     payload = tagging_payload([(0, [("ai", 0.9)], "newsletter"), (2, [("web", 0.8)], "article")])
-    payload["items"].insert(1, {"index": 1, "tags": [{"name": "ai", "confidence": "high"}], "content_type": 3})
+    payload["items"].insert(
+        1, {"index": 1, "tags": [{"name": "ai", "confidence": "high"}], "content_type": 3}
+    )
     gateway.chat(payload)
     rows = await categorize.tag_items(session, user, items)
     by_item = {r.item_id: r for r in rows}
@@ -208,7 +214,11 @@ async def test_file_feed_creates_new_folder_only_at_high_confidence(session, use
     await session.commit()
     assert target is None
     assert await session.scalar(select(models.Folder).where(models.Folder.user_id == user.id)) is None
-    assert feed.suggested_folder_id is None and feed.suggested_folder_confidence == 0.7 and feed.folder_id is None
+    assert (
+        feed.suggested_folder_id is None
+        and feed.suggested_folder_confidence == 0.7
+        and feed.folder_id is None
+    )
     gateway.chat({"folder": None, "new_folder": "Data Engineering", "confidence": 0.95})
     target = await categorize.file_feed(session, user, feed)
     await session.commit()
@@ -222,7 +232,9 @@ async def test_file_feed_reuses_a_folder_created_during_the_model_call(session, 
     real_examples = categorize.filing_examples
 
     async def import_lands_meanwhile(session_, user_, names):
-        session.add(models.Folder(user_id=user.id, name="Tech News"))  # e.g. an OPML import committing mid-call
+        session.add(
+            models.Folder(user_id=user.id, name="Tech News")
+        )  # e.g. an OPML import committing mid-call
         await session.flush()
         return await real_examples(session_, user_, names)
 

@@ -40,11 +40,17 @@ def rendered(url: str = "https://news.example.com/story", dom: str = RENDERED_DO
         "https://news.example.com/site.css": Resource(
             "https://news.example.com/site.css", "text/css", b"body{background:url(/bg.png)} h1{color:red}"
         ),
-        "https://news.example.com/bg.png": Resource("https://news.example.com/bg.png", "image/png", PNG + b"bg"),
+        "https://news.example.com/bg.png": Resource(
+            "https://news.example.com/bg.png", "image/png", PNG + b"bg"
+        ),
         "https://news.example.com/pic.png": Resource("https://news.example.com/pic.png", "image/png", PNG),
-        "https://news.example.com/lead.png": Resource("https://news.example.com/lead.png", "image/png", PNG + b"lead"),
+        "https://news.example.com/lead.png": Resource(
+            "https://news.example.com/lead.png", "image/png", PNG + b"lead"
+        ),
     }
-    return Rendered(url=url, status=200, html=dom, title="Orchard survey", resources=resources, screenshot=JPEG, **kw)
+    return Rendered(
+        url=url, status=200, html=dom, title="Orchard survey", resources=resources, screenshot=JPEG, **kw
+    )
 
 
 class FakeRenderer:

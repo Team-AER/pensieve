@@ -92,7 +92,9 @@ ACCOUNT_SECTIONS = [
 ]
 
 
-def page(request: Request, user: User, section: str, template: str, ctx: dict[str, Any], status_code: int = 200):
+def page(
+    request: Request, user: User, section: str, template: str, ctx: dict[str, Any], status_code: int = 200
+):
     msg = request.query_params.get("msg")
     base = {
         "section": section,
@@ -126,7 +128,9 @@ async def get_feed_or_404(session: AsyncSession, user: User, feed_id: uuid.UUID)
 
 async def user_folders(session: AsyncSession, user: User) -> list[Folder]:
     return list(
-        await session.scalars(select(Folder).where(Folder.user_id == user.id).order_by(Folder.position, Folder.name))
+        await session.scalars(
+            select(Folder).where(Folder.user_id == user.id).order_by(Folder.position, Folder.name)
+        )
     )
 
 
@@ -173,7 +177,11 @@ async def _feeds(
     error: str | None = None,
     status_code: int = 200,
 ):
-    stmt = select(Feed).where(Feed.user_id == user.id, Feed.kind != FEED_KIND_SAVED).order_by(Feed.title, Feed.url)
+    stmt = (
+        select(Feed)
+        .where(Feed.user_id == user.id, Feed.kind != FEED_KIND_SAVED)
+        .order_by(Feed.title, Feed.url)
+    )
     if q.strip():
         like = f"%{q.strip().lower()}%"
         stmt = stmt.where(func.lower(Feed.title).like(like) | func.lower(Feed.url).like(like))
@@ -211,7 +219,10 @@ async def _feeds(
             }
         )
     paused_count = int(
-        await session.scalar(select(func.count(Feed.id)).where(Feed.user_id == user.id, Feed.paused.is_(True))) or 0
+        await session.scalar(
+            select(func.count(Feed.id)).where(Feed.user_id == user.id, Feed.paused.is_(True))
+        )
+        or 0
     )
     return page(
         request,
@@ -253,7 +264,9 @@ async def add_feed_route(
     except Exception as exc:  # noqa: BLE001  FeedError (and anything else) surfaces as a message
         await session.rollback()
         await session.refresh(user)
-        return await _feeds(request, user, session, error=str(exc) or "Couldn't add that feed.", status_code=400)
+        return await _feeds(
+            request, user, session, error=str(exc) or "Couldn't add that feed.", status_code=400
+        )
     return back("/manage/feeds", "feed_added")
 
 
@@ -324,7 +337,9 @@ async def set_feed_interval(
     minutes = max(settings.fetch_min_interval_min, min(settings.fetch_max_interval_min, minutes))
     feed.fetch_interval_min = minutes
     base = feed.last_fetch_at or datetime.now(UTC)
-    feed.next_fetch_at = min(base + timedelta(minutes=minutes), datetime.now(UTC) + timedelta(minutes=minutes))
+    feed.next_fetch_at = min(
+        base + timedelta(minutes=minutes), datetime.now(UTC) + timedelta(minutes=minutes)
+    )
     await session.commit()
     return back("/manage/feeds", "feed_updated")
 
@@ -459,15 +474,25 @@ async def dismiss_suggestion(
 
 @router.get("/folders")
 async def folders_page(
-    request: Request, user: CurrentUser, session: DB,
+    request: Request,
+    user: CurrentUser,
+    session: DB,
 ):
     folders = await user_folders(session, user)
     counts = dict(
-        (await session.execute(
-            select(Feed.folder_id, func.count(Feed.id)).where(Feed.user_id == user.id).group_by(Feed.folder_id)
-        )).all()
+        (
+            await session.execute(
+                select(Feed.folder_id, func.count(Feed.id))
+                .where(Feed.user_id == user.id)
+                .group_by(Feed.folder_id)
+            )
+        ).all()
     )
-    tags = list(await session.scalars(select(Tag).where(Tag.user_id == user.id).order_by(Tag.kind, Tag.position, Tag.name)))
+    tags = list(
+        await session.scalars(
+            select(Tag).where(Tag.user_id == user.id).order_by(Tag.kind, Tag.position, Tag.name)
+        )
+    )
     return page(
         request,
         user,
@@ -489,8 +514,15 @@ async def create_folder(
         return back("/manage/folders")
     exists_ = await session.scalar(select(Folder).where(Folder.user_id == user.id, Folder.name == name))
     if exists_:
-        return RedirectResponse("/manage/folders?err=A+folder+with+that+name+already+exists.", status_code=303)
-    position = int(await session.scalar(select(func.coalesce(func.max(Folder.position), 0)).where(Folder.user_id == user.id)) or 0)
+        return RedirectResponse(
+            "/manage/folders?err=A+folder+with+that+name+already+exists.", status_code=303
+        )
+    position = int(
+        await session.scalar(
+            select(func.coalesce(func.max(Folder.position), 0)).where(Folder.user_id == user.id)
+        )
+        or 0
+    )
     session.add(Folder(user_id=user.id, name=name, position=position + 1))
     await session.commit()
     return back("/manage/folders", "folder_saved")
@@ -612,17 +644,29 @@ RULE_ACTIONS = {"hide", "star", "tag", "mark_read"}
 
 @router.get("/rules")
 async def rules_page(request: Request, user: CurrentUser, session: DB):
-    rules = list(await session.scalars(select(FeedRule).where(FeedRule.user_id == user.id).order_by(FeedRule.created_at)))
+    rules = list(
+        await session.scalars(
+            select(FeedRule).where(FeedRule.user_id == user.id).order_by(FeedRule.created_at)
+        )
+    )
     feeds = list(
         await session.scalars(
             select(Feed).where(Feed.user_id == user.id, Feed.kind != FEED_KIND_SAVED).order_by(Feed.title)
         )
     )
     feed_names = {f.id: f.title or f.url for f in feeds}
-    return page(request, user, "rules", "manage/rules.html", {"rules": rules, "feeds": feeds, "feed_names": feed_names})
+    return page(
+        request,
+        user,
+        "rules",
+        "manage/rules.html",
+        {"rules": rules, "feeds": feeds, "feed_names": feed_names},
+    )
 
 
-def _rule_values(feed_id: str, field: str, pattern: str, is_regex: str, action: str, action_value: str) -> dict:
+def _rule_values(
+    feed_id: str, field: str, pattern: str, is_regex: str, action: str, action_value: str
+) -> dict:
     return {
         "feed_id": parse_uuid(feed_id),
         "field": field if field in RULE_FIELDS else "title",
@@ -734,7 +778,9 @@ async def apply_rule_to_existing(session: AsyncSession, user: User, rule: FeedRu
     existing = {
         st.item_id: st
         for st in await session.scalars(
-            select(ItemState).where(ItemState.user_id == user.id, ItemState.item_id.in_([m.item_id for m in matched]))
+            select(ItemState).where(
+                ItemState.user_id == user.id, ItemState.item_id.in_([m.item_id for m in matched])
+            )
         )
     }
     for new in matched:
@@ -767,7 +813,9 @@ async def apply_rule_route(
     try:
         await apply_rule_to_existing(session, user, rule)
     except ImportError:
-        return RedirectResponse("/manage/rules?err=Rules+can%27t+be+applied+retroactively+yet.", status_code=303)
+        return RedirectResponse(
+            "/manage/rules?err=Rules+can%27t+be+applied+retroactively+yet.", status_code=303
+        )
     await session.commit()
     return back("/manage/rules", "rule_applied")
 
@@ -780,7 +828,10 @@ async def apply_rule_route(
 def ai_settings(user: User) -> dict[str, Any]:
     s = user.settings or {}
     out = {k: bool(s.get(k, True)) for k in AI_TOGGLES}
-    out["digest_time"] = str(s.get("digest_time") or f"{get_settings().digest_hour_local:02d}:{get_settings().digest_minute_local:02d}")
+    out["digest_time"] = str(
+        s.get("digest_time")
+        or f"{get_settings().digest_hour_local:02d}:{get_settings().digest_minute_local:02d}"
+    )
     return out
 
 
@@ -936,7 +987,13 @@ async def save_profile(
 
 @router.get("/import")
 async def import_page(request: Request, user: CurrentUser):
-    return page(request, user, "import", "manage/import.html", {"result": None, "error": request.query_params.get("err")})
+    return page(
+        request,
+        user,
+        "import",
+        "manage/import.html",
+        {"result": None, "error": request.query_params.get("err")},
+    )
 
 
 @router.post("/import/opml")
@@ -950,15 +1007,31 @@ async def import_opml_route(
     try:
         from pensieve.fetch.opml import import_opml  # type: ignore[import-not-found]
     except ImportError:
-        return page(request, user, "import", "manage/import.html", {"result": None, "error": "OPML import isn't available yet."}, 400)
+        return page(
+            request,
+            user,
+            "import",
+            "manage/import.html",
+            {"result": None, "error": "OPML import isn't available yet."},
+            400,
+        )
     try:
         result = await import_opml(session, user, data)
         await session.commit()
     except Exception as exc:  # noqa: BLE001
         await session.rollback()
         await session.refresh(user)
-        return page(request, user, "import", "manage/import.html", {"result": None, "error": str(exc) or "Import failed."}, 400)
-    return page(request, user, "import", "manage/import.html", {"result": result, "flash": FLASH["opml_imported"]})
+        return page(
+            request,
+            user,
+            "import",
+            "manage/import.html",
+            {"result": None, "error": str(exc) or "Import failed."},
+            400,
+        )
+    return page(
+        request, user, "import", "manage/import.html", {"result": result, "flash": FLASH["opml_imported"]}
+    )
 
 
 @router.get("/export/opml")
@@ -976,21 +1049,26 @@ async def export_opml_route(user: CurrentUser, session: DB):
     except ImportError:
         data = _fallback_opml(feeds, folders)
     return Response(
-        data, media_type="text/x-opml", headers={"Content-Disposition": 'attachment; filename="pensieve.opml"'}
+        data,
+        media_type="text/x-opml",
+        headers={"Content-Disposition": 'attachment; filename="pensieve.opml"'},
     )
 
 
 def _fallback_opml(feeds: list[Feed], folders: list[Folder]) -> bytes:
     from xml.sax.saxutils import quoteattr
 
-    lines = ['<?xml version="1.0" encoding="UTF-8"?>', "<opml version=\"2.0\"><head><title>Pensieve</title></head><body>"]
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<opml version="2.0"><head><title>Pensieve</title></head><body>',
+    ]
     by_folder: dict[uuid.UUID | None, list[Feed]] = {}
     for f in feeds:
         by_folder.setdefault(f.folder_id, []).append(f)
 
     def outline(f: Feed) -> str:
         return (
-            f"<outline type=\"rss\" text={quoteattr(f.title or f.url)} title={quoteattr(f.title or f.url)} "
+            f'<outline type="rss" text={quoteattr(f.title or f.url)} title={quoteattr(f.title or f.url)} '
             f"xmlUrl={quoteattr(f.url)} htmlUrl={quoteattr(f.site_url or '')}/>"
         )
 
@@ -1029,7 +1107,13 @@ async def export_json(user: CurrentUser, session: DB):
         "user": {"email": user.email, "display_name": user.display_name},
         "folders": [{"id": str(f.id), "name": f.name, "position": f.position} for f in folders],
         "feeds": [
-            {"id": str(f.id), "title": f.title, "url": f.url, "site_url": f.site_url, "folder_id": str(f.folder_id) if f.folder_id else None}
+            {
+                "id": str(f.id),
+                "title": f.title,
+                "url": f.url,
+                "site_url": f.site_url,
+                "folder_id": str(f.folder_id) if f.folder_id else None,
+            }
             for f in feeds
         ],
         "items": [
@@ -1052,10 +1136,20 @@ async def export_json(user: CurrentUser, session: DB):
             for i, s in items
         ],
         "notes": [
-            {"id": str(n.id), "item_id": str(n.item_id), "quote": n.quote, "body": n.body, "created_at": dt(n.created_at)}
+            {
+                "id": str(n.id),
+                "item_id": str(n.item_id),
+                "quote": n.quote,
+                "body": n.body,
+                "created_at": dt(n.created_at),
+            }
             for n in notes
         ],
-        "profile": {"version": profile.version, "body_text": profile.body_text, "generated_at": dt(profile.generated_at)}
+        "profile": {
+            "version": profile.version,
+            "body_text": profile.body_text,
+            "generated_at": dt(profile.generated_at),
+        }
         if profile
         else None,
     }
@@ -1144,7 +1238,9 @@ async def change_password(
 @router.get("/tokens")
 async def tokens_page(request: Request, user: CurrentUser, session: DB):
     tokens = list(
-        await session.scalars(select(ApiToken).where(ApiToken.user_id == user.id).order_by(ApiToken.created_at.desc()))
+        await session.scalars(
+            select(ApiToken).where(ApiToken.user_id == user.id).order_by(ApiToken.created_at.desc())
+        )
     )
     return page(request, user, "tokens", "manage/tokens.html", {"tokens": tokens, "new_token": None})
 
@@ -1175,7 +1271,9 @@ async def create_token(
     session.add(token)
     await session.commit()
     tokens = list(
-        await session.scalars(select(ApiToken).where(ApiToken.user_id == user.id).order_by(ApiToken.created_at.desc()))
+        await session.scalars(
+            select(ApiToken).where(ApiToken.user_id == user.id).order_by(ApiToken.created_at.desc())
+        )
     )
     return page(
         request,
@@ -1210,7 +1308,13 @@ def require_admin(user: User) -> None:
 async def users_page(request: Request, user: CurrentUser, session: DB):
     require_admin(user)
     users = list(await session.scalars(select(User).order_by(User.created_at)))
-    return page(request, user, "users", "manage/users.html", {"users": users, "invited": None, "error": request.query_params.get("err")})
+    return page(
+        request,
+        user,
+        "users",
+        "manage/users.html",
+        {"users": users, "invited": None, "error": request.query_params.get("err")},
+    )
 
 
 @router.post("/users")

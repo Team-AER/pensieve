@@ -285,9 +285,7 @@ async def daily_digest(
     profile = await profile_text(session, user.id)
     profile_lc = profile.lower()
     open_rates = await feed_open_rates(session, user.id)
-    liked_tags = (
-        await top_tags(session, user.id) if (center is None or len(vectors) < len(items)) else {}
-    )
+    liked_tags = await top_tags(session, user.id) if (center is None or len(vectors) < len(items)) else {}
     has_history = bool(liked_tags) or any(r is not None for r in open_rates.values())
 
     # cluster membership for the window's items
@@ -656,7 +654,9 @@ async def _story_siblings(
     return {item_id: cluster_id for item_id, cluster_id in rows}
 
 
-async def summarized_cluster_ids(session: AsyncSession, user_id: uuid.UUID, cluster_ids: set[uuid.UUID]) -> set:
+async def summarized_cluster_ids(
+    session: AsyncSession, user_id: uuid.UUID, cluster_ids: set[uuid.UUID]
+) -> set:
     """Clusters that already have at least one member with a summary for this user."""
     if not cluster_ids:
         return set()
@@ -674,7 +674,12 @@ async def summarized_cluster_ids(session: AsyncSession, user_id: uuid.UUID, clus
 
 
 async def items_without_summary(
-    session: AsyncSession, user_id: uuid.UUID, since: datetime, *, until: datetime | None = None, limit: int = 500
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    since: datetime,
+    *,
+    until: datetime | None = None,
+    limit: int = 500,
 ) -> list[uuid.UUID]:
     """Ids of the user's items published in [since, until) that have no summary and whose story (cluster) has
     none either; newest first. What the sweep and the paper's "write missing summaries" hand to the job."""

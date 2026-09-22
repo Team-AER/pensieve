@@ -18,7 +18,13 @@ def _fresh_choice():
 
 def test_clean_maps_slider_positions_and_defaults():
     out = model_choice.clean(
-        {"fast": "  m-a ", "long": "__default__", "embedding": "", "fast_reasoning": "3", "long_reasoning": "bogus"}
+        {
+            "fast": "  m-a ",
+            "long": "__default__",
+            "embedding": "",
+            "fast_reasoning": "3",
+            "long_reasoning": "bogus",
+        }
     )
     assert out == {"fast": "m-a", "fast_reasoning": "medium"}
     assert model_choice.clean({"fast_reasoning": "99"}) == {"fast_reasoning": "xhigh"}
@@ -34,7 +40,11 @@ async def test_save_applies_and_reloads(session):
 
     await model_choice.save(session, {"fast": "picked-model", "long_reasoning": "high"})
     await session.commit()
-    assert s.llm_fast_model == "picked-model" and s.llm_long_model == env_long and s.llm_digest_reasoning == "high"
+    assert (
+        s.llm_fast_model == "picked-model"
+        and s.llm_long_model == env_long
+        and s.llm_digest_reasoning == "high"
+    )
     row = await session.scalar(select(models.AppSetting).where(models.AppSetting.key == "llm"))
     assert row is not None and row.value == {"fast": "picked-model", "long_reasoning": "high"}
 

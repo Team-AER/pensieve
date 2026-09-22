@@ -67,7 +67,11 @@ async def test_list_pages_by_cursor_and_is_stable_under_inserts(client, session,
 
 def test_cursor_roundtrip():
     item = models.Item(
-        feed_id=None, guid="g", title="t", published_at=datetime(2026, 9, 18, 1, 2, 3, 456789, tzinfo=UTC), hash="h"
+        feed_id=None,
+        guid="g",
+        title="t",
+        published_at=datetime(2026, 9, 18, 1, 2, 3, 456789, tzinfo=UTC),
+        hash="h",
     )
     item.id = models._uuid7()
     assert decode_cursor(encode_cursor(item)) == (item.published_at, item.id)
@@ -135,7 +139,11 @@ async def test_favicon_route_serves_bytes_or_letter_avatar(client, session, user
     feed.icon_content_type = "image/png"
     await session.commit()
     r = await client.get(f"/favicons/{feed.id}")
-    assert r.status_code == 200 and r.headers["content-type"] == "image/png" and r.content == bytes(feed.icon_data)
+    assert (
+        r.status_code == 200
+        and r.headers["content-type"] == "image/png"
+        and r.content == bytes(feed.icon_data)
+    )
     etag = r.headers["etag"]
     r = await client.get(f"/favicons/{feed.id}", headers={"If-None-Match": etag})
     assert r.status_code == 304
@@ -174,20 +182,50 @@ async def test_mark_all_read_undo_is_capped_and_token_is_single_use(client, sess
     r = await client.post("/items/undo-read", data={"token": token, "view": "unread"}, headers=headers | HX)
     assert r.status_code == 200
     unread = await session.scalar(
-        select(models.ItemState).where(models.ItemState.user_id == user.id, models.ItemState.is_read.is_(False))
+        select(models.ItemState).where(
+            models.ItemState.user_id == user.id, models.ItemState.is_read.is_(False)
+        )
     )
     assert unread is not None
     count_unread = len(
-        list(await session.scalars(select(models.ItemState).where(models.ItemState.user_id == user.id, models.ItemState.is_read.is_(False))))
+        list(
+            await session.scalars(
+                select(models.ItemState).where(
+                    models.ItemState.user_id == user.id, models.ItemState.is_read.is_(False)
+                )
+            )
+        )
     )
     assert count_unread == 3
     # Replaying the token does nothing more; a forged ids list is capped too.
     r = await client.post("/items/undo-read", data={"token": token, "view": "unread"}, headers=headers | HX)
     assert r.status_code == 200
-    assert len(list(await session.scalars(select(models.ItemState).where(models.ItemState.user_id == user.id, models.ItemState.is_read.is_(False))))) == 3
+    assert (
+        len(
+            list(
+                await session.scalars(
+                    select(models.ItemState).where(
+                        models.ItemState.user_id == user.id, models.ItemState.is_read.is_(False)
+                    )
+                )
+            )
+        )
+        == 3
+    )
     ids = ",".join(str(i.id) for i in items)
     await client.post("/items/undo-read", data={"ids": ids, "view": "unread"}, headers=headers | HX)
-    assert len(list(await session.scalars(select(models.ItemState).where(models.ItemState.user_id == user.id, models.ItemState.is_read.is_(False))))) == 3
+    assert (
+        len(
+            list(
+                await session.scalars(
+                    select(models.ItemState).where(
+                        models.ItemState.user_id == user.id, models.ItemState.is_read.is_(False)
+                    )
+                )
+            )
+        )
+        == 3
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -197,9 +235,25 @@ async def test_mark_all_read_undo_is_capped_and_token_is_single_use(client, sess
 
 async def test_feed_health_and_resume_all_and_interval(client, session, user):
     now = datetime.now(UTC)
-    a = await seed_feed(session, user, "Paused A", paused=True, error_count=7, last_error="HTTP 500", last_fetch_at=now - timedelta(hours=2), next_fetch_at=now + timedelta(hours=3))
+    a = await seed_feed(
+        session,
+        user,
+        "Paused A",
+        paused=True,
+        error_count=7,
+        last_error="HTTP 500",
+        last_fetch_at=now - timedelta(hours=2),
+        next_fetch_at=now + timedelta(hours=3),
+    )
     b = await seed_feed(session, user, "Paused B", paused=True, error_count=10)
-    c = await seed_feed(session, user, "Healthy C", last_fetch_at=now - timedelta(minutes=5), next_fetch_at=now + timedelta(minutes=10), last_success_at=now)
+    c = await seed_feed(
+        session,
+        user,
+        "Healthy C",
+        last_fetch_at=now - timedelta(minutes=5),
+        next_fetch_at=now + timedelta(minutes=10),
+        last_success_at=now,
+    )
     headers = await login(client, user)
     r = await client.get("/manage/feeds")
     assert r.status_code == 200
@@ -215,17 +269,23 @@ async def test_feed_health_and_resume_all_and_interval(client, session, user):
     assert "Resume all paused" not in r.text
 
     s = get_settings()
-    r = await client.post(f"/manage/feeds/{c.id}/interval", data={"fetch_interval_min": "45"}, headers=headers)
+    r = await client.post(
+        f"/manage/feeds/{c.id}/interval", data={"fetch_interval_min": "45"}, headers=headers
+    )
     assert r.status_code == 303
     await session.refresh(c)
     assert c.fetch_interval_min == 45 and c.next_fetch_at <= c.last_fetch_at + timedelta(minutes=45)
     await client.post(f"/manage/feeds/{c.id}/interval", data={"fetch_interval_min": "1"}, headers=headers)
     await session.refresh(c)
     assert c.fetch_interval_min == s.fetch_min_interval_min
-    await client.post(f"/manage/feeds/{c.id}/interval", data={"fetch_interval_min": "999999"}, headers=headers)
+    await client.post(
+        f"/manage/feeds/{c.id}/interval", data={"fetch_interval_min": "999999"}, headers=headers
+    )
     await session.refresh(c)
     assert c.fetch_interval_min == s.fetch_max_interval_min
-    r = await client.post(f"/manage/feeds/{c.id}/interval", data={"fetch_interval_min": "soon"}, headers=headers)
+    r = await client.post(
+        f"/manage/feeds/{c.id}/interval", data={"fetch_interval_min": "soon"}, headers=headers
+    )
     assert "err=" in r.headers["location"]
 
 
@@ -237,7 +297,9 @@ async def test_move_feed_over_htmx_returns_204_and_refreshes_counts(client, sess
     headers = await login(client, user)
     r = await client.get("/")
     assert f'data-feed-id="{feed.id}"' in r.text and f'data-drop-folder="{folder.id}"' in r.text
-    r = await client.post(f"/manage/feeds/{feed.id}/move", data={"folder_id": str(folder.id)}, headers=headers | HX)
+    r = await client.post(
+        f"/manage/feeds/{feed.id}/move", data={"folder_id": str(folder.id)}, headers=headers | HX
+    )
     assert r.status_code == 204 and "counts-changed" in r.headers["HX-Trigger"]
     await session.refresh(feed)
     assert feed.folder_id == folder.id
@@ -254,7 +316,9 @@ async def test_rule_applies_to_existing_items(client, session, user):
     elsewhere = await seed_item(session, other, "Sponsored elsewhere")
     starred = await seed_item(session, feed, "Sponsored but starred")
     session.add(models.ItemState(user_id=user.id, item_id=starred.id, is_starred=True, tags=["keep"]))
-    rule = models.FeedRule(user_id=user.id, feed_id=feed.id, field="title", pattern="sponsored", action="hide")
+    rule = models.FeedRule(
+        user_id=user.id, feed_id=feed.id, field="title", pattern="sponsored", action="hide"
+    )
     session.add(rule)
     await session.commit()
     headers = await login(client, user)
@@ -269,7 +333,9 @@ async def test_rule_applies_to_existing_items(client, session, user):
     await session.refresh(merged)
     assert merged.hidden and merged.is_starred and merged.tags == ["keep"]  # merged, not overwritten
     # A global tag rule reaches every feed and appends tags.
-    tag_rule = models.FeedRule(user_id=user.id, feed_id=None, field="title", pattern="sponsored", action="tag", action_value="ads")
+    tag_rule = models.FeedRule(
+        user_id=user.id, feed_id=None, field="title", pattern="sponsored", action="tag", action_value="ads"
+    )
     session.add(tag_rule)
     await session.commit()
     await client.post(f"/manage/rules/{tag_rule.id}/apply", headers=headers)
@@ -282,7 +348,9 @@ async def test_dismiss_suggestion_calls_ai_service_and_tolerates_absence(client,
     suggested = models.Folder(user_id=user.id, name="Suggested")
     session.add(suggested)
     await session.commit()
-    feed = await seed_feed(session, user, "Inbox feed", suggested_folder_id=suggested.id, suggested_folder_confidence=0.7)
+    feed = await seed_feed(
+        session, user, "Inbox feed", suggested_folder_id=suggested.id, suggested_folder_confidence=0.7
+    )
     headers = await login(client, user)
     r = await client.get("/manage/feeds?folder=inbox")
     assert f"/manage/feeds/{feed.id}/dismiss-suggestion" in r.text and ">Dismiss<" in r.text
@@ -295,7 +363,11 @@ async def test_dismiss_suggestion_calls_ai_service_and_tolerates_absence(client,
 
     fake_module(monkeypatch, "pensieve.ai.service", dismiss_folder_suggestion=dismiss_folder_suggestion)
     r = await client.post(f"/manage/feeds/{feed.id}/dismiss-suggestion", headers=headers)
-    assert r.status_code == 303 and r.headers["location"].endswith("suggestion_dismissed") and called == [feed.id]
+    assert (
+        r.status_code == 303
+        and r.headers["location"].endswith("suggestion_dismissed")
+        and called == [feed.id]
+    )
     await session.refresh(feed)
     assert feed.suggested_folder_id is None and feed.folder_id is None
 
@@ -313,7 +385,11 @@ async def test_font_size_and_measure_settings(client, session, user):
     headers = await login(client, user)
     r = await client.get("/")
     assert 'data-font="m"' in r.text and 'data-measure="normal"' in r.text
-    r = await client.post("/manage/account/profile", data={"theme": "auto", "font_size": "xl", "measure": "wide"}, headers=headers)
+    r = await client.post(
+        "/manage/account/profile",
+        data={"theme": "auto", "font_size": "xl", "measure": "wide"},
+        headers=headers,
+    )
     assert r.status_code == 303
     await session.refresh(user)
     assert user.settings["font_size"] == "xl" and user.settings["measure"] == "wide"
@@ -333,23 +409,40 @@ async def test_font_size_and_measure_settings(client, session, user):
 async def test_reading_preferences_font_face_leading_align_theme(client, session, user):
     headers = await login(client, user)
     r = await client.get("/")
-    assert 'data-face="sans"' in r.text and 'data-leading="normal"' in r.text and 'data-align="left"' in r.text
+    assert (
+        'data-face="sans"' in r.text and 'data-leading="normal"' in r.text and 'data-align="left"' in r.text
+    )
     # Live changes from the popover post one key at a time.
-    for key, value in [("font_family", "serif"), ("line_height", "loose"), ("text_align", "justify"), ("theme", "sepia")]:
+    for key, value in [
+        ("font_family", "serif"),
+        ("line_height", "loose"),
+        ("text_align", "justify"),
+        ("theme", "sepia"),
+    ]:
         r = await client.post("/manage/account/font", data={key: value}, headers=headers)
         assert r.status_code == 204
     await session.refresh(user)
     assert user.settings["font_family"] == "serif" and user.settings["line_height"] == "loose"
     assert user.settings["text_align"] == "justify" and user.settings["theme"] == "sepia"
     r = await client.get("/manage/account")
-    assert 'data-face="serif"' in r.text and 'data-leading="loose"' in r.text and 'data-align="justify"' in r.text
+    assert (
+        'data-face="serif"' in r.text
+        and 'data-leading="loose"' in r.text
+        and 'data-align="justify"' in r.text
+    )
     assert 'data-theme="sepia"' in r.text and 'value="serif" selected' in r.text
     # Out-of-range values are ignored, both live and from the profile form (which falls back to the default).
-    r = await client.post("/manage/account/font", data={"font_family": "comic", "theme": "neon"}, headers=headers)
+    r = await client.post(
+        "/manage/account/font", data={"font_family": "comic", "theme": "neon"}, headers=headers
+    )
     assert r.status_code == 204
     await session.refresh(user)
     assert user.settings["font_family"] == "serif" and user.settings["theme"] == "sepia"
-    r = await client.post("/manage/account/profile", data={"theme": "auto", "font_family": "wingdings", "line_height": "tight"}, headers=headers)
+    r = await client.post(
+        "/manage/account/profile",
+        data={"theme": "auto", "font_family": "wingdings", "line_height": "tight"},
+        headers=headers,
+    )
     assert r.status_code == 303
     await session.refresh(user)
     assert user.settings["font_family"] == "sans" and user.settings["line_height"] == "tight"
@@ -370,12 +463,16 @@ async def test_toolbar_share_and_shortcuts_listed(client, session, user):
 
 async def test_session_cookie_secure_follows_setting(client, user, monkeypatch):
     monkeypatch.setattr(get_settings(), "session_cookie_secure", True)
-    r = await client.post("/login", data={"email": user.email, "password": "password123", "csrf_token": make_csrf(None)})
+    r = await client.post(
+        "/login", data={"email": user.email, "password": "password123", "csrf_token": make_csrf(None)}
+    )
     assert r.status_code == 303
     assert "secure" in r.headers["set-cookie"].lower()
     monkeypatch.setattr(get_settings(), "session_cookie_secure", False)
     await client.post("/logout", headers={"X-CSRF-Token": make_csrf(user.id)})
-    r = await client.post("/login", data={"email": user.email, "password": "password123", "csrf_token": make_csrf(None)})
+    r = await client.post(
+        "/login", data={"email": user.email, "password": "password123", "csrf_token": make_csrf(None)}
+    )
     assert "secure" not in r.headers["set-cookie"].lower()
 
 

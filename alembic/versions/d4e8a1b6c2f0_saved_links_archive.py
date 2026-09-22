@@ -21,7 +21,9 @@ OLD_SEARCH_VECTOR = (
     "setweight(to_tsvector('english', coalesce(title, '')), 'A') || "
     "setweight(to_tsvector('english', coalesce(content_text, '')), 'B')"
 )
-NEW_SEARCH_VECTOR = OLD_SEARCH_VECTOR + " || setweight(to_tsvector('english', coalesce(archive_text, '')), 'C')"
+NEW_SEARCH_VECTOR = (
+    OLD_SEARCH_VECTOR + " || setweight(to_tsvector('english', coalesce(archive_text, '')), 'C')"
+)
 
 
 def _replace_search_vector(expression: str) -> None:
@@ -30,7 +32,9 @@ def _replace_search_vector(expression: str) -> None:
     op.drop_column("items", "search_vector")
     op.add_column(
         "items",
-        sa.Column("search_vector", postgresql.TSVECTOR(), sa.Computed(expression, persisted=True), nullable=True),
+        sa.Column(
+            "search_vector", postgresql.TSVECTOR(), sa.Computed(expression, persisted=True), nullable=True
+        ),
     )
     op.create_index("ix_items_search", "items", ["search_vector"], postgresql_using="gin")
 
@@ -85,9 +89,14 @@ def upgrade() -> None:
     )
     op.create_table(
         "snapshot_assets",
-        sa.Column("snapshot_id", sa.UUID(), sa.ForeignKey("snapshots.id", ondelete="CASCADE"), primary_key=True),
         sa.Column(
-            "sha256", sa.String(length=64), sa.ForeignKey("archive_assets.sha256", ondelete="CASCADE"), primary_key=True
+            "snapshot_id", sa.UUID(), sa.ForeignKey("snapshots.id", ondelete="CASCADE"), primary_key=True
+        ),
+        sa.Column(
+            "sha256",
+            sa.String(length=64),
+            sa.ForeignKey("archive_assets.sha256", ondelete="CASCADE"),
+            primary_key=True,
         ),
     )
     op.create_index("ix_snapshot_assets_sha256", "snapshot_assets", ["sha256"])

@@ -77,7 +77,9 @@ def is_unread(state=ItemState):
 async def get_user_item(session: AsyncSession, user: User, item_id: uuid.UUID) -> tuple[Item, Feed] | None:
     row = (
         await session.execute(
-            select(Item, Feed).join(Feed, Item.feed_id == Feed.id).where(Item.id == item_id, Feed.user_id == user.id)
+            select(Item, Feed)
+            .join(Feed, Item.feed_id == Feed.id)
+            .where(Item.id == item_id, Feed.user_id == user.id)
         )
     ).first()
     return (row[0], row[1]) if row else None
@@ -87,12 +89,21 @@ async def get_state(session: AsyncSession, user: User, item_id: uuid.UUID) -> It
     return await session.get(ItemState, (user.id, item_id))
 
 
-async def upsert_states(session: AsyncSession, user_id: uuid.UUID, item_ids: list[uuid.UUID], **values: Any) -> None:
+async def upsert_states(
+    session: AsyncSession, user_id: uuid.UUID, item_ids: list[uuid.UUID], **values: Any
+) -> None:
     """Insert-or-update item_states for many items at once (a missing row means unread/unstarred)."""
     if not item_ids:
         return
     rows = [
-        {"user_id": user_id, "item_id": iid, "is_read": False, "is_starred": False, "hidden": False, "tags": []}
+        {
+            "user_id": user_id,
+            "item_id": iid,
+            "is_read": False,
+            "is_starred": False,
+            "hidden": False,
+            "tags": [],
+        }
         | values
         for iid in item_ids
     ]
@@ -133,17 +144,23 @@ async def set_starred(session: AsyncSession, user_id: uuid.UUID, item_id: uuid.U
     await upsert_states(session, user_id, [item_id], is_starred=starred, starred_at=now if starred else None)
 
 
-async def user_owns_items(session: AsyncSession, user_id: uuid.UUID, item_ids: list[uuid.UUID]) -> list[uuid.UUID]:
+async def user_owns_items(
+    session: AsyncSession, user_id: uuid.UUID, item_ids: list[uuid.UUID]
+) -> list[uuid.UUID]:
     """Filter a list of item ids down to those in the user's own feeds."""
     if not item_ids:
         return []
     rows = await session.scalars(
-        select(Item.id).join(Feed, Item.feed_id == Feed.id).where(Feed.user_id == user_id, Item.id.in_(item_ids))
+        select(Item.id)
+        .join(Feed, Item.feed_id == Feed.id)
+        .where(Feed.user_id == user_id, Item.id.in_(item_ids))
     )
     return list(rows)
 
 
-async def unread_state_ids(session: AsyncSession, user_id: uuid.UUID, item_ids: list[uuid.UUID]) -> list[uuid.UUID]:
+async def unread_state_ids(
+    session: AsyncSession, user_id: uuid.UUID, item_ids: list[uuid.UUID]
+) -> list[uuid.UUID]:
     """Of the given items, those the user has not read yet."""
     if not item_ids:
         return []

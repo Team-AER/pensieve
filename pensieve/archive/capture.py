@@ -42,7 +42,14 @@ MAX_EXTRA_FETCHES = 60
 EXTRA_FETCH_BYTES = 8 * 1024 * 1024
 RAW_HTML_LIMIT = 5 * 1024 * 1024
 CLIENT_HTML_LIMIT = 8 * 1024 * 1024
-ASSET_TYPES = ("image/", "font/", "text/css", "application/font", "application/x-font", "application/vnd.ms-fontobject")
+ASSET_TYPES = (
+    "image/",
+    "font/",
+    "text/css",
+    "application/font",
+    "application/x-font",
+    "application/vnd.ms-fontobject",
+)
 
 
 @dataclass
@@ -60,7 +67,9 @@ class RawPage:
     def text(self) -> str:
         head = self.body[:RAW_HTML_LIMIT]
         try:
-            response = httpx.Response(200, content=head, headers={"content-type": self.content_type or "text/html"})
+            response = httpx.Response(
+                200, content=head, headers={"content-type": self.content_type or "text/html"}
+            )
             return response.text
         except Exception:  # noqa: BLE001
             return head.decode("utf-8", errors="replace")
@@ -73,7 +82,9 @@ def _now() -> datetime:
 async def _raw(url: str) -> tuple[RawPage | None, str | None]:
     limit = get_settings().capture_max_file_mb * 1024 * 1024
     try:
-        response = await fetch_http.get(url, headers={"User-Agent": BROWSER_UA, "Accept": PAGE_ACCEPT}, max_bytes=limit)
+        response = await fetch_http.get(
+            url, headers={"User-Agent": BROWSER_UA, "Accept": PAGE_ACCEPT}, max_bytes=limit
+        )
     except fetch_http.UnsafeURLError as exc:
         return None, f"refused: {exc}"
     except (httpx.HTTPError, TimeoutError) as exc:
@@ -85,20 +96,26 @@ async def _raw(url: str) -> tuple[RawPage | None, str | None]:
 async def _fetch_extra(urls: list[str], resources: dict[str, Resource]) -> None:
     """Fetch assets the browser didn't load (or everything, with no browser); same SSRF guard as feeds."""
     sem = asyncio.Semaphore(6)
-    budget = [get_settings().capture_max_asset_mb * 1024 * 1024 - sum(len(r.body) for r in resources.values())]
+    budget = [
+        get_settings().capture_max_asset_mb * 1024 * 1024 - sum(len(r.body) for r in resources.values())
+    ]
 
     async def one(url: str) -> None:
         async with sem:
             if budget[0] <= 0:
                 return
             try:
-                response = await fetch_http.get(url, headers={"User-Agent": BROWSER_UA}, max_bytes=EXTRA_FETCH_BYTES)
+                response = await fetch_http.get(
+                    url, headers={"User-Agent": BROWSER_UA}, max_bytes=EXTRA_FETCH_BYTES
+                )
             except Exception:  # noqa: BLE001 - a missing image is not a failed capture
                 return
             if response.status_code != 200:
                 return
             ctype = response.headers.get("content-type", "").split(";")[0].strip().lower()
-            if not ctype.startswith(ASSET_TYPES) and not url.lower().endswith((".css", ".woff", ".woff2", ".ico")):
+            if not ctype.startswith(ASSET_TYPES) and not url.lower().endswith(
+                (".css", ".woff", ".woff2", ".ico")
+            ):
                 return
             if ctype in {"", "application/octet-stream"} and url.lower().endswith(".css"):
                 ctype = "text/css"
@@ -131,7 +148,9 @@ def _paragraphs_html(text: str, limit: int = 200_000) -> str:
     return "".join(f"<p>{html_lib.escape(' '.join(b.split()))}</p>" for b in blocks)
 
 
-async def _store_assets(session: AsyncSession, storage: Storage | None, snapshot: Snapshot, used: dict[str, Resource]) -> int:
+async def _store_assets(
+    session: AsyncSession, storage: Storage | None, snapshot: Snapshot, used: dict[str, Resource]
+) -> int:
     await session.execute(delete(SnapshotAsset).where(SnapshotAsset.snapshot_id == snapshot.id))
     if not used or storage is None:
         return 0
@@ -219,7 +238,9 @@ async def capture_snapshot(
 
     # Non-HTML: keep the file itself, and its text when it has some.
     if raw is not None and raw.status < 400 and not raw.is_html and client_html is None:
-        return await _capture_file(session, snapshot, item, feed, raw, store, prefix, captured_at, old_generation)
+        return await _capture_file(
+            session, snapshot, item, feed, raw, store, prefix, captured_at, old_generation
+        )
 
     rendered: Rendered | None = None
     if render is not None and client_html is None:
@@ -250,14 +271,19 @@ async def capture_snapshot(
         wanted = await asyncio.to_thread(collect_refs, frozen_source, base, resources)
         article_imgs = await asyncio.to_thread(collect_refs, ex.html, base, resources) if ex else []
         extra = [*article_imgs]
-        for candidate in ((ex.image if ex else None) or meta.get("image"), rendered.icon_url if rendered else None):
+        for candidate in (
+            (ex.image if ex else None) or meta.get("image"),
+            rendered.icon_url if rendered else None,
+        ):
             if candidate and candidate not in resources:
                 extra.append(candidate)
         await _fetch_extra(pick_urls([*extra, *wanted], MAX_EXTRA_FETCHES), resources)
 
     # Without a bucket nothing can be served from /archive/a/, so nothing may point there.
     freezer = Freezer(resources if store is not None else {})
-    page_html = await asyncio.to_thread(freezer.freeze, frozen_source, base, original_url=url, captured_at=captured_at)
+    page_html = await asyncio.to_thread(
+        freezer.freeze, frozen_source, base, original_url=url, captured_at=captured_at
+    )
     article_html = freezer.rewrite_article(ex.html, base) if ex else None
     lead_url = (ex.image if ex else None) or meta.get("image")
     lead_local = freezer.asset_url(lead_url)

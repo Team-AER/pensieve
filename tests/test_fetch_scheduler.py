@@ -11,9 +11,15 @@ from tests.test_fetch_helpers import fake_queue  # noqa: F401
 
 async def test_due_feeds_enqueue_with_deterministic_job_ids(session, user, fake_queue):
     now = datetime.now(UTC)
-    due = models.Feed(user_id=user.id, url="https://a.example.com/rss", next_fetch_at=now - timedelta(minutes=1))
-    later = models.Feed(user_id=user.id, url="https://b.example.com/rss", next_fetch_at=now + timedelta(hours=1))
-    paused = models.Feed(user_id=user.id, url="https://c.example.com/rss", next_fetch_at=now - timedelta(days=1), paused=True)
+    due = models.Feed(
+        user_id=user.id, url="https://a.example.com/rss", next_fetch_at=now - timedelta(minutes=1)
+    )
+    later = models.Feed(
+        user_id=user.id, url="https://b.example.com/rss", next_fetch_at=now + timedelta(hours=1)
+    )
+    paused = models.Feed(
+        user_id=user.id, url="https://c.example.com/rss", next_fetch_at=now - timedelta(days=1), paused=True
+    )
     never = models.Feed(user_id=user.id, url="https://d.example.com/rss", next_fetch_at=None)
     session.add_all([due, later, paused, never])
     await session.commit()
@@ -61,7 +67,11 @@ async def test_prune_old_items_respects_exemptions(session, user):
 
 def test_jobs_registry():
     assert [f.__name__ for f in jobs.FUNCTIONS] == [
-        "fetch_feed", "fetch_reader_mode", "fetch_due_feeds", "prune_old_items", "refresh_favicons",
+        "fetch_feed",
+        "fetch_reader_mode",
+        "fetch_due_feeds",
+        "prune_old_items",
+        "refresh_favicons",
     ]
     by_name = {c.name: c for c in jobs.CRON_JOBS}
     assert set(by_name) == {"cron:fetch_due_feeds", "cron:prune_old_items", "cron:refresh_favicons"}

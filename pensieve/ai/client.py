@@ -195,7 +195,13 @@ def clamp_effort(model: str, value: str | None) -> str | None:
         chosen = ranked[0]
     if (model, value) not in _EFFORT_WARNED:
         _EFFORT_WARNED.add((model, value))
-        log.warning("reasoning effort %r is not offered by %s (catalog: %s); sending %r", value, model, allowed, chosen)
+        log.warning(
+            "reasoning effort %r is not offered by %s (catalog: %s); sending %r",
+            value,
+            model,
+            allowed,
+            chosen,
+        )
     return chosen
 
 
@@ -407,7 +413,9 @@ class LLMClient:
         system, user = self._fit(model, system, user)
         messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
         try:
-            return (await self._completion(self._body(model, messages, max_tokens, reasoning), workflow)).strip()
+            return (
+                await self._completion(self._body(model, messages, max_tokens, reasoning), workflow)
+            ).strip()
         except LLMTruncated as exc:
             log.warning("chat_text(%s): %s", workflow, exc)
             return exc.content.strip()

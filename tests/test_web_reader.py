@@ -1,4 +1,3 @@
-
 import re
 from datetime import UTC, datetime, timedelta
 
@@ -67,7 +66,12 @@ async def test_grouped_view_one_row_per_cluster(client, session, user):
     )
     session.add(cluster)
     await session.flush()
-    session.add_all([models.ClusterItem(cluster_id=cluster.id, item_id=a.id), models.ClusterItem(cluster_id=cluster.id, item_id=b.id)])
+    session.add_all(
+        [
+            models.ClusterItem(cluster_id=cluster.id, item_id=a.id),
+            models.ClusterItem(cluster_id=cluster.id, item_id=b.id),
+        ]
+    )
     await session.commit()
     await login(client, user)
     r = await client.get("/reader/all/list?grouped=1", headers=HX)
@@ -91,7 +95,9 @@ async def test_mark_all_read_with_undo(client, session, user):
     assert r.status_code == 200
     assert "Marked 1 item as read" in r.text
     token = re.search(r'name="token" value="([^"]*)"', r.text).group(1)
-    assert token and str(old.id) not in r.text.split("undo-form")[1].split("</form>")[0]  # only the token travels
+    assert (
+        token and str(old.id) not in r.text.split("undo-form")[1].split("</form>")[0]
+    )  # only the token travels
     state = await session.get(models.ItemState, (user.id, old.id))
     assert state is not None and state.is_read
     assert await session.get(models.ItemState, (user.id, new.id)) is None
@@ -114,7 +120,9 @@ async def test_tag_view_and_sorting(client, session, user):
     feed = await seed_feed(session, user, "Feed")
     first = await seed_item(session, feed, "First", published_at=datetime.now(UTC) - timedelta(days=2))
     second = await seed_item(session, feed, "Second", published_at=datetime.now(UTC) - timedelta(days=1))
-    session.add(models.ItemAI(user_id=user.id, item_id=first.id, tags=["databases"], confidences={"databases": 0.9}))
+    session.add(
+        models.ItemAI(user_id=user.id, item_id=first.id, tags=["databases"], confidences={"databases": 0.9})
+    )
     session.add(models.ItemState(user_id=user.id, item_id=second.id, tags=["todo"]))
     await session.commit()
     await login(client, user)
@@ -151,7 +159,11 @@ async def test_search_finds_by_title(client, session, user):
     r = await client.get("/search?q=postgres")
     assert r.status_code == 200
     # Matched terms are wrapped in <mark> (search highlighting).
-    assert "<mark>Postgres</mark> upgrade notes" in r.text and "Cooking" not in r.text and "another user" not in r.text
+    assert (
+        "<mark>Postgres</mark> upgrade notes" in r.text
+        and "Cooking" not in r.text
+        and "another user" not in r.text
+    )
     assert "1 result for" in r.text
     r = await client.get("/search?q=postgres&state=starred", headers=HX)
     assert "No matches" in r.text

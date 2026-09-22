@@ -104,7 +104,9 @@ async def test_per_host_concurrency_limit(monkeypatch):
     with respx.mock() as router:
         router.get(host="slow.example.com").mock(side_effect=handler)
         async with fetch_http.get_client() as client:
-            await asyncio.gather(*(fetch_http.get(f"https://slow.example.com/{i}", client=client) for i in range(4)))
+            await asyncio.gather(
+                *(fetch_http.get(f"https://slow.example.com/{i}", client=client) for i in range(4))
+            )
     assert peak == 1
 
     # Different hosts do not share a limiter.
@@ -113,5 +115,7 @@ async def test_per_host_concurrency_limit(monkeypatch):
     with respx.mock() as router:
         router.get(host__regex=r"h\d\.example\.com").mock(side_effect=handler)
         async with fetch_http.get_client() as client:
-            await asyncio.gather(*(fetch_http.get(f"https://h{i}.example.com/", client=client) for i in range(3)))
+            await asyncio.gather(
+                *(fetch_http.get(f"https://h{i}.example.com/", client=client) for i in range(3))
+            )
     assert peak == 3

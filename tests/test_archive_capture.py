@@ -79,7 +79,13 @@ async def test_capture_rendered_page_end_to_end(session, user, fake_queue, bucke
     assert "archive-banner" in page and "Archived copy of" in page
     assert "Embedded content: video.example.com" in page
     assert "/archive/a/" in page and "h1{color:red}" in page  # stylesheet inlined, its background rewritten
-    assets = set((await session.scalars(select(models.SnapshotAsset.sha256).where(models.SnapshotAsset.snapshot_id == done.id))).all())
+    assets = set(
+        (
+            await session.scalars(
+                select(models.SnapshotAsset.sha256).where(models.SnapshotAsset.snapshot_id == done.id)
+            )
+        ).all()
+    )
     assert len(assets) >= 3 and all(asset_key(sha) in bucket.objects for sha in assets)
     assert done.lead_image_sha in assets
     assert "/archive/a/" in item.content_html  # the article's image points at the archived copy
@@ -88,8 +94,11 @@ async def test_capture_rendered_page_end_to_end(session, user, fake_queue, bucke
     assert any(call[0] == queue.AI_PROCESS_NEW_ITEMS and call[1][1] == [str(item.id)] for call in fake_queue)
     # Full-text search finds words from deep in the page.
     hits = await session.scalar(
-        select(func.count()).select_from(models.Item).where(
-            models.Item.id == item.id, models.Item.search_vector.op("@@")(func.websearch_to_tsquery("english", "heritage graft"))
+        select(func.count())
+        .select_from(models.Item)
+        .where(
+            models.Item.id == item.id,
+            models.Item.search_vector.op("@@")(func.websearch_to_tsquery("english", "heritage graft")),
         )
     )
     assert hits == 1
@@ -131,7 +140,9 @@ async def test_browser_failure_falls_back_to_server_html(session, user, fake_que
         item, snap = await _saved(session, user, fake_queue)
         with respx.mock(assert_all_called=False) as router:
             router.get(URL).respond(200, text=RENDERED_DOM, headers={"content-type": "text/html"})
-            router.get("https://news.example.com/pic.png").respond(200, content=PNG, headers={"content-type": "image/png"})
+            router.get("https://news.example.com/pic.png").respond(
+                200, content=PNG, headers={"content-type": "image/png"}
+            )
             router.get(url__regex=r".*").respond(404)
             done = await capture.capture_snapshot(session, snap.id)
     finally:
@@ -147,7 +158,9 @@ async def test_pdf_is_kept_as_a_file_with_its_text(session, user, fake_queue, bu
     item, snap = await _saved(session, user, fake_queue, url="https://papers.example.com/report.pdf")
     with respx.mock() as router:
         router.get("https://papers.example.com/report.pdf").respond(
-            200, content=_pdf("Quarterly orchard yields rose sharply"), headers={"content-type": "application/pdf"}
+            200,
+            content=_pdf("Quarterly orchard yields rose sharply"),
+            headers={"content-type": "application/pdf"},
         )
         done = await capture.capture_snapshot(session, snap.id)
     await session.refresh(item)
@@ -186,8 +199,14 @@ async def test_starred_feed_item_archive_fills_archive_text_only(session, user, 
     session.add(feed)
     await session.flush()
     item = models.Item(
-        feed_id=feed.id, guid="g1", url=URL, title="Orchard survey (feed)", content_html="<p>Short teaser.</p>",
-        content_text="Short teaser.", hash="h", published_at=datetime.now(UTC),
+        feed_id=feed.id,
+        guid="g1",
+        url=URL,
+        title="Orchard survey (feed)",
+        content_html="<p>Short teaser.</p>",
+        content_text="Short teaser.",
+        hash="h",
+        published_at=datetime.now(UTC),
     )
     session.add(item)
     await session.commit()
@@ -203,7 +222,9 @@ async def test_starred_feed_item_archive_fills_archive_text_only(session, user, 
     assert item.full_text == item.archive_text  # the AI reads the archived page, not the teaser
     # Archived text is searchable too (weight C).
     found = await session.scalar(
-        select(models.Item.id).where(models.Item.search_vector.op("@@")(func.websearch_to_tsquery("english", "saplings frost")))
+        select(models.Item.id).where(
+            models.Item.search_vector.op("@@")(func.websearch_to_tsquery("english", "saplings frost"))
+        )
     )
     assert found == item.id
     # Not queued twice; and a user who turned it off gets nothing new.

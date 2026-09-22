@@ -37,7 +37,9 @@ async def test_chat_json_sends_headers_and_schema(gateway):
     assert body["model"] == settings.llm_fast_model
     assert body["response_format"]["type"] == "json_schema"
     assert body["response_format"]["json_schema"] == {"name": "t", "schema": SCHEMA, "strict": True}
-    assert body["reasoning_effort"] == "none"  # fast model: Qwen routes think by default, so switch it off explicitly
+    assert (
+        body["reasoning_effort"] == "none"
+    )  # fast model: Qwen routes think by default, so switch it off explicitly
     assert client.usage.tokens_in == 100 and client.usage.tokens_out == 20
     assert client.take_usage() == (100, 20) and client.usage.tokens_in == 0
     await client.aclose()
@@ -46,9 +48,13 @@ async def test_chat_json_sends_headers_and_schema(gateway):
 async def test_long_model_sends_reasoning_effort(gateway):
     gateway.chat("plain text answer")
     client = LLMClient()
-    text = await client.chat_text(settings.llm_long_model, "sys", "user", workflow="digest", reasoning="medium")
+    text = await client.chat_text(
+        settings.llm_long_model, "sys", "user", workflow="digest", reasoning="medium"
+    )
     assert text == "plain text answer"
-    assert gateway.chat_calls[0]["reasoning_effort"] == "medium"  # the caller's explicit level, passed through
+    assert (
+        gateway.chat_calls[0]["reasoning_effort"] == "medium"
+    )  # the caller's explicit level, passed through
     await client.aclose()
 
 
@@ -76,7 +82,13 @@ async def test_reasoning_effort_is_clamped_to_what_the_catalog_offers(gateway, m
     await client.chat_json(settings.llm_fast_model, "s", "u", SCHEMA, workflow="x")  # default "none" = off
     await client.chat_json("other-model", "s", "u", SCHEMA, workflow="x", reasoning="high")
     efforts = [c.get("reasoning_effort") for c in gateway.chat_calls]
-    assert efforts == ["medium", "none", "none", "none", "high"]  # minimal sits between none and low; lower wins
+    assert efforts == [
+        "medium",
+        "none",
+        "none",
+        "none",
+        "high",
+    ]  # minimal sits between none and low; lower wins
     assert client_mod.clamp_effort(settings.llm_fast_model, "max") == "xhigh"
     assert client_mod.clamp_effort("unknown", "high") == "high" and client_mod.clamp_effort("x", None) is None
     await client.aclose()

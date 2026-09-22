@@ -44,7 +44,9 @@ TRACKING_PARAMS = re.compile(
 _URL_IN_TEXT = re.compile(r"https?://[^\s<>\"']+", re.IGNORECASE)
 CLIENT_HTML_MAX = 8 * 1024 * 1024
 _HOST = re.compile(r"^[a-z0-9._:\[\]-]+$", re.IGNORECASE)
-_SCHEME = re.compile(r"^([a-zA-Z][a-zA-Z0-9+.-]*):(?!\d)")  # "example.com:8080/x" is a host and port, not a scheme
+_SCHEME = re.compile(
+    r"^([a-zA-Z][a-zA-Z0-9+.-]*):(?!\d)"
+)  # "example.com:8080/x" is a host and port, not a scheme
 
 
 class SaveError(ValueError):
@@ -97,7 +99,9 @@ def normalize_url(raw: str) -> str:
         raise SaveError("That doesn't look like a link.") from exc
     if not _HOST.match(host) or ("." not in host and ":" not in host):
         raise SaveError("That doesn't look like a link.")
-    query = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if not TRACKING_PARAMS.match(k)]
+    query = [
+        (k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if not TRACKING_PARAMS.match(k)
+    ]
     netloc = parts.netloc.lower() if not (parts.username or parts.password) else parts.netloc
     path = parts.path or "/"
     url = urlunsplit((parts.scheme.lower(), netloc, path, urlencode(query, doseq=True), ""))
@@ -135,10 +139,20 @@ async def ensure_snapshot(
     session: AsyncSession, user_id: uuid.UUID, item: Item, url: str, *, force: bool = False
 ) -> tuple[Snapshot, bool]:
     """(snapshot, needs_capture). A done capture is kept unless ``force``; a failed one is retried."""
-    snap = await session.scalar(select(Snapshot).where(Snapshot.user_id == user_id, Snapshot.item_id == item.id))
+    snap = await session.scalar(
+        select(Snapshot).where(Snapshot.user_id == user_id, Snapshot.item_id == item.id)
+    )
     if snap is None:
-        snap = Snapshot(user_id=user_id, item_id=item.id, requested_url=url[:2048], status="queued", attempts=0,
-                        generation=0, word_count=0, bytes_total=0)
+        snap = Snapshot(
+            user_id=user_id,
+            item_id=item.id,
+            requested_url=url[:2048],
+            status="queued",
+            attempts=0,
+            generation=0,
+            word_count=0,
+            bytes_total=0,
+        )
         session.add(snap)
         await session.flush()
         return snap, True
@@ -155,7 +169,10 @@ async def enqueue_capture(snapshot_id: uuid.UUID, client_html: str | None = None
     kwargs = {"client_html": client_html[:CLIENT_HTML_MAX]} if client_html else {}
     try:
         await queue.enqueue(
-            queue.CAPTURE_PAGE, str(snapshot_id), _job_id=queue.job_id_for(queue.CAPTURE_PAGE, snapshot_id), **kwargs
+            queue.CAPTURE_PAGE,
+            str(snapshot_id),
+            _job_id=queue.job_id_for(queue.CAPTURE_PAGE, snapshot_id),
+            **kwargs,
         )
         return True
     except Exception as exc:  # noqa: BLE001 - the sweep cron re-queues anything left in 'queued'
@@ -189,7 +206,9 @@ async def save_link(
         try:
             await ensure_safe_url(url)
         except UnsafeURLError as exc:
-            raise SaveError("Pensieve can't fetch that address (it points at a private or local network).") from exc
+            raise SaveError(
+                "Pensieve can't fetch that address (it points at a private or local network)."
+            ) from exc
     feed = await saved_feed(session, user.id)
     now = datetime.now(UTC)
     title = " ".join((title or "").split())[:1000] or None
@@ -257,12 +276,21 @@ async def archive_items(session: AsyncSession, user: User, item_ids: list[uuid.U
     if not item_ids or not wants_starred_archive(user):
         return 0
     rows = (
-        await session.execute(
-            select(Item)
-            .join(Feed, Feed.id == Item.feed_id)
-            .where(Item.id.in_(item_ids), Feed.user_id == user.id, Feed.kind == FEED_KIND_RSS, Item.url.is_not(None))
+        (
+            await session.execute(
+                select(Item)
+                .join(Feed, Feed.id == Item.feed_id)
+                .where(
+                    Item.id.in_(item_ids),
+                    Feed.user_id == user.id,
+                    Feed.kind == FEED_KIND_RSS,
+                    Item.url.is_not(None),
+                )
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     todo: list[uuid.UUID] = []
     for item in rows:
         try:
@@ -296,7 +324,9 @@ async def archive_starred_backlog(session: AsyncSession, user_id: uuid.UUID, lim
     ids = (
         await session.scalars(
             select(ItemState.item_id)
-            .where(ItemState.user_id == user_id, ItemState.is_starred.is_(True), ItemState.item_id.not_in(have))
+            .where(
+                ItemState.user_id == user_id, ItemState.is_starred.is_(True), ItemState.item_id.not_in(have)
+            )
             .limit(limit)
         )
     ).all()
@@ -308,7 +338,9 @@ async def archive_starred_backlog(session: AsyncSession, user_id: uuid.UUID, lim
 
 async def requeue_failed(session: AsyncSession, user_id: uuid.UUID) -> int:
     snaps = (
-        await session.scalars(select(Snapshot).where(Snapshot.user_id == user_id, Snapshot.status == "failed"))
+        await session.scalars(
+            select(Snapshot).where(Snapshot.user_id == user_id, Snapshot.status == "failed")
+        )
     ).all()
     for s in snaps:
         s.status, s.attempts, s.error = "queued", 0, None
@@ -331,7 +363,9 @@ async def stale_captures(
     failed = 0
     dead = (
         await session.scalars(
-            select(Snapshot).where(Snapshot.status == "rendering", Snapshot.updated_at < now - timedelta(minutes=15))
+            select(Snapshot).where(
+                Snapshot.status == "rendering", Snapshot.updated_at < now - timedelta(minutes=15)
+            )
         )
     ).all()
     for s in dead:

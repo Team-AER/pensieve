@@ -97,4 +97,6 @@ class CaptureWorkerSettings:
     timezone = _timezone()
     max_jobs = max(1, get_settings().capture_concurrency)
     job_timeout = 240
-    keep_result = 1  # the job id is capture_page:<snapshot>; a re-capture right after must not be deduplicated
+    keep_result = (
+        1  # the job id is capture_page:<snapshot>; a re-capture right after must not be deduplicated
+    )

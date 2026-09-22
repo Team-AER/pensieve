@@ -302,7 +302,9 @@ async def _read_capped(response: httpx.Response, max_bytes: int) -> httpx.Respon
     )
 
 
-async def _get_streamed(client: httpx.AsyncClient, url: str, headers: dict | None, max_bytes: int) -> httpx.Response:
+async def _get_streamed(
+    client: httpx.AsyncClient, url: str, headers: dict | None, max_bytes: int
+) -> httpx.Response:
     request = client.build_request("GET", url, headers=headers)
     response = await client.send(request, stream=True)
     return await _read_capped(response, max_bytes)

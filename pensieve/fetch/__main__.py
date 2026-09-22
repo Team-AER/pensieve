@@ -1,8 +1,8 @@
 """Manual testing helpers.
 
-    python -m pensieve.fetch refresh <feed_url_or_id>
-    python -m pensieve.fetch import <user_email> <file.opml>
-    python -m pensieve.fetch discover <url>
+python -m pensieve.fetch refresh <feed_url_or_id>
+python -m pensieve.fetch import <user_email> <file.opml>
+python -m pensieve.fetch discover <url>
 """
 
 from __future__ import annotations
@@ -33,7 +33,9 @@ async def _refresh(target: str) -> int:
             print(f"no feed matching {target!r}", file=sys.stderr)
             return 1
         items = await refresh_feed(session, feed)
-        print(f"{feed.title or feed.url}: {len(items)} new item(s); next fetch in {feed.fetch_interval_min} min")
+        print(
+            f"{feed.title or feed.url}: {len(items)} new item(s); next fetch in {feed.fetch_interval_min} min"
+        )
         if feed.last_error:
             print(f"last error: {feed.last_error}", file=sys.stderr)
         for item in items:

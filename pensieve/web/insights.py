@@ -56,7 +56,9 @@ async def _history(session: AsyncSession, user: User, kinds: list[str], limit: i
 # ---------------------------------------------------------------------------
 
 
-async def _render_insight(request: Request, session: AsyncSession, user: User, insight: Insight | None, kind: str):
+async def _render_insight(
+    request: Request, session: AsyncSession, user: User, insight: Insight | None, kind: str
+):
     if insight is not None and insight.opened_at is None:
         insight.opened_at = datetime.now(UTC)
         await session.commit()
@@ -91,7 +93,9 @@ async def weekly(request: Request, user: CurrentUser, session: DB):
 # ---------------------------------------------------------------------------
 
 
-def _section_rows(config: dict[str, Any], vocab: list[str], folders: list[str], present: list[str]) -> list[dict]:
+def _section_rows(
+    config: dict[str, Any], vocab: list[str], folders: list[str], present: list[str]
+) -> list[dict]:
     """Rows for the layout editor: configured sections in their order, then every other candidate (auto)."""
     keys = folders if config["group_by"] == "folder" else vocab
     rows: list[dict] = []
@@ -146,14 +150,20 @@ def _tuned_rows(config: dict[str, Any], feeds: list[Feed]) -> dict[str, list[dic
     return {"tags": tags, "feeds": feed_rows}
 
 
-async def _paper_ctx(request: Request, session: AsyncSession, user: User, edition: Insight | None) -> dict[str, Any]:
+async def _paper_ctx(
+    request: Request, session: AsyncSession, user: User, edition: Insight | None
+) -> dict[str, Any]:
     body = dict(edition.body or {}) if edition else {}
     config = paper.paper_config(user)
     feeds = list(await session.scalars(select(Feed).where(Feed.user_id == user.id).order_by(Feed.title)))
     vocab = list(
-        await session.scalars(select(Tag.name).where(Tag.user_id == user.id, Tag.kind == "ai").order_by(Tag.name))
+        await session.scalars(
+            select(Tag.name).where(Tag.user_id == user.id, Tag.kind == "ai").order_by(Tag.name)
+        )
     )
-    folders = list(await session.scalars(select(Folder.name).where(Folder.user_id == user.id).order_by(Folder.name)))
+    folders = list(
+        await session.scalars(select(Folder.name).where(Folder.user_id == user.id).order_by(Folder.name))
+    )
     present = [s["key"] for s in body.get("sections") or []]
     return {
         "edition": edition,
@@ -267,7 +277,9 @@ async def _feed_titles(session: AsyncSession, user: User) -> dict[str, str]:
     return {str(fid): title for fid, title in rows.all()}
 
 
-def _story_ctx(user: User, edition: Insight, section: dict | None, story: dict, feeds: dict[str, str]) -> dict:
+def _story_ctx(
+    user: User, edition: Insight, section: dict | None, story: dict, feeds: dict[str, str]
+) -> dict:
     config = paper.paper_config(user)
     return {
         "edition": edition,
@@ -280,7 +292,9 @@ def _story_ctx(user: User, edition: Insight, section: dict | None, story: dict, 
     }
 
 
-def _summary_ctx(user: User, edition: Insight, story: dict, *, pending: bool, error: str | None, n: int) -> dict:
+def _summary_ctx(
+    user: User, edition: Insight, story: dict, *, pending: bool, error: str | None, n: int
+) -> dict:
     return {
         "edition": edition,
         "story": story,
@@ -300,8 +314,15 @@ def _story_or_404(body: dict[str, Any], key: str) -> tuple[dict | None, dict]:
 
 
 @router.post("/insights/paper/{insight_id}/tune")
-async def tune_story(request: Request, insight_id: uuid.UUID, user: CsrfUser, session: DB, key: Annotated[str, Form()], direction: Annotated[str, Form()]):
-    """"More of this" / "less of this" / reset for one story: steps its tag and feeds in the reader's tuning,
+async def tune_story(
+    request: Request,
+    insight_id: uuid.UUID,
+    user: CsrfUser,
+    session: DB,
+    key: Annotated[str, Form()],
+    direction: Annotated[str, Form()],
+):
+    """ "More of this" / "less of this" / reset for one story: steps its tag and feeds in the reader's tuning,
     records a correction for the profile, and recompiles today's edition so the next open reflects it."""
     edition = await _edition_or_404(session, user, insight_id)
     if direction not in paper.TUNE_DIRECTIONS:
@@ -335,7 +356,14 @@ async def tune_story(request: Request, insight_id: uuid.UUID, user: CsrfUser, se
 
 
 @router.post("/insights/paper/{insight_id}/rewrite")
-async def rewrite_summary(request: Request, insight_id: uuid.UUID, user: CsrfUser, session: DB, key: Annotated[str, Form()], note: Annotated[str, Form()] = ""):
+async def rewrite_summary(
+    request: Request,
+    insight_id: uuid.UUID,
+    user: CsrfUser,
+    session: DB,
+    key: Annotated[str, Form()],
+    note: Annotated[str, Form()] = "",
+):
     """The reader rejects a story's summary (usually its why-it-matters): record what was wrong and queue a
     rewrite that carries their note. Returns the story's summary block, polling until the rewrite lands."""
     edition = await _edition_or_404(session, user, insight_id)
@@ -346,7 +374,9 @@ async def rewrite_summary(request: Request, insight_id: uuid.UUID, user: CsrfUse
         raise HTTPException(status_code=404, detail="Item not found")
     note = " ".join(note.split())[:400]
     old = story.get("summary") or None
-    await record_correction(session, user, "item_summary", item_id, "why_it_matters", old, note or "off-target")
+    await record_correction(
+        session, user, "item_summary", item_id, "why_it_matters", old, note or "off-target"
+    )
     error = None
     stamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
     try:
@@ -370,8 +400,10 @@ async def rewrite_summary(request: Request, insight_id: uuid.UUID, user: CsrfUse
 
 
 @router.post("/insights/paper/{insight_id}/summarize")
-async def summarize_story(request: Request, insight_id: uuid.UUID, user: CsrfUser, session: DB, key: Annotated[str, Form()]):
-    """"Summarize now" for one story of the paper (its representative item); polls the paper-native block."""
+async def summarize_story(
+    request: Request, insight_id: uuid.UUID, user: CsrfUser, session: DB, key: Annotated[str, Form()]
+):
+    """ "Summarize now" for one story of the paper (its representative item); polls the paper-native block."""
     edition = await _edition_or_404(session, user, insight_id)
     body = _body(edition)
     _section, story = _story_or_404(body, key)
@@ -398,7 +430,9 @@ async def summarize_story(request: Request, insight_id: uuid.UUID, user: CsrfUse
 
 
 @router.get("/insights/paper/{insight_id}/summary")
-async def poll_story_summary(request: Request, insight_id: uuid.UUID, user: CurrentUser, session: DB, key: str, n: int = 0):
+async def poll_story_summary(
+    request: Request, insight_id: uuid.UUID, user: CurrentUser, session: DB, key: str, n: int = 0
+):
     """Polled every 2 s by the paper's summary block until the queued summary or rewrite has landed."""
     edition = await _edition_or_404(session, user, insight_id)
     body = _body(edition)
@@ -419,7 +453,11 @@ async def poll_story_summary(request: Request, insight_id: uuid.UUID, user: Curr
             .order_by(AIJob.created_at.desc())
             .limit(1)
         )
-        recent = job is not None and job.finished_at and (datetime.now(UTC) - job.finished_at) < timedelta(minutes=5)
+        recent = (
+            job is not None
+            and job.finished_at
+            and (datetime.now(UTC) - job.finished_at) < timedelta(minutes=5)
+        )
         if job is not None and job.status in {"failed", "partial"} and recent:
             error = "The summary failed: " + (job.last_error or "the AI gateway did not answer.")[:160]
         elif n >= SUMMARY_MAX_POLLS:
@@ -450,7 +488,9 @@ async def write_missing_summaries(request: Request, insight_id: uuid.UUID, user:
 
 
 @router.post("/insights/paper/{insight_id}/hide")
-async def hide_story(request: Request, insight_id: uuid.UUID, user: CsrfUser, session: DB, key: Annotated[str, Form()]):
+async def hide_story(
+    request: Request, insight_id: uuid.UUID, user: CsrfUser, session: DB, key: Annotated[str, Form()]
+):
     """Prune one story from this edition (kept out of it on recompiles)."""
     edition = await _edition_or_404(session, user, insight_id)
     body = _body(edition)
@@ -475,7 +515,14 @@ async def hide_story(request: Request, insight_id: uuid.UUID, user: CsrfUser, se
 
 
 @router.post("/insights/paper/{insight_id}/read")
-async def read_story(request: Request, insight_id: uuid.UUID, user: CsrfUser, session: DB, key: Annotated[str, Form()] = "", section: Annotated[str, Form()] = ""):
+async def read_story(
+    request: Request,
+    insight_id: uuid.UUID,
+    user: CsrfUser,
+    session: DB,
+    key: Annotated[str, Form()] = "",
+    section: Annotated[str, Form()] = "",
+):
     """Mark one story (``key``) or a whole section (``section``) as read; returns the updated partial."""
     edition = await _edition_or_404(session, user, insight_id)
     body = _body(edition)
@@ -514,8 +561,12 @@ async def read_story(request: Request, insight_id: uuid.UUID, user: CsrfUser, se
     }
     if key:
         ctx.update(_story_ctx(user, edition, hit_section, targets[0], feeds))
-        return render(request, "partials/paper_story.html", ctx, user=user, headers=hx_trigger("counts-changed"))
-    return render(request, "partials/paper_section.html", ctx, user=user, headers=hx_trigger("counts-changed"))
+        return render(
+            request, "partials/paper_story.html", ctx, user=user, headers=hx_trigger("counts-changed")
+        )
+    return render(
+        request, "partials/paper_section.html", ctx, user=user, headers=hx_trigger("counts-changed")
+    )
 
 
 @router.post("/insights/paper/hide-section")

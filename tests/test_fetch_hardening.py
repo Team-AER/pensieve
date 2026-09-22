@@ -121,7 +121,9 @@ async def test_retry_after_seconds_and_http_date(session, user, fake_queue):
     assert parse_retry_after("120", now) == timedelta(seconds=120)
     assert parse_retry_after("garbage", now) is None
     assert parse_retry_after(None, now) is None
-    assert parse_retry_after((now - timedelta(hours=1)).strftime("%a, %d %b %Y %H:%M:%S GMT"), now) == timedelta(0)
+    assert parse_retry_after(
+        (now - timedelta(hours=1)).strftime("%a, %d %b %Y %H:%M:%S GMT"), now
+    ) == timedelta(0)
 
 
 async def test_gone_pauses_immediately(session, user, fake_queue):
@@ -246,7 +248,9 @@ async def test_pinned_backend_refuses_rebound_private_address(monkeypatch):
 
 
 async def test_request_hook_pins_addresses_for_the_backend(monkeypatch):
-    monkeypatch.setattr(fetch_http, "resolve_host", lambda host: ["93.184.216.34", "2606:2800:220:1:248:1893:25c8:1946"])
+    monkeypatch.setattr(
+        fetch_http, "resolve_host", lambda host: ["93.184.216.34", "2606:2800:220:1:248:1893:25c8:1946"]
+    )
     seen: dict = {}
 
     async def capture(request: httpx.Request) -> httpx.Response:
@@ -271,10 +275,14 @@ def test_client_uses_pinned_transport():
 async def test_claim_due_feeds_is_atomic_and_pushes_next_fetch(session, user, fake_queue):
     now = datetime.now(UTC)
     feeds = [
-        models.Feed(user_id=user.id, url=f"https://{n}.example.com/rss", next_fetch_at=now - timedelta(minutes=n))
+        models.Feed(
+            user_id=user.id, url=f"https://{n}.example.com/rss", next_fetch_at=now - timedelta(minutes=n)
+        )
         for n in range(1, 4)
     ]
-    later = models.Feed(user_id=user.id, url="https://later.example.com/rss", next_fetch_at=now + timedelta(hours=1))
+    later = models.Feed(
+        user_id=user.id, url="https://later.example.com/rss", next_fetch_at=now + timedelta(hours=1)
+    )
     session.add_all([*feeds, later])
     await session.commit()
 
@@ -295,7 +303,9 @@ async def test_claim_due_feeds_is_atomic_and_pushes_next_fetch(session, user, fa
 
 async def test_enqueue_due_feeds_enqueues_only_claimed_ids(session, user, fake_queue):
     now = datetime.now(UTC)
-    due = models.Feed(user_id=user.id, url="https://a.example.com/rss", next_fetch_at=now - timedelta(minutes=1))
+    due = models.Feed(
+        user_id=user.id, url="https://a.example.com/rss", next_fetch_at=now - timedelta(minutes=1)
+    )
     session.add(due)
     await session.commit()
     assert await scheduler.enqueue_due_feeds(session, now) == 1
@@ -314,7 +324,9 @@ async def test_ingest_skips_same_hash_under_new_guid_and_updates_changed_content
         first = await refresh_feed(session, feed)
         assert len(first) == 2
         # Same two articles re-published under new guids (a CMS migration): nothing new.
-        regu = RSS.replace(b"post-1", b"post-1-new").replace(b"https://example.com/posts/2</link>", b"https://example.com/posts/2b</link>")
+        regu = RSS.replace(b"post-1", b"post-1-new").replace(
+            b"https://example.com/posts/2</link>", b"https://example.com/posts/2b</link>"
+        )
         router.get(FEED_URL).respond(200, content=regu)
         assert await refresh_feed(session, feed) == []
         assert len(await _items(session, feed)) == 2
@@ -337,7 +349,9 @@ async def test_ingest_dedupes_hash_within_one_batch(session, user, fake_queue):
     feed = await _make_feed(session, user)
     from pensieve.fetch.parse import parse_feed
 
-    doubled = RSS.replace(b"<guid isPermaLink=\"false\">post-1</guid>", b"<guid isPermaLink=\"false\">post-1</guid>")
+    doubled = RSS.replace(
+        b'<guid isPermaLink="false">post-1</guid>', b'<guid isPermaLink="false">post-1</guid>'
+    )
     parsed = parse_feed(doubled, FEED_URL)
     dup = parsed.entries[0]
     parsed.entries.append(type(dup)(**{f: getattr(dup, f) for f in dup.__slots__}))
@@ -359,7 +373,10 @@ def test_sanitizer_srcset_and_iframe_and_svg_and_data_href():
         '<img src="https://site.example/a.png" srcset="https://site.example/a.png 1x, '
         'https://site.example/b.png 2x, data:image/png;base64,AAAA 4x">'
     )
-    out = sanitize_html('<picture><source srcset="/w.webp 640w, data:text/html,x 1x" type="image/webp"><img src="/f.jpg"></picture>', base_url=base)
+    out = sanitize_html(
+        '<picture><source srcset="/w.webp 640w, data:text/html,x 1x" type="image/webp"><img src="/f.jpg"></picture>',
+        base_url=base,
+    )
     assert 'srcset="https://site.example/w.webp 640w"' in out and "data:" not in out
     assert sanitize_html('<img srcset="javascript:x 1x, data:text/plain,y 2x">') == "<img>"
     assert clean_srcset("https://a/b.png 1x,https://a/c.png 2x") == "https://a/b.png 1x, https://a/c.png 2x"
@@ -374,14 +391,20 @@ def test_sanitizer_srcset_and_iframe_and_svg_and_data_href():
 def test_sanitizer_iframe_allowlist_and_prestrip():
     yt = '<p><iframe src="https://www.youtube.com/embed/abc" width="560" height="315" allowfullscreen></iframe></p>'
     out = sanitize_html(yt)
-    assert 'src="https://www.youtube.com/embed/abc"' in out and 'sandbox="allow-scripts' in out and 'loading="lazy"' in out
+    assert (
+        'src="https://www.youtube.com/embed/abc"' in out
+        and 'sandbox="allow-scripts' in out
+        and 'loading="lazy"' in out
+    )
     assert "<iframe" in sanitize_html('<iframe src="https://player.vimeo.com/video/1"></iframe>')
     assert "<iframe" in sanitize_html('<iframe src="https://www.youtube-nocookie.com/embed/x"></iframe>')
     # Unknown hosts, http embeds and srcdoc-only frames are dropped entirely (text inside too).
     assert sanitize_html('<p>a<iframe src="https://evil.example/x">junk</iframe>b</p>') == "<p>ab</p>"
     assert sanitize_html('<p>a<iframe src="http://www.youtube.com/embed/x"></iframe>b</p>') == "<p>ab</p>"
     assert sanitize_html('<p>x<iframe srcdoc="<script>alert(1)</script>"></iframe></p>') == "<p>x</p>"
-    assert "youtube.com.evil.example" not in sanitize_html('<iframe src="https://www.youtube.com.evil.example/e"></iframe>')
+    assert "youtube.com.evil.example" not in sanitize_html(
+        '<iframe src="https://www.youtube.com.evil.example/e"></iframe>'
+    )
     # Mixed case and unclosed: the pre-strip regex removes the open tag; the rest of the document survives.
     out = sanitize_html("<p>a<IFRAME SRC='http://evil.example/x'>after</p><p>more</p>")
     assert out == "<p>aafter</p><p>more</p>" and "iframe" not in out.lower()
@@ -394,16 +417,25 @@ def test_sanitizer_iframe_allowlist_and_prestrip():
 
 async def test_favicon_fetch_and_add_feed_caches_bytes(session, user, fake_queue):
     png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
-    feed = models.Feed(user_id=user.id, url=FEED_URL, site_url="https://example.com/", icon_url="https://example.com/logo.png")
+    feed = models.Feed(
+        user_id=user.id,
+        url=FEED_URL,
+        site_url="https://example.com/",
+        icon_url="https://example.com/logo.png",
+    )
     with respx.mock(assert_all_called=False) as router:
-        router.get("https://example.com/logo.png").respond(200, content=png, headers={"content-type": "image/png"})
+        router.get("https://example.com/logo.png").respond(
+            200, content=png, headers={"content-type": "image/png"}
+        )
         found = await fetch_favicon(feed)
     assert found == (png, "image/png")
 
     # icon_url dead -> /favicon.ico fallback; a non-image body is rejected.
     with respx.mock(assert_all_called=False) as router:
         router.get("https://example.com/logo.png").respond(404)
-        router.get("https://example.com/favicon.ico").respond(200, content=b"<html>nope</html>", headers={"content-type": "text/html"})
+        router.get("https://example.com/favicon.ico").respond(
+            200, content=b"<html>nope</html>", headers={"content-type": "text/html"}
+        )
         assert await fetch_favicon(feed) is None
         router.get("https://example.com/favicon.ico").respond(200, content=b"\x00\x00\x01\x00" + b"\x00" * 8)
         found = await fetch_favicon(feed)
@@ -412,7 +444,9 @@ async def test_favicon_fetch_and_add_feed_caches_bytes(session, user, fake_queue
     session.add(feed)
     await session.commit()
     with respx.mock(assert_all_called=False) as router:
-        router.get("https://example.com/logo.png").respond(200, content=png, headers={"content-type": "image/png"})
+        router.get("https://example.com/logo.png").respond(
+            200, content=png, headers={"content-type": "image/png"}
+        )
         assert await refresh_feed_icon(session, feed)
     await session.commit()
     row = await session.scalar(select(models.Feed).where(models.Feed.id == feed.id))
@@ -423,7 +457,9 @@ async def test_favicon_fetch_and_add_feed_caches_bytes(session, user, fake_queue
 
     with _router() as router:
         router.get("https://new.example.com/feed.xml").respond(200, content=RSS_MORE)
-        router.get("https://example.com/logo.png").respond(200, content=png, headers={"content-type": "image/png"})
+        router.get("https://example.com/logo.png").respond(
+            200, content=png, headers={"content-type": "image/png"}
+        )
         added = await add_feed(session, user, "https://new.example.com/feed.xml")
     assert bytes(added.icon_data) == png
 
@@ -450,7 +486,9 @@ async def test_opml_import_enqueues_filing_for_unfiled_feeds(session, user, fake
     </body></opml>"""
     result = await import_opml(session, user, opml)
     loose = next(f for f in result.added if f.folder_id is None)
-    assert fake_queue == [(queue.AI_FILE_FEED, (str(loose.id),), queue.job_id_for(queue.AI_FILE_FEED, loose.id))]
+    assert fake_queue == [
+        (queue.AI_FILE_FEED, (str(loose.id),), queue.job_id_for(queue.AI_FILE_FEED, loose.id))
+    ]
 
 
 # ---------------------------------------------------------------------------------------------- gzip

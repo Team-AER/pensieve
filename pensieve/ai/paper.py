@@ -216,7 +216,7 @@ def story_boost(story: dict[str, Any], tuning: dict[str, dict[str, float]]) -> f
 
 
 def apply_tune(config: dict[str, Any], story: dict[str, Any], direction: str) -> dict[str, Any]:
-    """"more" / "less" of a story: step its main tag and every one of its feeds; "reset" clears them. Returns
+    """ "more" / "less" of a story: step its main tag and every one of its feeds; "reset" clears them. Returns
     the changed config (normalised); the caller stores it and records the correction."""
     if direction not in TUNE_DIRECTIONS:
         raise ValueError(direction)
@@ -231,7 +231,9 @@ def apply_tune(config: dict[str, Any], story: dict[str, Any], direction: str) ->
     return paper_config(models.User(settings={"paper": {**config, "tuning": tuning}}))
 
 
-def tune_summary(config: dict[str, Any], story: dict[str, Any], feed_titles: dict[str, str] | None = None) -> str:
+def tune_summary(
+    config: dict[str, Any], story: dict[str, Any], feed_titles: dict[str, str] | None = None
+) -> str:
     """Human line for a story's tuning state, e.g. "AI +2 · Alpha +0.5"; empty when nothing is tuned."""
     parts = []
     tags = config["tuning"]["tags"]
@@ -349,7 +351,9 @@ async def compile_paper(
             for t in row.tags:
                 tag_weight[t] += float((row.confidences or {}).get(t, 0.5)) + 0.01
         tags = [t for t, _ in tag_weight.most_common()]
-        summary_item = next((m for m in [rep, *members] if (ai_rows.get(m.id) and ai_rows[m.id].summary)), None)
+        summary_item = next(
+            (m for m in [rep, *members] if (ai_rows.get(m.id) and ai_rows[m.id].summary)), None
+        )
         feed_ids = list(dict.fromkeys(m.feed_id for m in members))
         stories.append(
             {
@@ -438,7 +442,9 @@ async def compile_paper(
     sections: list[dict[str, Any]] = []
     for key in ordered_keys:
         # stable sort: ties on every rank key keep the newest story first
-        rows = sorted(sorted(by_section.get(key, []), key=lambda s: s["published_at"], reverse=True), key=rank)
+        rows = sorted(
+            sorted(by_section.get(key, []), key=lambda s: s["published_at"], reverse=True), key=rank
+        )
         if not rows:
             continue
         limit = (configured.get(key) or {}).get("limit") or cfg["per_section"]
@@ -450,9 +456,9 @@ async def compile_paper(
         sections.append(
             {
                 "key": key,
-                "title": section_title(key) if kind != "folder" else next(
-                    (name for name in folders.values() if name.lower() == key), section_title(key)
-                ),
+                "title": section_title(key)
+                if kind != "folder"
+                else next((name for name in folders.values() if name.lower() == key), section_title(key)),
                 "kind": kind,
                 "count": len(rows),
                 "unread": sum(1 for s in rows if not s["read"]),
@@ -478,7 +484,9 @@ async def latest_lede(session: AsyncSession, user_id: uuid.UUID, day: date) -> s
     """The digest's model-written day summary when one exists for ``day`` (the paper itself never waits)."""
     row = await session.scalar(
         select(models.Insight).where(
-            models.Insight.user_id == user_id, models.Insight.kind == "daily", models.Insight.period == day.isoformat()
+            models.Insight.user_id == user_id,
+            models.Insight.kind == "daily",
+            models.Insight.period == day.isoformat(),
         )
     )
     return str((row.body or {}).get("summary") or "") if row else ""
@@ -487,7 +495,9 @@ async def latest_lede(session: AsyncSession, user_id: uuid.UUID, day: date) -> s
 async def get_edition(session: AsyncSession, user: models.User, day: date) -> models.Insight | None:
     return await session.scalar(
         select(models.Insight).where(
-            models.Insight.user_id == user.id, models.Insight.kind == KIND, models.Insight.period == day.isoformat()
+            models.Insight.user_id == user.id,
+            models.Insight.kind == KIND,
+            models.Insight.period == day.isoformat(),
         )
     )
 

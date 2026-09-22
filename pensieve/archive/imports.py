@@ -78,7 +78,9 @@ def _from_csv(data: str) -> list[ImportedLink]:
     if url_key is None:
         return []
     title_key = fields.get("title")
-    time_key = fields.get("time_added") or fields.get("timestamp") or fields.get("created") or fields.get("saved_at")
+    time_key = (
+        fields.get("time_added") or fields.get("timestamp") or fields.get("created") or fields.get("saved_at")
+    )
     tags_key = fields.get("tags")
     status_key = fields.get("status") or fields.get("folder")
     links: list[ImportedLink] = []
@@ -104,7 +106,9 @@ def parse_export(filename: str, data: bytes) -> list[ImportedLink]:
     """Links from an export file, deduplicated by URL (last one wins), capped at ``MAX_LINKS``."""
     text = data.decode("utf-8-sig", errors="replace")
     head = text.lstrip()[:400].lower()
-    if filename.lower().endswith((".html", ".htm")) or head.startswith(("<!doctype", "<html", "<meta", "<title")):
+    if filename.lower().endswith((".html", ".htm")) or head.startswith(
+        ("<!doctype", "<html", "<meta", "<title")
+    ):
         links = _from_html(text)
     else:
         links = _from_csv(text)
