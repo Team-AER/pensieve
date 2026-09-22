@@ -23,9 +23,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pensieve import models, queue
-from pensieve.ai import categorize, cluster, embeddings, insights, memory
+from pensieve.ai import categorize, cluster, embeddings, insights, memory, paper
 from pensieve.ai.client import LLMClient, LLMError
-from pensieve.ai.common import ai_on, utcnow
+from pensieve.ai.common import ai_on, user_feed_ids, utcnow
 from pensieve.config import get_settings
 from pensieve.db import session_scope
 
@@ -311,6 +311,20 @@ async def ai_process_new_items(ctx: dict, feed_id: str, item_ids: list[str]) -> 
             errors.append(exc)
             notes.append(f"cluster failed: {exc}")
         await session.commit()
+        # Summaries are written eagerly, one per story, by their own job: it has its own retry budget and
+        # never holds this job's slot, and clustering is committed by now so duplicates are skipped there.
+        if ai_on(user, "summarize_items"):
+            try:
+                await _enqueue(
+                    ctx,
+                    queue.AI_SUMMARIZE_ITEMS,
+                    str(user.id),
+                    [str(i.id) for i in items],
+                    job_id=queue.job_id_for(queue.AI_SUMMARIZE_ITEMS, f"{fid}:{items[0].id}"),
+                )
+            except Exception as exc:  # noqa: BLE001 - a Redis hiccup must not fail the tagging we did
+                log.warning("could not enqueue summaries for feed %s: %s", fid, exc)
+                notes.append(f"summaries not queued ({exc.__class__.__name__}); run `python -m pensieve.ai summaries`")
         note = "; ".join(notes)[:2000] or None
         if errors and int(ctx.get("job_try") or 1) < MAX_TRIES:
             raise errors[0]
@@ -394,6 +408,48 @@ async def ai_refresh_profile(ctx: dict, user_id: str) -> None:
     await _guarded(ctx, "profile", uid, uid, work)
 
 
+async def ai_summarize_items(ctx: dict, user_id: str, item_ids: list[str]) -> None:
+    """Eager summaries for a batch of new items (one per story; see ``insights.summarize_items``)."""
+    uid = uuid.UUID(str(user_id))
+    ids = [uuid.UUID(str(i)) for i in item_ids]
+
+    async def work(session: AsyncSession, client: LLMClient) -> str | None:
+        user = await _load_user(session, uid)
+        if user is None or not ai_on(user, "summarize_items"):
+            return "summaries disabled"
+        items = list(
+            (
+                await session.scalars(
+                    select(models.Item).where(
+                        models.Item.id.in_(ids), models.Item.feed_id.in_(user_feed_ids(uid))
+                    )
+                )
+            ).all()
+        )
+        if not items:
+            return "no items"
+        written = await insights.summarize_items(session, user, items, client)
+        await session.commit()
+        return f"summarised {len(written)} of {len(items)} (rest already covered)"
+
+    await _guarded(ctx, "summarize_items", ids[0] if ids else None, uid, work)
+
+
+async def ai_daily_paper(ctx: dict, user_id: str, day: str | None = None) -> None:
+    """Compile the paper for ``day`` (no model call; runs at digest time so the edition is on record)."""
+    uid = uuid.UUID(str(user_id))
+    target_day = date.fromisoformat(day) if day else _today()
+
+    async def work(session: AsyncSession, client: LLMClient) -> str | None:
+        user = await _load_user(session, uid)
+        if user is None or not ai_on(user, "paper"):
+            return "paper disabled"
+        row = await paper.daily_paper(session, user, target_day)
+        return f"edition {row.id}: {row.body.get('story_count', 0)} stories"
+
+    await _guarded(ctx, "paper", uid, uid, work)
+
+
 async def ai_summarize_item(ctx: dict, user_id: str, item_id: str) -> None:
     uid = uuid.UUID(str(user_id))
     iid = uuid.UUID(str(item_id))
@@ -420,6 +476,10 @@ async def ai_summarize_item(ctx: dict, user_id: str, item_id: str) -> None:
 def digest_job_id(user_id: uuid.UUID | str, day: date | None = None) -> str:
     """Day-qualified id shared by the cron and the manual "generate" button so one day runs once."""
     return queue.job_id_for(queue.AI_DAILY_DIGEST, f"{user_id}:{(day or _today()).isoformat()}")
+
+
+def paper_job_id(user_id: uuid.UUID | str, day: date | None = None) -> str:
+    return queue.job_id_for(queue.AI_DAILY_PAPER, f"{user_id}:{(day or _today()).isoformat()}")
 
 
 def weekly_job_id(user_id: uuid.UUID | str, iso_week: str | None = None) -> str:
@@ -482,6 +542,10 @@ async def ai_dispatch_daily(ctx: dict, at: datetime | None = None) -> int:
                 str(user.id),
                 job_id=digest_job_id(user.id, now_local.date()),
             )
+            if ai_on(user, "paper"):
+                await _enqueue(
+                    ctx, queue.AI_DAILY_PAPER, str(user.id), job_id=paper_job_id(user.id, now_local.date())
+                )
             n += 1
     return n
 
@@ -520,5 +584,7 @@ FUNCTIONS: list = [
     ai_weekly_review,
     ai_refresh_profile,
     ai_summarize_item,
+    ai_summarize_items,
+    ai_daily_paper,
 ]
 CRON_JOBS: list = _cron_jobs()

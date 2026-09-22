@@ -8,8 +8,10 @@ sync, and optional local AI without sending their reading history to a hosted mo
 
 It provides a responsive web and installable PWA interface, Google Reader and Fever-compatible APIs,
 OPML import/export, full-text search, reader mode, rules, folders, tags, and household accounts. Connect
-an OpenAI-compatible local gateway to add automatic categorization, story clustering, summaries, reader
-memory, and daily insights—or disable AI and use Pensieve as a straightforward feed reader.
+an OpenAI-compatible local gateway to add automatic categorization, story clustering, summaries written as
+items arrive, reader memory, a daily paper (every story of the day in sections, one row per story however
+many sources ran it, compiled without a model call) and analytics insights—or disable AI and use Pensieve as
+a straightforward feed reader.
 
 ## Highlights
 

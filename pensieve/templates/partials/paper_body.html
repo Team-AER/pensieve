@@ -1,0 +1,55 @@
+{% import "_macros.html" as m %}
+{% if saved %}<div class="flash flash-ok" role="status">{{ m.icon('check', 14) }} Layout saved and the paper recompiled.</div>{% endif %}
+{% if not paper_on %}
+<div class="insights-head">
+  <div class="insight-header">
+    <div class="eyebrow eyebrow-ai">{{ m.icon('digest', 14) }} The paper</div>
+    <h1 class="insight-title">The paper is switched off.</h1>
+  </div>
+  <div class="insight-actions">{% include "partials/paper_switch.html" %}</div>
+</div>
+<section class="card insight-card">{{ m.empty_state('Turn it on under Manage → AI and memory', 'The paper needs no model call; it lays out every story of the day in sections, expandable, from what the tagger and the story grouper already produced.', 'digest', ai=True) }}</section>
+{% elif not edition %}
+<div class="insights-head">
+  <div class="insight-header">
+    <div class="eyebrow eyebrow-ai">{{ m.icon('digest', 14) }} The paper</div>
+    <h1 class="insight-title">No edition yet.</h1>
+  </div>
+  <div class="insight-actions">{% include "partials/paper_switch.html" %}</div>
+</div>
+{% else %}
+<header class="insights-head paper-head">
+  <div class="insight-header">
+    <div class="eyebrow eyebrow-ai">{{ m.icon('digest', 14) }} The paper{% if not is_today %} · earlier edition{% endif %}</div>
+    <h1 class="insight-title">{{ edition.period|date_long }}</h1>
+    <p class="paper-stand">
+      {{ body.story_count }} stor{{ 'y' if body.story_count == 1 else 'ies' }} from {{ body.item_count }} item{{ 's' if body.item_count != 1 }} in the last {{ body.window.hours if body.window and body.window.hours else config.window_hours }} hours{% if body.unread_count is defined %} · {{ body.unread_count }} unread{% endif %}
+      · compiled {{ edition.generated_at|timeago }}
+    </p>
+    {% if body.lede %}<p class="insight-summary">{{ body.lede }}</p>{% endif %}
+  </div>
+  <div class="insight-actions">
+    {% include "partials/paper_switch.html" %}
+    <button type="button" class="btn" data-open-dialog="#paper-settings">{{ m.icon('settings', 14) }} Customize</button>
+    {% if is_today %}<a class="btn btn-ghost" href="/insights?refresh=1" title="Recompile from what has arrived since">{{ m.icon('refresh', 14) }} Refresh</a>{% endif %}
+    {% if history|length > 1 %}
+    <details class="menu">
+      <summary class="btn" aria-haspopup="menu">Earlier {{ m.icon('chevron-down', 14) }}</summary>
+      <div class="menu-body" role="menu" aria-label="Earlier editions">{% for h in history %}<a class="menu-item{% if h.id == edition.id %} on{% endif %}" role="menuitem" href="/insights/{{ h.id }}">{{ h.period|date_long }}</a>{% endfor %}</div>
+    </details>
+    {% endif %}
+  </div>
+</header>
+{% if sections %}
+<nav class="paper-nav" aria-label="Sections">
+  {% for s in sections %}<a class="chip{% if s.unread %} chip-live{% endif %}" href="#sec-{{ s.key|replace(' ', '-') }}">{{ s.title }} <span class="faint">{{ s.count }}</span></a>{% endfor %}
+</nav>
+<div class="paper">
+  {% for section in sections %}{% include "partials/paper_section.html" %}{% endfor %}
+</div>
+{% if not summaries_on %}<p class="muted small">Summaries are off (Manage → AI and memory → “Summarize new items as they arrive”), so stories show sources only.</p>{% endif %}
+{% else %}
+<section class="card insight-card">{{ m.empty_state('Nothing in this window', 'No items arrived in the last ' ~ config.window_hours ~ ' hours, or every story is hidden, muted or already read. Widen the window or relax the filters under Customize.', 'digest', ai=True) }}</section>
+{% endif %}
+{% include "partials/paper_settings.html" %}
+{% endif %}

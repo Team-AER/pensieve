@@ -204,6 +204,67 @@ async def test_summarize_item_stores_markdown(session, user, gateway):
     assert gateway.chat_requests[0].headers["X-Workflow"] == "summarize_item"
 
 
+def batch_summaries(indexes):
+    return {"items": [{"index": i, "bullets": [f"b{i}", "x", "y"], "why_it_matters": f"why {i}"} for i in indexes]}
+
+
+async def test_summarize_items_batches_and_skips_story_duplicates(session, user, gateway):
+    feed_a, feed_b = make_feed(user, "A"), make_feed(user, "B")
+    session.add_all([feed_a, feed_b])
+    await session.flush()
+    solo = [make_item(feed_a, f"Solo {i}", "text " * 20, age=timedelta(hours=i + 1)) for i in range(5)]
+    dupe_a = make_item(feed_a, "Same story", "text", age=timedelta(hours=8))
+    dupe_b = make_item(feed_b, "Same story again", "text", age=timedelta(hours=7))
+    already = make_item(feed_b, "Has one", "text", age=timedelta(hours=9))
+    session.add_all([*solo, dupe_a, dupe_b, already])
+    await session.flush()
+    cluster = models.Cluster(
+        user_id=user.id, headline="Same story", window_start=dupe_a.published_at,
+        window_end=dupe_b.published_at, canonical_item_id=dupe_a.id, source_count=2, kind="story",
+    )  # fmt: skip
+    session.add(cluster)
+    await session.flush()
+    session.add_all([models.ClusterItem(cluster_id=cluster.id, item_id=i.id) for i in (dupe_a, dupe_b)])
+    session.add(models.ItemAI(user_id=user.id, item_id=already.id, summary="- old\n", tags=["ai"]))
+    await session.commit()
+
+    calls = []
+
+    def side_effect(request):
+        import json
+
+        import httpx
+
+        from tests.test_ai_helpers import chat_response
+
+        body = json.loads(request.content)
+        n = body["messages"][1]["content"].count("### Article ")
+        calls.append(n)
+        return httpx.Response(200, json=chat_response(batch_summaries(range(n))))
+
+    gateway.router.post(f"{settings.llm_base_url.rstrip('/')}/chat/completions").mock(side_effect=side_effect)
+    written = await insights.summarize_items(session, user, [*solo, dupe_a, dupe_b, already])
+    await session.commit()
+    # 5 solos + one member of the story (its canonical item) = 6 articles in batches of 4 + 2
+    assert calls == [4, 2] and set(written) == {*[i.id for i in solo], dupe_a.id}
+    rows = {
+        r.item_id: r
+        for r in (await session.scalars(select(models.ItemAI).where(models.ItemAI.user_id == user.id))).all()
+    }
+    assert dupe_b.id not in rows and rows[already.id].summary == "- old\n"
+    assert rows[dupe_a.id].summary.startswith("- b") and "**Why this matters to you**" in rows[dupe_a.id].summary
+    assert rows[solo[0].id].tags == [] and rows[solo[0].id].prompt_version == ""
+    # the story is covered now: a member arriving later is not summarised again
+    late = make_item(feed_b, "Same story, third copy", "text", age=timedelta(hours=6))
+    session.add(late)
+    await session.flush()
+    session.add(models.ClusterItem(cluster_id=cluster.id, item_id=late.id))
+    await session.commit()
+    assert await insights.summarize_items(session, user, [late]) == {} and calls == [4, 2]
+    req = gateway.chat_requests[0]
+    assert req.headers["X-Workflow"] == "summarize_items" and gateway.chat_calls[0]["model"] == settings.llm_fast_model
+
+
 async def test_digest_without_embeddings_ranks_by_open_rate_and_tags(session, user, gateway):
     """No centroid and no item vectors: affinity comes from feed open-rate + tag overlap, not a constant."""
     w = await seed_digest_world(session, user)

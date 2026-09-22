@@ -55,6 +55,11 @@ def timeago(value: datetime | None, now: datetime | None = None) -> str:
     """Compact relative time: 'now', '5m', '3h', '2d', or 'Sep 4' beyond a week."""
     if value is None:
         return ""
+    if isinstance(value, str):  # stored insight bodies carry ISO strings
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            return value
     now = now or datetime.now(UTC)
     if value.tzinfo is None:
         value = value.replace(tzinfo=UTC)
@@ -106,6 +111,27 @@ def sparkline_points(series: list[int | float] | None, width: int = 120, height:
         y = height - 2 - ((v - lo) / span) * (height - 4)
         pts.append(f"{x:.1f},{y:.1f}")
     return " ".join(pts)
+
+
+def summary_blocks(markdown: str | None) -> dict[str, Any]:
+    """Split ``insights.render_summary`` output into {"bullets": [...], "why": str} for templates."""
+    bullets: list[str] = []
+    why: list[str] = []
+    in_why = False
+    for raw in (markdown or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("**Why"):
+            in_why = True
+            continue
+        if line.startswith("- ") and not in_why:
+            bullets.append(line[2:].strip())
+        elif in_why:
+            why.append(line)
+        else:
+            bullets.append(line.lstrip("-* ").strip())
+    return {"bullets": bullets, "why": " ".join(why)}
 
 
 _TAG_RE = re.compile(r"<[^>]+>")
@@ -250,6 +276,7 @@ def _build_env() -> Environment:
     env.filters["date_long"] = date_long
     env.filters["snippet"] = snippet
     env.filters["highlight"] = highlight
+    env.filters["summary_blocks"] = summary_blocks
     env.filters["tojson_attr"] = lambda v: json.dumps(v)
     env.globals["sparkline_points"] = sparkline_points
     env.globals["now"] = lambda: datetime.now(UTC)

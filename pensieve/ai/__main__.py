@@ -1,4 +1,4 @@
-"""Manual runs: ``python -m pensieve.ai digest <email> | profile <email> | tag <item_uuid> | backfill <email> | health``."""
+"""Manual runs: ``python -m pensieve.ai digest | paper | profile | tag | backfill | summaries | health``."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 
 from pensieve import models
-from pensieve.ai import categorize, insights, memory
+from pensieve.ai import categorize, insights, memory, paper
 from pensieve.ai.client import LLMClient
 from pensieve.config import get_settings
 from pensieve.db import dispose_engine, session_scope
@@ -48,6 +48,63 @@ async def cmd_digest(args: argparse.Namespace) -> int:
                 {"id": str(row.id), "period": row.period, "title": row.title, "body": row.body}, indent=1
             )
         )
+    return 0
+
+
+async def cmd_paper(args: argparse.Namespace) -> int:
+    day = date.fromisoformat(args.day) if args.day else paper.today()
+    async with session_scope() as session:
+        user = await _user_by_email(session, args.email)
+        row = await paper.daily_paper(session, user, day)
+        body = row.body
+        print(f"{row.title}: {body['story_count']} stories from {body['item_count']} items")
+        for sec in body["sections"]:
+            print(f"  {sec['title']}: {sec['count']} ({sec['unread']} unread)")
+    return 0
+
+
+async def cmd_summaries(args: argparse.Namespace) -> int:
+    """Enqueue eager summaries for the user's recent items that have none yet (one job per feed chunk)."""
+    from datetime import timedelta
+
+    from pensieve import queue
+    from pensieve.ai.common import utcnow
+
+    cap = get_settings().ai_max_items_per_job
+    since = utcnow() - timedelta(days=args.days)
+    async with session_scope() as session:
+        user = await _user_by_email(session, args.email)
+        feeds = list((await session.scalars(select(models.Feed).where(models.Feed.user_id == user.id))).all())
+        total = 0
+        for feed in feeds:
+            stmt = (
+                select(models.Item.id)
+                .where(
+                    models.Item.feed_id == feed.id,
+                    models.Item.published_at >= since,
+                    ~select(models.ItemAI.item_id)
+                    .where(
+                        models.ItemAI.item_id == models.Item.id,
+                        models.ItemAI.user_id == user.id,
+                        models.ItemAI.summary.is_not(None),
+                    )
+                    .exists(),
+                )
+                .order_by(models.Item.published_at.desc())
+            )
+            ids = [str(i) for i in (await session.scalars(stmt)).all()]
+            for n, start in enumerate(range(0, len(ids), cap)):
+                chunk = ids[start : start + cap]
+                await queue.enqueue(
+                    queue.AI_SUMMARIZE_ITEMS,
+                    str(user.id),
+                    chunk,
+                    _job_id=f"{queue.job_id_for('summaries', feed.id)}:{n}",
+                )
+                total += len(chunk)
+            if ids:
+                print(f"{feed.title}: {len(ids)} without a summary -> {(len(ids) + cap - 1) // cap} job(s)")
+        print(f"enqueued {total} items in chunks of {cap}; duplicates within a story are skipped by the job")
     return 0
 
 
@@ -128,6 +185,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("email")
     p.add_argument("--day", help="YYYY-MM-DD (default today)")
     p.set_defaults(fn=cmd_digest)
+    p = sub.add_parser("paper", help="compile today's paper for a user (no model call)")
+    p.add_argument("email")
+    p.add_argument("--day", help="YYYY-MM-DD (default today)")
+    p.set_defaults(fn=cmd_paper)
+    p = sub.add_parser("summaries", help="enqueue eager summaries for recent items that have none")
+    p.add_argument("email")
+    p.add_argument("--days", type=int, default=2, help="look back this many days (default 2)")
+    p.set_defaults(fn=cmd_summaries)
     p = sub.add_parser("profile", help="refresh the reader profile for a user")
     p.add_argument("email")
     p.set_defaults(fn=cmd_profile)

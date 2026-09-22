@@ -1,0 +1,48 @@
+{% import "_macros.html" as m %}
+{# One story: a <details> row. Summary line = headline + sources; body = the eager summary and every copy. #}
+{% set sid = 'story-' ~ story.key|replace(':', '-') %}
+<details class="pstory{% if story.read %} read{% endif %}{% if story.folded %} folded{% endif %}" id="{{ sid }}" data-key="{{ story.key }}"{% if brief is defined and brief %} data-brief="1"{% endif %}>
+  <summary class="pstory-head">
+    <span class="pstory-dot" aria-hidden="true"></span>
+    <span class="pstory-main">
+      <span class="pstory-title">{{ story.title }}</span>
+      <span class="pstory-meta">
+        {% if story.sources > 1 %}<span class="sources" role="note">{{ story.sources }} sources</span>{% if story.copies > story.sources %}<span class="faint">· {{ story.copies }} copies</span>{% endif %}{% else %}<span class="faint">{{ story.feeds[0].title if story.feeds else '' }}</span>{% endif %}
+        {% if story.tag and (section is not defined or section is none or section.kind != 'tag' or story.tag != section.key) %}<span class="chip chip-ai chip-sm">{{ story.tag }}</span>{% endif %}
+        <time class="faint" datetime="{{ story.published_at }}">{{ story.published_at|timeago }}</time>
+        {% if not story.summary %}<span class="faint pstory-nosum" title="The summary is written when the item arrives; this one is still queued or was disabled.">no summary yet</span>{% endif %}
+      </span>
+    </span>
+    <span class="pstory-chev" aria-hidden="true">{{ m.icon('chevron-down', 16) }}</span>
+  </summary>
+  <div class="pstory-body">
+    {% if config.show_summaries %}
+    {% if story.summary %}
+    {% set blocks = story.summary|summary_blocks %}
+    <div class="pstory-summary">
+      <ul class="pstory-bullets">{% for b in blocks.bullets %}<li>{{ b }}</li>{% endfor %}</ul>
+      {% if blocks.why %}<p class="pstory-why"><span class="eyebrow eyebrow-ai">{{ m.icon('sparkle', 12) }} Why it matters</span> {{ blocks.why }}</p>{% endif %}
+    </div>
+    {% else %}
+    <div class="pstory-summary muted small" id="summary-{{ story.item_id }}">
+      No summary yet. <button type="button" class="btn btn-sm btn-ai" hx-post="/items/{{ story.item_id }}/summarize" hx-target="#summary-{{ story.item_id }}" hx-swap="innerHTML" hx-indicator="this">{{ m.icon('sparkle', 14) }} Summarize now</button>
+    </div>
+    {% endif %}
+    {% endif %}
+    <ul class="pstory-sources" aria-label="Copies of this story">
+      {% for mbr in story.members %}
+      <li class="pstory-source{% if mbr.read %} read{% endif %}">
+        <a href="/items/{{ mbr.item_id }}" class="plain">{{ mbr.title }}</a>
+        <span class="faint">{{ mbr.feed }} · {{ mbr.published_at|timeago }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    <div class="pstory-actions">
+      <a class="btn btn-sm" href="/items/{{ story.item_id }}">{{ m.icon('reader', 14) }} Read</a>
+      {% if not story.read %}
+      <form hx-post="/insights/paper/{{ edition.id }}/read" hx-target="#{{ sid }}" hx-swap="outerHTML" method="post" action="/insights/paper/{{ edition.id }}/read">{{ m.csrf_field(csrf_token) }}<input type="hidden" name="key" value="{{ story.key }}"><button class="btn btn-sm" type="submit">{{ m.icon('check-circle', 14) }} Mark read</button></form>
+      {% endif %}
+      <form hx-post="/insights/paper/{{ edition.id }}/hide" hx-target="#{{ sid }}" hx-swap="delete" method="post" action="/insights/paper/{{ edition.id }}/hide">{{ m.csrf_field(csrf_token) }}<input type="hidden" name="key" value="{{ story.key }}"><button class="btn btn-sm btn-ghost" type="submit" title="Drop this story from today's paper">{{ m.icon('close', 14) }} Hide</button></form>
+    </div>
+  </div>
+</details>

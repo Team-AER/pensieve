@@ -464,6 +464,33 @@
     if (openIt && !d.open) d.showModal(); else if (!openIt && d.open) d.close();
   }
   document.addEventListener('click', (e) => { if (e.target.closest('[data-close-shortcuts]')) toggleShortcuts(false); });
+  // ---- Generic dialogs (the paper's Customize panel), section reorder, expand-all and unfold ----
+  document.addEventListener('click', (e) => {
+    const open = e.target.closest('[data-open-dialog]');
+    if (open) { const d = $(open.dataset.openDialog); if (d && typeof d.showModal === 'function' && !d.open) d.showModal(); return; }
+    const dismiss = e.target.closest('[data-dialog-dismiss]');
+    if (dismiss) { const d = dismiss.closest('dialog'); if (d) d.close(); return; }
+    const move = e.target.closest('[data-move]');
+    if (move) {
+      const row = move.closest('.section-row'); if (!row) return;
+      if (move.dataset.move === 'up' && row.previousElementSibling) row.parentElement.insertBefore(row, row.previousElementSibling);
+      else if (move.dataset.move === 'down' && row.nextElementSibling) row.parentElement.insertBefore(row.nextElementSibling, row);
+      move.focus();
+      return;
+    }
+    const expand = e.target.closest('[data-expand]');
+    if (expand) {
+      const sec = $(expand.dataset.expand); if (!sec) return;
+      const rows = $$('details.pstory', sec);
+      const anyClosed = rows.some((d) => !d.open);
+      rows.forEach((d) => { d.open = anyClosed; });
+      const label = expand.querySelector('.btn-label'); if (label) label.textContent = anyClosed ? 'Collapse all' : 'Expand all';
+      return;
+    }
+    const unfold = e.target.closest('[data-unfold]');
+    if (unfold) { const sec = $(unfold.dataset.unfold); if (sec) sec.classList.add('unfolded'); }
+  });
+  document.body.addEventListener('story-hidden', () => toast('Hidden from today\'s paper'));
 
   document.addEventListener('keydown', (e) => {
     if (e.metaKey || e.ctrlKey || e.altKey || e.defaultPrevented) return;

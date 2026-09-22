@@ -22,11 +22,12 @@ from typing import NamedTuple
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pensieve import models
 from pensieve.ai import prompts
-from pensieve.ai.client import LLMClient, LLMError, get_client
+from pensieve.ai.client import LLMClient, LLMError, get_client, validate_schema
 from pensieve.ai.common import (
     ai_on,
     centroid,
@@ -56,6 +57,10 @@ STARRED_UNREAD_DAYS = 14
 TREND_WEEKS = 4
 TREND_TAGS = 8
 SUMMARY_TEXT_CHARS = 24_000
+SUMMARY_BATCH = 4
+SUMMARY_BATCH_TEXT_CHARS = 6_000  # per article inside a batch; four leads fit the short-model input budget
+SUMMARY_TOKENS_PER_ITEM = 260
+SUMMARY_TOKENS_HEADROOM = 200
 TOP_TAGS = 20
 TOP_TAGS_DAYS = 90
 
@@ -591,6 +596,151 @@ async def weekly_review(
 def render_summary(bullets: list[str], why: str) -> str:
     lines = [f"- {b.strip()}" for b in bullets if b and b.strip()]
     return "\n".join(lines) + f"\n\n**Why this matters to you**\n\n{why.strip()}\n"
+
+
+def _summary_entry_ok(entry: object) -> bool:
+    try:
+        validate_schema(entry, prompts.ITEM_SUMMARY_BATCH_ENTRY_SCHEMA)
+    except LLMError as exc:
+        log.warning("summarize_items: skipping malformed entry: %s", exc)
+        return False
+    return True
+
+
+async def _story_siblings(
+    session: AsyncSession, user_id: uuid.UUID, item_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, uuid.UUID]:
+    """item_id -> cluster_id for the given items (only those in a cluster)."""
+    if not item_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(models.ClusterItem.item_id, models.ClusterItem.cluster_id)
+            .join(models.Cluster, models.Cluster.id == models.ClusterItem.cluster_id)
+            .where(models.Cluster.user_id == user_id, models.ClusterItem.item_id.in_(item_ids))
+        )
+    ).all()
+    return {item_id: cluster_id for item_id, cluster_id in rows}
+
+
+async def summarized_cluster_ids(session: AsyncSession, user_id: uuid.UUID, cluster_ids: set[uuid.UUID]) -> set:
+    """Clusters that already have at least one member with a summary for this user."""
+    if not cluster_ids:
+        return set()
+    stmt = (
+        select(models.ClusterItem.cluster_id)
+        .join(models.ItemAI, models.ItemAI.item_id == models.ClusterItem.item_id)
+        .where(
+            models.ClusterItem.cluster_id.in_(cluster_ids),
+            models.ItemAI.user_id == user_id,
+            models.ItemAI.summary.is_not(None),
+        )
+        .distinct()
+    )
+    return set((await session.scalars(stmt)).all())
+
+
+async def summarize_items(
+    session: AsyncSession,
+    user: models.User,
+    items: list[models.Item],
+    client: LLMClient | None = None,
+    *,
+    force: bool = False,
+) -> dict[uuid.UUID, str]:
+    """Eager summaries: 3 bullets + why-it-matters per item, in batches of ``SUMMARY_BATCH``, stored in
+    ``item_ai.summary``. Returns {item_id: markdown} for what was written this call.
+
+    One summary per *story*: items already summarised are skipped, and of the members of one cluster only
+    one (the canonical item when present, else the newest) is summarised, unless ``force``. A batch that
+    fails raises ``LLMError`` after the earlier batches were flushed; a malformed entry is skipped, not the
+    batch.
+    """
+    if not items:
+        return {}
+    client = client or get_client()
+    settings = get_settings()
+    ids = [i.id for i in items]
+    existing = await _ai_rows(session, user.id, ids)
+    todo = items if force else [i for i in items if not (existing.get(i.id) and existing[i.id].summary)]
+    if not force and todo:
+        membership = await _story_siblings(session, user.id, [i.id for i in todo])
+        done_clusters = await summarized_cluster_ids(session, user.id, set(membership.values()))
+        canonical = {}
+        if membership:
+            rows = await session.execute(
+                select(models.Cluster.id, models.Cluster.canonical_item_id).where(
+                    models.Cluster.id.in_(set(membership.values()))
+                )
+            )
+            canonical = dict(rows.all())
+        picked: dict[uuid.UUID, models.Item] = {}
+        singles: list[models.Item] = []
+        for item in sorted(todo, key=lambda i: i.published_at, reverse=True):
+            cid = membership.get(item.id)
+            if cid is None:
+                singles.append(item)
+                continue
+            if cid in done_clusters:
+                continue
+            best = picked.get(cid)
+            if best is None or canonical.get(cid) == item.id:
+                picked[cid] = item
+        todo = singles + list(picked.values())
+    if not todo:
+        return {}
+    feeds = {
+        f.id: f.title
+        for f in (await session.scalars(select(models.Feed).where(models.Feed.user_id == user.id))).all()
+    }
+    profile = await profile_text(session, user.id)
+    written: dict[uuid.UUID, str] = {}
+    for start in range(0, len(todo), SUMMARY_BATCH):
+        batch = todo[start : start + SUMMARY_BATCH]
+        payload = [
+            (n, it.title, feeds.get(it.feed_id, ""), (it.content_text or "")[:SUMMARY_BATCH_TEXT_CHARS])
+            for n, it in enumerate(batch)
+        ]
+        result = await client.chat_json(
+            settings.llm_fast_model,
+            prompts.ITEM_SUMMARY_BATCH_SYSTEM,
+            prompts.item_summary_batch_user(profile, payload),
+            prompts.ITEM_SUMMARY_BATCH_SCHEMA,
+            max_tokens=SUMMARY_TOKENS_PER_ITEM * len(batch) + SUMMARY_TOKENS_HEADROOM,
+            workflow="summarize_items",
+            name="item_summaries",
+            validate_with=prompts.ITEM_SUMMARY_BATCH_LOOSE_SCHEMA,
+        )
+        by_index = {int(e["index"]): e for e in result["items"] if _summary_entry_ok(e)}
+        values = []
+        for n, item in enumerate(batch):
+            entry = by_index.get(n)
+            if entry is None:
+                continue
+            markdown = render_summary([str(b) for b in entry["bullets"]], str(entry["why_it_matters"]))
+            written[item.id] = markdown
+            values.append(
+                {
+                    "user_id": user.id,
+                    "item_id": item.id,
+                    "summary": markdown,
+                    "model": settings.llm_fast_model,
+                    "prompt_version": "",  # a summary-only row must not count as tagged (categorize.is_tagged)
+                    "tags": [],
+                    "confidences": {},
+                    "generated_at": utcnow(),
+                }
+            )
+        if not values:
+            continue
+        # Upsert: a tagging job may create the row concurrently; on conflict only the summary changes.
+        stmt = pg_insert(models.ItemAI).values(values)
+        stmt = stmt.on_conflict_do_update(
+            index_elements=["user_id", "item_id"], set_={"summary": stmt.excluded.summary}
+        )
+        await session.execute(stmt)
+        await session.flush()
+    return written
 
 
 async def summarize_item(

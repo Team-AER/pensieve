@@ -1,0 +1,31 @@
+{% import "_macros.html" as m %}
+{% set sec_id = 'sec-' ~ section.key|replace(' ', '-') %}
+<section class="psection" id="{{ sec_id }}" aria-labelledby="{{ sec_id }}-h" data-key="{{ section.key }}">
+  <header class="psection-head">
+    <h2 class="psection-title" id="{{ sec_id }}-h">{{ section.title }}</h2>
+    <span class="psection-count">{{ section.count }} stor{{ 'y' if section.count == 1 else 'ies' }}{% if section.unread %} · {{ section.unread }} unread{% endif %}</span>
+    <span class="grow"></span>
+    <div class="psection-actions">
+      <button type="button" class="btn btn-sm btn-ghost" data-expand="#{{ sec_id }}" aria-label="Expand or collapse every story in {{ section.title }}">{{ m.icon('layers', 14) }} <span class="btn-label">Expand all</span></button>
+      {% if section.unread %}
+      <form hx-post="/insights/paper/{{ edition.id }}/read" hx-target="#{{ sec_id }}" hx-swap="outerHTML" method="post" action="/insights/paper/{{ edition.id }}/read">{{ m.csrf_field(csrf_token) }}<input type="hidden" name="section" value="{{ section.key }}"><button class="btn btn-sm btn-ghost" type="submit">{{ m.icon('check-circle', 14) }} <span class="btn-label">Mark section read</span></button></form>
+      {% endif %}
+      {% if section.kind != 'other' %}
+      <form method="post" action="/insights/paper/hide-section" hx-boost="false">{{ m.csrf_field(csrf_token) }}<input type="hidden" name="key" value="{{ section.key }}"><button class="btn btn-sm btn-ghost" type="submit" title="Turn this section off (undo in Customize)">{{ m.icon('close', 14) }} <span class="btn-label">Hide section</span></button></form>
+      {% endif %}
+    </div>
+  </header>
+  <div class="pstories">
+    {% for story in section.stories %}{% include "partials/paper_story.html" %}{% endfor %}
+  </div>
+  {% set folded = section.stories|selectattr('folded')|list|length %}
+  {% if folded %}<button type="button" class="btn btn-sm psection-more" data-unfold="#{{ sec_id }}">{{ m.icon('chevron-down', 14) }} Show {{ folded }} more</button>{% endif %}
+  {% if section.brief %}
+  <details class="pbrief">
+    <summary class="pbrief-head">In brief: {{ section.brief|length }} single-source item{{ 's' if section.brief|length != 1 }}</summary>
+    <div class="pstories pstories-brief">
+      {% for story in section.brief %}{% with brief=True %}{% include "partials/paper_story.html" %}{% endwith %}{% endfor %}
+    </div>
+  </details>
+  {% endif %}
+</section>

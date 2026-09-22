@@ -40,6 +40,18 @@ async def seed(session, user, n=2):
     return feed, items
 
 
+@pytest.fixture(autouse=True)
+def enqueued(monkeypatch):
+    """Record what a job hands to the queue when its ctx carries no arq redis (never touch a real Redis)."""
+    calls = []
+
+    async def fake_enqueue(function, *args, _job_id=None, **kwargs):
+        calls.append((function, args, _job_id))
+
+    monkeypatch.setattr(jobs.queue, "enqueue", fake_enqueue)
+    return calls
+
+
 async def ai_job(session, kind, target_id):
     stmt = select(models.AIJob).where(models.AIJob.kind == kind, models.AIJob.target_id == target_id)
     rows = (await session.scalars(stmt.execution_options(populate_existing=True))).all()
@@ -55,6 +67,8 @@ def test_function_registry_matches_queue_contract():
         queue.AI_WEEKLY_REVIEW,
         queue.AI_REFRESH_PROFILE,
         queue.AI_SUMMARIZE_ITEM,
+        queue.AI_SUMMARIZE_ITEMS,
+        queue.AI_DAILY_PAPER,
     ]
     names = {c.coroutine.__name__: c for c in CRON_JOBS}
     assert set(names) == {"ai_dispatch_daily", "ai_dispatch_weekly"}
@@ -67,12 +81,17 @@ def test_function_registry_matches_queue_contract():
     assert AIWorkerSettings.queue_name == "pensieve:ai" and WorkerSettings.queue_name == "arq:queue"
 
 
-async def test_process_new_items_runs_all_steps_and_mirrors_done(session, user, gateway):
+async def test_process_new_items_runs_all_steps_and_mirrors_done(session, user, gateway, enqueued):
     feed, items = await seed(session, user)
     gateway.chat_by_workflow({"tag_items": tagging(2), "cluster": {"same_story": True, "headline": "h"}})
     await jobs.ai_process_new_items({"job_try": 1}, str(feed.id), [str(i.id) for i in items])
     row = await ai_job(session, "process_items", feed.id)
     assert row.status == "done" and row.attempts == 1 and row.started_at and row.finished_at
+    # eager summaries are a follow-up job of their own, queued once tagging and clustering are committed
+    assert [(c[0], c[1][0], sorted(c[1][1])) for c in enqueued] == [
+        (queue.AI_SUMMARIZE_ITEMS, str(user.id), sorted(str(i.id) for i in items))
+    ]
+    assert enqueued[0][2].startswith(f"{queue.AI_SUMMARIZE_ITEMS}:{feed.id}:")
     assert row.tokens_in > 0 and row.tokens_out > 0 and row.last_error is None
     assert (
         len(
@@ -174,10 +193,13 @@ async def test_cap_remainder_is_requeued_in_chunks(session, user, gateway, monke
     assert row.status == "done" and "3 more re-queued in 2 job(s)" in row.last_error
     newest_first = sorted(items, key=lambda i: i.published_at, reverse=True)
     expected = [[str(i.id) for i in newest_first[2:4]], [str(newest_first[4].id)]]
-    assert [c[0] for c in redis.calls] == [queue.AI_PROCESS_NEW_ITEMS] * 2
-    assert [list(c[1][1]) for c in redis.calls] == expected
-    assert [c[2] for c in redis.calls] == [jobs.remainder_job_id(feed.id, n, ch) for n, ch in enumerate(expected, 1)]
-    assert all(c[2].startswith(f"process:{feed.id}:") for c in redis.calls)
+    process = [c for c in redis.calls if c[0] == queue.AI_PROCESS_NEW_ITEMS]
+    assert len(process) == 2 and [c[0] for c in redis.calls][-1] == queue.AI_SUMMARIZE_ITEMS
+    assert [list(c[1][1]) for c in process] == expected
+    assert [c[2] for c in process] == [jobs.remainder_job_id(feed.id, n, ch) for n, ch in enumerate(expected, 1)]
+    assert all(c[2].startswith(f"process:{feed.id}:") for c in process)
+    # summaries are queued for the two items this job actually processed
+    assert sorted(redis.calls[-1][1][1]) == sorted(str(i.id) for i in newest_first[:2])
     # only the newest two were tagged by this job
     tagged = (await session.scalars(select(models.ItemAI.item_id).where(models.ItemAI.user_id == user.id))).all()
     assert set(tagged) == {i.id for i in newest_first[:2]}
@@ -246,6 +268,45 @@ async def test_summarize_item_job(session, user, gateway):
     assert ai.summary.startswith("- a")
 
 
+async def test_process_new_items_respects_summaries_toggle(session, user, gateway, enqueued):
+    feed, items = await seed(session, user)
+    user.settings = {"summarize_items": False}
+    await session.commit()
+    gateway.chat_by_workflow({"tag_items": tagging(2)})
+    await jobs.ai_process_new_items({"job_try": 1}, str(feed.id), [str(i.id) for i in items])
+    assert enqueued == []
+
+
+def summaries(n):
+    return {"items": [{"index": i, "bullets": ["a", "b", "c"], "why_it_matters": f"why {i}"} for i in range(n)]}
+
+
+async def test_summarize_items_job(session, user, gateway):
+    _feed, items = await seed(session, user, n=3)
+    gateway.chat_by_workflow({"summarize_items": summaries(3)})
+    await jobs.ai_summarize_items({"job_try": 1}, str(user.id), [str(i.id) for i in items])
+    row = await ai_job(session, "summarize_items", items[0].id)
+    assert row.status == "done" and row.user_id == user.id and "summarised 3 of 3" in row.last_error
+    rows = (await session.scalars(select(models.ItemAI).where(models.ItemAI.user_id == user.id))).all()
+    assert len(rows) == 3 and all(r.summary and r.summary.startswith("- a") for r in rows)
+    assert all(r.tags == [] and r.prompt_version == "" for r in rows)  # summary-only rows still need tagging
+    # a second run has nothing to do and makes no model call
+    before = len(gateway.chat_calls)
+    await jobs.ai_summarize_items({"job_try": 1, "job_id": "again"}, str(user.id), [str(i.id) for i in items])
+    assert len(gateway.chat_calls) == before
+
+
+async def test_daily_paper_job(session, user, gateway):
+    _feed, items = await seed(session, user, n=2)
+    session.add(models.ItemAI(user_id=user.id, item_id=items[0].id, tags=["ai"], confidences={"ai": 0.9}))
+    await session.commit()
+    await jobs.ai_daily_paper({"job_try": 1}, str(user.id))
+    row = await ai_job(session, "paper", user.id)
+    assert row.status == "done" and "2 stories" in row.last_error and gateway.chat_calls == []
+    edition = await session.scalar(select(models.Insight).where(models.Insight.kind == "paper"))
+    assert edition is not None and [s["key"] for s in edition.body["sections"]] == ["ai", "other"]
+
+
 async def test_jobs_skip_when_ai_disabled(session, user, gateway):
     feed, items = await seed(session, user)
     user.ai_enabled = False
@@ -279,6 +340,9 @@ async def test_dispatchers_enqueue_per_user(session, user):
     assert n == 1 and redis.calls[0][0] == queue.AI_DAILY_DIGEST and redis.calls[0][1] == (str(user.id),)
     assert redis.calls[0][2] == jobs.digest_job_id(user.id, when.date())
     assert redis.calls[0][2].startswith(f"{queue.AI_DAILY_DIGEST}:{user.id}:")
+    # the paper is compiled at digest time too, so the edition is on record even if nobody opens it
+    assert [c[0] for c in redis.calls] == [queue.AI_DAILY_DIGEST, queue.AI_DAILY_PAPER]
+    assert redis.calls[1][2] == jobs.paper_job_id(user.id, when.date())
     redis = FakeRedis()
     await jobs.ai_dispatch_weekly({"redis": redis})
     funcs = sorted((c[0], c[1][0]) for c in redis.calls)

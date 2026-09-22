@@ -8,7 +8,8 @@
   </div>
   <div class="insight-actions">
     <div class="seg" role="group" aria-label="Kind">
-      <a class="seg-btn{% if kind == 'daily' %} on{% endif %}" href="/insights">Daily digest</a>
+      <a class="seg-btn" href="/insights">The paper</a>
+      <a class="seg-btn{% if kind == 'daily' %} on{% endif %}" href="/insights/digest">Digest</a>
       <a class="seg-btn{% if kind == 'weekly' %} on{% endif %}" href="/insights/weekly">Weekly review</a>
     </div>
   </div>
@@ -33,7 +34,8 @@
   </div>
   <div class="insight-actions">
     <div class="seg" role="group" aria-label="Kind">
-      <a class="seg-btn{% if kind == 'daily' %} on{% endif %}" href="/insights">Daily digest</a>
+      <a class="seg-btn" href="/insights">The paper</a>
+      <a class="seg-btn{% if kind == 'daily' %} on{% endif %}" href="/insights/digest">Digest</a>
       <a class="seg-btn{% if kind == 'weekly' %} on{% endif %}" href="/insights/weekly">Weekly review</a>
     </div>
     {% if history %}

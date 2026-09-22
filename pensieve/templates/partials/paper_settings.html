@@ -1,0 +1,45 @@
+{% import "_macros.html" as m %}
+<dialog id="paper-settings" class="dialog dialog-wide paper-settings" aria-labelledby="paper-settings-title">
+  <form method="post" action="/insights/paper/settings" hx-boost="false">
+    {{ m.csrf_field(csrf_token) }}
+    <div class="dialog-head"><h2 id="paper-settings-title">Customize the paper</h2><button type="button" class="btn btn-icon btn-sm btn-ghost" data-dialog-dismiss aria-label="Close">{{ m.icon('close') }}</button></div>
+    <div class="dialog-body paper-settings-body">
+      <div class="field-row">
+        <div class="field"><label for="ps-group">Sections by</label>
+          <select class="input input-sm" id="ps-group" name="group_by">{% for v, label in [('tag', 'AI tag'), ('folder', 'Folder')] %}<option value="{{ v }}"{% if config.group_by == v %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="ps-window">Covers</label>
+          <select class="input input-sm" id="ps-window" name="window_hours">{% for h in [24, 48, 72] %}<option value="{{ h }}"{% if config.window_hours == h %} selected{% endif %}>Last {{ h }} hours</option>{% endfor %}</select></div>
+        <div class="field"><label for="ps-per">Stories per section</label><input class="input input-sm" id="ps-per" type="number" name="per_section" min="1" max="50" value="{{ config.per_section }}"></div>
+        <div class="field"><label for="ps-min">Needs sources</label><input class="input input-sm" id="ps-min" type="number" name="min_sources" min="1" max="10" value="{{ config.min_sources }}"><span class="field-hint">Stories with fewer go to “In brief”.</span></div>
+      </div>
+      <div class="paper-settings-checks">
+        <label class="check"><input type="checkbox" class="checkbox" name="show_summaries" value="1"{% if config.show_summaries %} checked{% endif %}><span>Show summaries</span></label>
+        <label class="check"><input type="checkbox" class="checkbox" name="hide_read" value="1"{% if config.hide_read %} checked{% endif %}><span>Drop stories I have read</span></label>
+        <label class="check"><input type="checkbox" class="checkbox" name="auto_sections" value="1"{% if config.auto_sections %} checked{% endif %}><span>Add new tags as sections automatically</span></label>
+      </div>
+      <div class="field">
+        <span class="field-label">Sections, in order</span>
+        <span class="field-hint">Untick to hide a section; leave the limit blank to use the default.</span>
+        <div class="section-rows" id="section-rows">
+          {% for row in section_rows %}
+          <div class="section-row">
+            <input type="hidden" name="section" value="{{ row.key }}">
+            <label class="check"><input type="checkbox" class="checkbox" name="section_on" value="{{ row.key }}"{% if row.on %} checked{% endif %}><span>{{ row.title }}{% if row.auto %} <span class="faint">auto</span>{% endif %}</span></label>
+            <input class="input input-sm section-limit" type="number" name="limit:{{ row.key }}" min="1" max="50" placeholder="{{ config.per_section }}" value="{{ row.limit or '' }}" aria-label="Stories in {{ row.title }}">
+            <button type="button" class="btn btn-icon btn-sm btn-ghost" data-move="up" aria-label="Move {{ row.title }} up">{{ m.icon('chevron', 14) }}</button>
+            <button type="button" class="btn btn-icon btn-sm btn-ghost" data-move="down" aria-label="Move {{ row.title }} down">{{ m.icon('chevron-down', 14) }}</button>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      <div class="field">
+        <span class="field-label">Muted sources</span>
+        <span class="field-hint">Muted feeds never appear in the paper.</span>
+        <div class="muted-feeds">
+          {% for f in feeds %}<label class="check"><input type="checkbox" class="checkbox" name="muted_feed" value="{{ f.id }}"{% if f.id|string in muted %} checked{% endif %}><span>{{ f.title or f.url }}</span></label>{% endfor %}
+        </div>
+      </div>
+    </div>
+    <div class="dialog-foot"><button type="button" class="btn" data-dialog-dismiss>Cancel</button><button class="btn btn-primary" type="submit">Save and recompile</button></div>
+  </form>
+</dialog>

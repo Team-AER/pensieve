@@ -141,6 +141,34 @@ ITEM_SUMMARY_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
+ITEM_SUMMARY_BATCH_ENTRY_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "index": {"type": "integer"},
+        "bullets": {"type": "array", "items": {"type": "string"}, "minItems": 3, "maxItems": 3},
+        "why_it_matters": {"type": "string"},
+    },
+    "required": ["index", "bullets", "why_it_matters"],
+    "additionalProperties": False,
+}
+"""One article's summary in a batch: {index, bullets[3], why_it_matters}. Validated per entry by ``insights``."""
+
+ITEM_SUMMARY_BATCH_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {"items": {"type": "array", "items": ITEM_SUMMARY_BATCH_ENTRY_SCHEMA}},
+    "required": ["items"],
+    "additionalProperties": False,
+}
+"""Batch form sent to the model: one entry per input article, keyed by index."""
+
+ITEM_SUMMARY_BATCH_LOOSE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {"items": {"type": "array", "items": {"type": "object"}}},
+    "required": ["items"],
+    "additionalProperties": False,
+}
+"""Loose envelope check so one malformed entry is skipped rather than failing the batch."""
+
 ASK_ANSWER_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -203,6 +231,13 @@ ITEM_SUMMARY_SYSTEM = (
     "Summarise the article in exactly three crisp bullets (facts, not opinions), then one or two sentences on why "
     "it matters to this specific reader given their profile. If the profile is empty, explain why it matters to "
     "a technical reader in general. " + _JSON_ONLY
+)
+
+ITEM_SUMMARY_BATCH_SYSTEM = (
+    "Summarise each article for one reader: exactly three crisp bullets of facts (not opinions), then one or two "
+    "sentences on why it matters to this specific reader given their profile (or to a technical reader in general "
+    "when the profile is empty). Return one entry per article, keyed by its index; never merge articles. "
+    + _JSON_ONLY
 )
 
 ASK_SYSTEM = (
@@ -311,6 +346,19 @@ def item_summary_user(profile: str, title: str, text: str) -> str:
     return f"Reader profile:\n{profile or '(none)'}\n\nArticle title: {title}\n\nArticle text:\n{text}"
 
 
+def item_summary_batch_user(profile: str, items: list[tuple[int, str, str, str]]) -> str:
+    """``items`` are (index, title, source, text)."""
+    parts = ["Reader profile:", profile or "(none)", ""]
+    for index, title, source, text in items:
+        parts.append(f"### Article {index}")
+        parts.append(f"Title: {title}")
+        if source:
+            parts.append(f"Source: {source}")
+        parts.append(f"Text: {text}")
+        parts.append("")
+    return "\n".join(parts).strip()
+
+
 def ask_user(question: str, excerpts: list[tuple[int, str, str, str]]) -> str:
     """``excerpts`` are (n, title, source, text)."""
     block = "\n\n".join(f"[{n}] {title} ({source})\n{text}" for n, title, source, text in excerpts)
@@ -327,6 +375,10 @@ __all__ = [
     "DIGEST_SYSTEM",
     "FEED_FILING_SCHEMA",
     "FEED_FILING_SYSTEM",
+    "ITEM_SUMMARY_BATCH_ENTRY_SCHEMA",
+    "ITEM_SUMMARY_BATCH_LOOSE_SCHEMA",
+    "ITEM_SUMMARY_BATCH_SCHEMA",
+    "ITEM_SUMMARY_BATCH_SYSTEM",
     "ITEM_SUMMARY_SCHEMA",
     "ITEM_SUMMARY_SYSTEM",
     "ITEM_TAGGING_BATCH_SCHEMA",
