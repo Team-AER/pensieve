@@ -143,6 +143,18 @@ def _pdf(data: bytes) -> tuple[str | None, str, int]:
     return title, "\n\n".join(pages)[: extract.TEXT_LIMIT], len(reader.pages)
 
 
+async def _tika_pdf(data: bytes) -> str:
+    url = get_settings().tika_url
+    if not url:
+        return ""
+    async with httpx.AsyncClient(timeout=45.0) as client:
+        response = await client.put(
+            url, content=data, headers={"Content-Type": "application/pdf", "Accept": "text/plain"}
+        )
+        response.raise_for_status()
+        return response.text.strip()[: extract.TEXT_LIMIT]
+
+
 def _paragraphs_html(text: str, limit: int = 200_000) -> str:
     blocks = [b.strip() for b in text[:limit].split("\n\n") if b.strip()]
     return "".join(f"<p>{html_lib.escape(' '.join(b.split()))}</p>" for b in blocks)
@@ -368,6 +380,13 @@ async def _capture_file(
             title, text, pages = await asyncio.to_thread(_pdf, raw.body)
         except Exception as exc:  # noqa: BLE001
             snapshot.error = f"PDF text could not be read: {exc.__class__.__name__}"
+        if not text:
+            try:
+                text = await _tika_pdf(raw.body)
+                if text:
+                    snapshot.error = None
+            except (httpx.HTTPError, TimeoutError) as exc:
+                log.warning("Tika PDF extraction failed for %s: %s", raw.url, exc)
     elif raw.content_type.startswith("text/"):
         text = raw.body[: extract.TEXT_LIMIT].decode("utf-8", errors="replace")
     snapshot.file_key = snapshot.page_key = snapshot.shot_key = snapshot.raw_key = None

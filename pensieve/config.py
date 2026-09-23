@@ -105,6 +105,7 @@ class Settings(BaseSettings):
     capture_max_file_mb: int = 40  # PDFs and other files saved as-is
     capture_shot_max_px: int = 12000  # full-page screenshot height cap
     capture_concurrency: int = 2
+    tika_url: str = ""  # optional Apache Tika /tika endpoint for PDF text fallback
 
 
 @lru_cache

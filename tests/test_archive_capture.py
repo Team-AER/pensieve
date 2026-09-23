@@ -168,6 +168,22 @@ async def test_pdf_is_kept_as_a_file_with_its_text(session, user, fake_queue, bu
     assert "orchard yields" in item.content_text and item.title.startswith("report.pdf")
 
 
+async def test_tika_recovers_pdf_without_local_text(session, user, fake_queue, bucket, monkeypatch):
+    item, snap = await _saved(session, user, fake_queue, url="https://papers.example.com/scanned.pdf")
+    monkeypatch.setattr(capture, "_pdf", lambda data: (None, "", 1))
+    settings = capture.get_settings().model_copy(update={"tika_url": "http://tika.test/tika"})
+    monkeypatch.setattr(capture, "get_settings", lambda: settings)
+    with respx.mock(assert_all_called=True) as router:
+        router.get("https://papers.example.com/scanned.pdf").respond(
+            200, content=_pdf("invisible locally"), headers={"content-type": "application/pdf"}
+        )
+        tika = router.put("http://tika.test/tika").respond(200, text="Recovered archive text")
+        done = await capture.capture_snapshot(session, snap.id)
+    await session.refresh(item)
+    assert tika.called and tika.calls[0].request.headers["content-type"] == "application/pdf"
+    assert done.status == "done" and item.content_text == "Recovered archive text"
+
+
 async def test_nothing_fetchable_marks_the_capture_failed(session, user, fake_queue, bucket):
     from pensieve.archive import render as render_mod
 

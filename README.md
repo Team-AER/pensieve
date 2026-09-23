@@ -89,6 +89,7 @@ All application settings use the `PENSIEVE_` prefix. The most important values a
 | `PENSIEVE_S3_ACCESS_KEY`, `PENSIEVE_S3_SECRET_KEY` | The archive's bucket credentials; `storage-init` imports them into Garage on every start |
 | `PENSIEVE_GARAGE_CAPACITY_GB` | Size the Garage node advertises (default 200) |
 | `PENSIEVE_CAPTURE_CONCURRENCY` | Pages captured at once by `worker-capture` (default 2) |
+| `PENSIEVE_TIKA_URL` | Optional Apache Tika `/tika` endpoint for PDFs whose local text extraction is empty |
 
 See [.env.example](.env.example) and [`pensieve/config.py`](pensieve/config.py) for the full set of defaults.
 Keep `.env` private; it is excluded from Git and the Docker build context.
