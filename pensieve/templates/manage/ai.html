@@ -38,7 +38,21 @@
   <div class="stats">
     {% for k in ['queued','running','done','failed'] %}<div class="stat"><div class="stat-n">{{ stats[k] }}</div><div class="eyebrow">{{ k }}</div></div>{% endfor %}
   </div>
-  {% if recent_failed %}<ul class="plain-list small">{% for j in recent_failed %}<li><span class="chip chip-sm">{{ j.kind }}</span> <span class="muted">{{ j.last_error|truncate(90) }}</span> <span class="faint">{{ j.created_at|timeago }}</span></li>{% endfor %}</ul>{% endif %}
+  {% if stats.failed %}
+  <div class="queue-failed">
+    <div class="row space-between queue-failed-head">
+      <span class="eyebrow">Still failing</span>
+      <form method="post" action="/manage/ai/retry" hx-boost="false">{{ m.csrf_field(csrf_token) }}<button class="btn btn-sm" type="submit" title="Queue fresh jobs for the work these could not do; a job fixed by a later run has already dropped off this count">{{ m.icon('refresh', 14) }} Retry {{ stats.failed }} failed</button></form>
+    </div>
+    <ul class="plain-list small">{% for j in recent_failed %}<li><span class="chip chip-sm">{{ j.kind }}</span> <span class="muted">{{ j.last_error|truncate(90) }}</span> <span class="faint">{{ j.created_at|timeago }}</span></li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+  {% if recent_notes %}
+  <details class="queue-notes">
+    <summary class="small muted">Recent notes from finished jobs</summary>
+    <ul class="plain-list small">{% for j in recent_notes %}<li><span class="chip chip-sm">{{ j.kind }}</span> <span class="muted">{{ j.last_error|truncate(90) }}</span> <span class="faint">{{ j.created_at|timeago }}</span></li>{% endfor %}</ul>
+  </details>
+  {% endif %}
 </section>
 </div>
 </div>

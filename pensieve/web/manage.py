@@ -12,9 +12,10 @@ from typing import Annotated, Any
 import httpx
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse, Response
-from sqlalchemy import and_, delete, func, or_, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from pensieve.ai import retry as ai_retry
 from pensieve.auth import (
     generate_api_token,
     hash_api_token,
@@ -53,6 +54,8 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/manage")
 
 FLASH = {
+    "ai_retried": "Retrying the failed work. The counts update as the new jobs finish.",
+    "ai_nothing_to_retry": "Nothing left to retry: later runs already did that work.",
     "feed_added": "Feed added.",
     "feed_updated": "Feed updated.",
     "feed_removed": "Unsubscribed.",
@@ -840,26 +843,27 @@ async def ai_page(request: Request, user: CurrentUser, session: DB):
     profile = await session.scalar(
         select(Profile).where(Profile.user_id == user.id).order_by(Profile.version.desc()).limit(1)
     )
+    # A failed job whose work a later run already did is settled first, so the count is what is still missing.
+    if await ai_retry.reconcile(session, user.id):
+        await session.commit()
     stats_rows = await session.execute(
         select(AIJob.status, func.count()).where(AIJob.user_id == user.id).group_by(AIJob.status)
     )
     stats = {"queued": 0, "running": 0, "done": 0, "failed": 0}
     for status_, n in stats_rows:
-        # "partial" (some steps failed on the last try) counts as failed for the reader's purposes
+        # "partial" (some steps failed on the last try) counts as failed; resolved and retried rows are settled
+        if status_ in ("resolved", "retried"):
+            continue
         key = "failed" if status_ == "partial" else status_
         stats[key] = stats.get(key, 0) + int(n)
     recent_failed = list(
         await session.scalars(
-            select(AIJob)
-            .where(
-                AIJob.user_id == user.id,
-                or_(
-                    AIJob.status.in_(["failed", "partial"]),
-                    and_(AIJob.status == "done", AIJob.last_error.is_not(None)),  # done-with-warning
-                ),
-            )
-            .order_by(AIJob.created_at.desc())
-            .limit(8)
+            select(AIJob).where(ai_retry.failed_filter(user.id)).order_by(AIJob.created_at.desc()).limit(8)
+        )
+    )
+    recent_notes = list(
+        await session.scalars(
+            select(AIJob).where(ai_retry.notes_filter(user.id)).order_by(AIJob.created_at.desc()).limit(8)
         )
     )
     return page(
@@ -867,8 +871,22 @@ async def ai_page(request: Request, user: CurrentUser, session: DB):
         user,
         "ai",
         "manage/ai.html",
-        {"ai": ai_settings(user), "profile": profile, "stats": stats, "recent_failed": recent_failed},
+        {
+            "ai": ai_settings(user),
+            "profile": profile,
+            "stats": stats,
+            "recent_failed": recent_failed,
+            "recent_notes": recent_notes,
+        },
     )
+
+
+@router.post("/ai/retry")
+async def ai_retry_failed(request: Request, user: CsrfUser, session: DB):
+    """Hand every failed job whose work is still missing to a fresh job (see ``pensieve.ai.retry``)."""
+    result = await ai_retry.retry_failed(session, user)
+    await session.commit()
+    return back("/manage/ai", "ai_retried" if result["jobs"] else "ai_nothing_to_retry")
 
 
 @router.get("/ai/gateway")

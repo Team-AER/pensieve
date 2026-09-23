@@ -837,3 +837,12 @@
   .table-wrap:has(details.menu) tbody tr:last-child td:last-child { border-bottom-right-radius: 11px; }
   .table-wrap details.menu[open] { position: relative; z-index: 20; }
 }
+
+/* ---- Manage → AI and memory: the Queue card's failures and notes ---- */
+@layer components {
+  .queue-failed { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+  .queue-failed-head { align-items: center; gap: 8px; flex-wrap: wrap; }
+  .queue-notes { margin-top: 12px; }
+  .queue-notes > summary { cursor: pointer; }
+  .queue-notes .plain-list { margin-top: 8px; }
+}
