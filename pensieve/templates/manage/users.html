@@ -11,8 +11,9 @@
 {% if invited %}
 <div class="card section token-reveal" role="status">
   <div class="card-head"><h2>Invited {{ invited.email }}</h2></div>
-  <p class="muted small">Share this temporary password once; they should change it after signing in.</p>
-  <code class="token-plain">{{ invited.password }}</code>
+  <p class="muted small">Send them the sign-in link and this temporary password, once. They can change it under Profile and password after signing in.</p>
+  <div class="field"><span class="field-label">Sign-in link</span><code class="token-plain">{{ invited.signin_url }}</code></div>
+  <div class="field"><span class="field-label">Temporary password</span><code class="token-plain">{{ invited.password }}</code></div>
 </div>
 {% endif %}
 <form class="card section" method="post" action="/manage/users">{{ m.csrf_field(csrf_token) }}

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Annotated
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Form, Request
 from fastapi.responses import RedirectResponse, Response
@@ -18,7 +19,7 @@ from pensieve.auth import (
     verify_password,
 )
 from pensieve.config import get_settings
-from pensieve.models import User, UserRole
+from pensieve.models import FEED_KIND_RSS, Feed, User, UserRole
 from pensieve.web.ratelimit import client_ip, get_limiter
 from pensieve.web.templating import DB, CsrfUser, check_csrf, render
 
@@ -30,6 +31,28 @@ def safe_next(value: str | None) -> str:
     if not value or not value.startswith("/") or value.startswith("//") or "\\" in value:
         return "/"
     return value
+
+
+ADMIN_ONLY_PAGES = ("/manage/users",)
+"""Pages a reader account gets a 403 on (see ``manage.require_admin``)."""
+WELCOME = "/manage/feeds?msg=welcome"
+
+
+async def landing(session: AsyncSession, user: User, next: str | None) -> str:
+    """Where a sign-in goes: ``next`` when this account may open it, else the Reader. An account with nothing
+    subscribed yet starts on Manage -> Feeds, not on an empty "All caught up"."""
+    target = safe_next(next)
+    path = urlsplit(target).path
+    if user.role != UserRole.admin and any(path == p or path.startswith(p + "/") for p in ADMIN_ONLY_PAGES):
+        # e.g. the admin shared the Household users page's address along with the temporary password
+        target = "/"
+    if target == "/":
+        has_feed = await session.scalar(
+            select(Feed.id).where(Feed.user_id == user.id, Feed.kind == FEED_KIND_RSS).limit(1)
+        )
+        if has_feed is None:
+            target = WELCOME
+    return target
 
 
 def set_session(response: Response, user: User) -> None:
@@ -52,8 +75,9 @@ async def user_count(session: AsyncSession) -> int:
 async def login_page(request: Request, session: DB, next: str = "/"):
     if await user_count(session) == 0:
         return RedirectResponse("/setup", status_code=303)
-    if await user_from_session(request, session) is not None:
-        return RedirectResponse(safe_next(next), status_code=303)
+    current = await user_from_session(request, session)
+    if current is not None:
+        return RedirectResponse(await landing(session, current, next), status_code=303)
     return render(request, "login.html", {"next": safe_next(next), "error": None, "email": ""})
 
 
@@ -91,7 +115,7 @@ async def login_submit(
         await limiter.record_failure(key)
         return fail("That email and password don't match.", 401)
     await limiter.reset(key)
-    response = RedirectResponse(safe_next(next), status_code=303)
+    response = RedirectResponse(await landing(session, user, next), status_code=303)
     set_session(response, user)
     return response
 
@@ -145,6 +169,6 @@ async def setup_submit(
     )
     session.add(user)
     await session.commit()
-    response = RedirectResponse("/", status_code=303)
+    response = RedirectResponse(WELCOME, status_code=303)
     set_session(response, user)
     return response

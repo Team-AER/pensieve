@@ -54,6 +54,8 @@ log = logging.getLogger(__name__)
 router = APIRouter(prefix="/manage")
 
 FLASH = {
+    "welcome": "Welcome to Pensieve. Add a site or feed below, or import an OPML file from your old reader; "
+    "your Reader fills up from there.",
     "ai_retried": "Retrying the failed work. The counts update as the new jobs finish.",
     "ai_nothing_to_retry": "Nothing left to retry: later runs already did that work.",
     "feed_added": "Feed added.",
@@ -1366,7 +1368,14 @@ async def invite_user(
         user,
         "users",
         "manage/users.html",
-        {"users": users, "invited": {"email": email, "password": temp_password}},
+        {
+            "users": users,
+            "invited": {
+                "email": email,
+                "password": temp_password,
+                "signin_url": str(request.base_url).rstrip("/") + "/login",
+            },
+        },
     )
 
 

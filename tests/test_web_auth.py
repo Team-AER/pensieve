@@ -3,7 +3,7 @@ from sqlalchemy import select
 
 from pensieve import models
 from pensieve.web.templating import make_csrf
-from tests.test_web_support import HTML, login, login_form, memory_limiter  # noqa: F401
+from tests.test_web_support import HTML, login, login_form, make_user, memory_limiter, seed_feed  # noqa: F401
 
 
 async def test_setup_creates_first_admin(client, session):
@@ -22,7 +22,8 @@ async def test_setup_creates_first_admin(client, session):
             "password_confirm": "hunter2hunter2",
         },
     )
-    assert r.status_code == 303 and r.headers["location"] == "/"
+    # A brand-new install has no feeds yet: start where feeds are added, not on an empty Reader.
+    assert r.status_code == 303 and r.headers["location"] == "/manage/feeds?msg=welcome"
     assert "pensieve_session" in r.cookies
     admin = await session.scalar(select(models.User).where(models.User.email == "admin@example.com"))
     assert admin is not None and admin.role == models.UserRole.admin
@@ -52,7 +53,8 @@ async def test_login_page_renders_split_layout(client, user):
     assert "Your feeds, sorted, grouped and remembered." in r.text
 
 
-async def test_next_only_relative(client, user):
+async def test_next_only_relative(client, session, user):
+    await seed_feed(session, user)
     r = await client.post("/login", data=login_form(user.email, "password123", next="https://evil.example"))
     assert r.headers["location"] == "/"
     r = await client.post("/login", data=login_form(user.email, "password123", next="//evil.example"))
@@ -126,3 +128,33 @@ async def test_post_without_csrf_is_rejected(client, session, user):
     await login(client, user)
     r = await client.post("/manage/folders", data={"name": "Nope"})
     assert r.status_code == 403
+
+
+async def test_first_sign_in_lands_somewhere_the_account_can_open(client, session):
+    """A reader handed the admin's Household users link (plus a temporary password) must not land on a 403."""
+    user = await make_user(session)  # a reader, as invited from Household users
+    r = await client.post("/login", data=login_form(user.email, "password123", next="/manage/users"))
+    assert r.status_code == 303 and r.headers["location"] == "/manage/feeds?msg=welcome"
+    r = await client.get(r.headers["location"], headers=HTML)
+    assert r.status_code == 200 and "Welcome to Pensieve" in r.text
+    # With a feed, the same link goes to the Reader; an allowed page is honoured as before.
+    await seed_feed(session, user)
+    r = await client.post("/login", data=login_form(user.email, "password123", next="/manage/users?x=1"))
+    assert r.headers["location"] == "/"
+    r = await client.post("/login", data=login_form(user.email, "password123", next="/manage/feeds"))
+    assert r.headers["location"] == "/manage/feeds"
+    # Already signed in: GET /login?next=... takes the same route.
+    r = await client.get("/login?next=/manage/users")
+    assert r.status_code == 303 and r.headers["location"] == "/"
+
+
+async def test_admin_keeps_admin_next_and_invite_shows_sign_in_link(client, session):
+    admin = await make_user(session, models.UserRole.admin)
+    await seed_feed(session, admin)
+    r = await client.post("/login", data=login_form(admin.email, "password123", next="/manage/users"))
+    assert r.headers["location"] == "/manage/users"
+    headers = await login(client, admin)
+    r = await client.post(
+        "/manage/users", data={"email": "new@example.com", "role": "reader"}, headers=headers
+    )
+    assert r.status_code == 200 and "Sign-in link" in r.text and "http://test/login" in r.text
