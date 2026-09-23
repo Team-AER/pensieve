@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import delete, select
 
@@ -193,6 +193,54 @@ async def test_paper_drops_stories_read_in_reader(client, session, user):
     await client.post(f"/items/{w['s1'].id}/read", headers=headers | HX)
     r = await client.get("/insights")
     assert "Big launch everywhere" in r.text
+
+
+async def test_paper_read_marks_every_copy_of_the_article(client, session, user):
+    w = await seed_paper(session, user)
+    old = datetime.now(UTC) - timedelta(days=3)
+    c = await seed_feed(session, user, "Gamma")  # the same link and the same text in another feed
+    # in the story's cluster but too old for the paper
+    older = await seed_item(session, w["a"], "Big launch, first word", published_at=old)
+    session.add(models.ClusterItem(cluster_id=w["cluster"].id, item_id=older.id))
+    relink = await seed_item(session, c, "Launch link", published_at=old, url=w["s2"].url)
+    rehash = await seed_item(session, c, "Big launch", published_at=old)
+    rehash.hash = w["s1"].hash
+    # a series groups different episodes: reading one reads no other
+    episode = await seed_item(session, w["a"], "Launch recap #2", published_at=old)
+    series = models.Cluster(
+        user_id=user.id, window_start=old, window_end=old, canonical_item_id=episode.id, kind="series"
+    )
+    saved = models.Feed(
+        user_id=user.id, url=models.SAVED_FEED_URL, title="Saved", kind=models.FEED_KIND_SAVED
+    )
+    session.add_all([series, saved])
+    await session.flush()
+    session.add_all(
+        [
+            models.ClusterItem(cluster_id=series.id, item_id=episode.id),
+            models.ClusterItem(cluster_id=series.id, item_id=w["s1"].id),
+        ]
+    )
+    await session.commit()
+    # saved on purpose: stays in My list
+    kept = await seed_item(session, saved, "Saved launch", url=w["s1"].url)
+    read = {it.title: it.id for it in (w["s1"], w["s2"], older, relink, rehash)}
+    unread = {it.title: it.id for it in (episode, kept, w["single"], w["phone"])}
+    headers = await login(client, user)
+    r = await client.get("/insights")
+    edition = await session.scalar(
+        select(models.Insight).where(models.Insight.user_id == user.id, models.Insight.kind == "paper")
+    )
+    r = await client.post(
+        f"/insights/paper/{edition.id}/read", data={"key": f"c:{w['cluster'].id}"}, headers=headers | HX
+    )
+    assert r.status_code == 200 and "Big launch everywhere" not in r.text
+    for title, iid in read.items():
+        state = await session.get(models.ItemState, (user.id, iid))
+        assert state is not None and state.is_read, title
+    for title, iid in unread.items():
+        state = await session.get(models.ItemState, (user.id, iid))
+        assert state is None or not state.is_read, title
 
 
 async def test_paper_settings_reorder_hide_and_mute(client, session, user):

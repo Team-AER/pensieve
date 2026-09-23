@@ -19,7 +19,7 @@ from pensieve.ai import paper
 from pensieve.ai.common import ai_on
 from pensieve.ai.memory import record_correction
 from pensieve.models import AIJob, Feed, Folder, Insight, ItemAI, Tag, User
-from pensieve.web.queries import parse_uuid, set_read, user_owns_items
+from pensieve.web.queries import parse_uuid, set_read, user_owns_items, with_copies
 from pensieve.web.templating import DB, CsrfUser, CurrentUser, hx_trigger, is_htmx, render
 
 log = logging.getLogger(__name__)
@@ -550,14 +550,21 @@ async def read_story(
         targets = [*hit_section["stories"], *hit_section.get("brief", [])]
     ids = [u for u in (parse_uuid(m["item_id"]) for s in targets for m in s["members"]) if u]
     owned = await user_owns_items(session, user.id, ids)
-    await set_read(session, user.id, owned, True)
+    # The story's copies outside the paper (an older one in the cluster, the same link in another feed) too:
+    # reading a story here reads the article everywhere.
+    read_ids = await with_copies(session, user.id, owned)
+    await set_read(session, user.id, read_ids, True)
+    in_paper = {m["item_id"] for sec in body.get("sections") or [] for s in [*sec["stories"], *sec.get("brief", [])]
+                for m in s["members"]}  # fmt: skip
     for story in targets:
         story["read"] = True
         for m in story["members"]:
             m["read"] = True
     for sec in body.get("sections") or []:
         sec["unread"] = sum(1 for s in [*sec["stories"], *sec.get("brief", [])] if not s["read"])
-    body["unread_count"] = max(0, int(body.get("unread_count") or 0) - len(owned))
+    body["unread_count"] = max(
+        0, int(body.get("unread_count") or 0) - sum(str(i) in in_paper for i in read_ids)
+    )
     edition.body = body
     await session.commit()
     return await _paper_update(
@@ -630,7 +637,7 @@ async def skip_read(request: Request, insight_id: uuid.UUID, user: CsrfUser, ses
     skip = (insight.body or {}).get("safe_to_skip") or {}
     ids = [u for u in (parse_uuid(x) for x in skip.get("item_ids") or []) if u]
     owned = await user_owns_items(session, user.id, ids)
-    await set_read(session, user.id, owned, True)
+    await set_read(session, user.id, await with_copies(session, user.id, owned), True)
     body = dict(insight.body or {})
     body["safe_to_skip"] = dict(skip, done=True, marked=len(owned))
     insight.body = body

@@ -11,9 +11,10 @@ from typing import Any
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 from sqlalchemy.orm.util import identity_key
 
-from pensieve.models import Feed, Item, ItemState, User
+from pensieve.models import FEED_KIND_SAVED, Cluster, ClusterItem, Feed, Item, ItemState, User
 
 # ---------------------------------------------------------------------------
 # Nav count cache: the sidebar's unread/starred/tag counts are the most expensive queries on every page
@@ -156,6 +157,48 @@ async def user_owns_items(
         .where(Feed.user_id == user_id, Item.id.in_(item_ids))
     )
     return list(rows)
+
+
+#: Cluster kinds whose members are one article (a series groups different episodes, so reading one reads no other).
+COPY_CLUSTER_KINDS = ("story", "duplicate")
+
+
+async def with_copies(
+    session: AsyncSession, user_id: uuid.UUID, item_ids: list[uuid.UUID]
+) -> list[uuid.UUID]:
+    """``item_ids`` plus every other copy of the same article in the user's feeds: the members of their story or
+    duplicate clusters (whatever their date), and items in another feed with the same URL or content hash.
+    Saved links are never pulled in: reading a copy must not archive what the reader saved on purpose."""
+    if not item_ids:
+        return []
+    src, other = aliased(Item), aliased(Item)
+    own = select(Feed.id).where(Feed.user_id == user_id, Feed.kind != FEED_KIND_SAVED)
+    clustered = (
+        select(ClusterItem.item_id)
+        .join(Cluster, Cluster.id == ClusterItem.cluster_id)
+        .where(
+            Cluster.user_id == user_id,
+            Cluster.kind.in_(COPY_CLUSTER_KINDS),
+            Cluster.id.in_(select(ClusterItem.cluster_id).where(ClusterItem.item_id.in_(item_ids))),
+        )
+    )
+    same = (
+        select(other.id)
+        .join(
+            src,
+            and_(
+                other.feed_id != src.feed_id,
+                or_(other.url == src.url, and_(src.hash != "", other.hash == src.hash)),
+            ),
+        )
+        .where(src.id.in_(item_ids))
+    )
+    rows = await session.scalars(
+        select(Item.id).where(
+            Item.feed_id.in_(own), or_(Item.id.in_(clustered), Item.id.in_(same)), Item.id.not_in(item_ids)
+        )
+    )
+    return [*dict.fromkeys(item_ids), *rows]
 
 
 async def unread_state_ids(

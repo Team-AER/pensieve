@@ -639,6 +639,13 @@
   document.body.addEventListener('story-removed', () => toast('Removed from today\'s paper; still unread in Reader'));
   document.body.addEventListener('paper-read', () => toast('Marked read'));
   document.body.addEventListener('paper-section-read', () => toast('Section marked read'));
+  // Back onto a reader page restores htmx's snapshot of it, taken before whatever was read since (in the paper, in
+  // another tab): ask for the list and the counts again so rows read elsewhere do not come back unread.
+  document.body.addEventListener('htmx:historyRestore', () => {
+    if (!$('#list')) return;
+    window.htmx.trigger(document.body, 'refresh-list');
+    window.htmx.trigger(document.body, 'counts-changed');
+  });
   document.body.addEventListener('paper-tuned-more', () => toast('More like this: its tag and sources gained weight'));
   document.body.addEventListener('paper-tuned-less', () => toast('Less of this: its tag and sources lost weight'));
   document.body.addEventListener('paper-tuned-reset', () => toast('Tuning reset for this story'));
