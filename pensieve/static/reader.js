@@ -625,6 +625,17 @@
     });
     paperOpen = null;
   });
+  // A chip jump must land the section heading below the pinned chips, however many rows they wrap to.
+  let navObserver = null;
+  function watchPaperNav() {
+    const nav = $('.paper-nav'), box = $('#insight');
+    if (!nav || !box || !window.ResizeObserver) return;
+    if (!navObserver) navObserver = new ResizeObserver(() => box.style.setProperty('--paper-nav-h', nav.offsetHeight + 'px'));
+    navObserver.disconnect();
+    navObserver.observe(nav);
+  }
+  document.addEventListener('htmx:afterSettle', watchPaperNav);
+  watchPaperNav();
   document.body.addEventListener('story-removed', () => toast('Removed from today\'s paper; still unread in Reader'));
   document.body.addEventListener('paper-read', () => toast('Marked read'));
   document.body.addEventListener('paper-section-read', () => toast('Section marked read'));

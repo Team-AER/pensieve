@@ -137,7 +137,7 @@
   .shortcuts-grid { display: grid; grid-template-columns: auto 1fr; gap: 8px 18px; font-size: var(--text-md); align-items: center; }
 
   /* ---- Full-page layouts (manage, insights) ---- */
-  .page-body { flex: 1; min-height: 0; overflow-y: auto; padding: 36px 48px 64px; -webkit-overflow-scrolling: touch; }
+  .page-body { --page-pad-top: 36px; flex: 1; min-height: 0; overflow-y: auto; padding: var(--page-pad-top) 48px 64px; -webkit-overflow-scrolling: touch; }
   .manage { flex: 1; display: flex; min-height: 0; }
   .manage-nav { width: 240px; flex: 0 0 auto; padding: 24px 12px; border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; font-size: 14px; overflow-y: auto; background: var(--bg); }
   .manage-nav .nav-eyebrow { padding: 20px 10px 8px; }
@@ -251,12 +251,14 @@
 
   /* ---- The paper: sections of expandable stories ---- */
   .paper-stand { font-size: var(--text-md); color: var(--muted); }
-  .paper-nav { display: flex; flex-wrap: wrap; gap: 6px; position: sticky; top: 0; z-index: 5; padding: 8px 0; background: var(--bg); }
+  /* Sticky insets count from inside the scroller's padding, so top: 0 would pin the chips 36px below the top bar
+     with stories scrolling through the gap. Pin them to the scroller's edge instead. */
+  .paper-nav { display: flex; flex-wrap: wrap; gap: 6px; position: sticky; top: calc(-1 * var(--page-pad-top, 0px)); z-index: 5; padding: 10px 0; background: var(--bg); }
   .paper-nav .chip { text-decoration: none; cursor: pointer; }
   .paper-nav .chip:hover { background: var(--line-3); color: var(--ink); }
   .paper-nav .chip-live { border: 1px solid var(--accent-soft); background: var(--accent-soft); color: var(--accent-ink); }
   .paper { display: flex; flex-direction: column; gap: 28px; }
-  .psection { display: flex; flex-direction: column; gap: 10px; scroll-margin-top: 56px; }
+  .psection { display: flex; flex-direction: column; gap: 10px; scroll-margin-top: calc(var(--paper-nav-h, 44px) + 12px); }
   .psection-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; padding-bottom: 8px; border-bottom: 2px solid var(--ink); }
   .psection-title { font-size: 26px; letter-spacing: -0.01em; }
   .psection-count { font-size: var(--text-sm); color: var(--faint); }
@@ -429,7 +431,7 @@
     .page-head h1 { font-size: 28px; }
     .page-head-actions .search { width: 100%; }
     .two-col, .insight-grid, .grid-8-4 { grid-template-columns: 1fr; }
-    .page-body { padding: 16px 16px 40px; }
+    .page-body { --page-pad-top: 16px; padding: var(--page-pad-top) 16px 40px; }
     .insight-title { font-size: 30px; }
     .insight-lede { font-size: 16px; }
     .stats { grid-template-columns: repeat(2, 1fr); }
@@ -812,6 +814,7 @@
     .app[data-bars] :is(.topbar, .pane-head, .tabbar, .article-foot) { transition-timing-function: cubic-bezier(0.4, 0, 0.6, 1); }
     .app[data-bars="gone"] :is(.topbar, .pane-head, .tabbar, .article-foot) { display: none !important; }
     /* Nothing else may pin to the top edge either: the paper's section chips scroll with the page. */
+    .psection { scroll-margin-top: calc(var(--bar-top, 56px) + 12px); }
     .paper-nav { position: static; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin: 0 -16px; padding: 8px 16px; }
     .paper-nav::-webkit-scrollbar { display: none; }
     .paper-nav .chip { flex: 0 0 auto; }
