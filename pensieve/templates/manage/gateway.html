@@ -6,7 +6,7 @@
 {% endif %}
 {% set fields = [
   ('fast', 'Fast model', 'Tagging, filing, summaries, ask my reading'),
-  ('long', 'Long model', 'Daily digest, weekly review, reader profile; fallback when the fast model fails'),
+  ('long', 'Long model', 'Daily digest, weekly review, reader profile'),
   ('embedding', 'Embeddings', 'Story grouping and related history; leave alone until the gateway serves /v1/embeddings'),
 ] %}
 <form class="model-form" method="post" action="/manage/ai/models" hx-post="/manage/ai/models" hx-target="#gateway" hx-swap="innerHTML" aria-label="Gateway models">
@@ -47,6 +47,21 @@
     </div>
     <span class="field-hint">Requests each Pensieve process keeps in flight per model, and jobs the AI worker runs side by side (1–{{ choice.max_count }}). Use 1 for a model that serves one request at a time; a batching route can take more.</span>
   </fieldset>
+  <fieldset class="field count-fields">
+    <legend>Token windows</legend>
+    <div class="count-grid">
+      {% for field, label in [
+        ('output_tokens', 'Output, every request'),
+        ('input_tokens_short', 'Input, fast model'),
+        ('input_tokens_long', 'Input, long model'),
+      ] %}
+      <label class="count-field" for="{{ field }}"><span>{{ label }}</span>
+        <input class="input input-sm" type="number" inputmode="numeric" id="{{ field }}" name="{{ field }}" min="{{ choice.min_tokens }}" max="{{ choice.max_tokens }}" step="1024" value="{{ choice.effective[field] }}" {% if not choice.can_edit %}disabled{% endif %}>
+      </label>
+      {% endfor %}
+    </div>
+    <span class="field-hint">Output is the least every request may write, thinking included; higher reasoning needs more. Input is how much of an article or prompt is sent before it is cut. A reply that hits the output window fails with an error on the AI queue rather than being retried on another model.</span>
+  </fieldset>
   <datalist id="reasoning-ticks">{% for step in choice.ladder %}<option value="{{ loop.index0 }}" label="{{ step }}"></option>{% endfor %}</datalist>
   {% if choice.can_edit %}
   <div class="row"><button type="submit" class="btn btn-primary btn-sm">Save</button><span class="field-hint">Applies to everyone on this Pensieve within a minute; no restart needed.</span></div>
@@ -59,6 +74,7 @@
   <div><span>in use · long</span><strong>{{ choice.effective.long }}</strong></div>
   <div><span>in use · embeddings</span><strong>{{ choice.effective.embedding }}</strong></div>
   <div><span>at once · fast / long / jobs</span><strong>{{ choice.effective.fast_concurrency }} / {{ choice.effective.long_concurrency }} / {{ choice.effective.ai_jobs }}</strong></div>
+  <div><span>tokens · out / in fast / in long</span><strong>{{ choice.effective.output_tokens }} / {{ choice.effective.input_tokens_short }} / {{ choice.effective.input_tokens_long }}</strong></div>
 </div>
 <script>
   (function () {

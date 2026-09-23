@@ -108,46 +108,45 @@ async def test_reasoning_off_is_spelled_per_model(gateway):
     await client.aclose()
 
 
-async def test_truncated_json_is_retried_with_more_tokens(gateway):
-    gateway.chat(truncated('{"answer": "cut off'), {"answer": "ok", "score": 0.5})
+async def test_every_request_gets_at_least_the_output_window(gateway):
+    gateway.chat({"answer": "ok", "score": 0.5})
     client = LLMClient()
-    out = await client.chat_json(settings.llm_fast_model, "s", "u", SCHEMA, workflow="x", max_tokens=100)
-    assert out["answer"] == "ok"
-    assert [c["max_tokens"] for c in gateway.chat_calls] == [100, 200]
-    assert [c["model"] for c in gateway.chat_calls] == [settings.llm_fast_model] * 2
+    window = settings.llm_max_output_tokens
+    await client.chat_json(settings.llm_fast_model, "s", "u", SCHEMA, workflow="x", max_tokens=100)
+    await client.chat_text(settings.llm_fast_model, "s", "u", workflow="x", max_tokens=window * 2)
+    assert [c["max_tokens"] for c in gateway.chat_calls] == [window, window * 2]
     await client.aclose()
 
 
-async def test_truncation_growth_is_capped_and_text_keeps_partial(gateway):
-    gateway.chat(truncated("{bad"), truncated("{bad"), truncated("{bad"))
+async def test_truncation_surfaces_at_once(gateway):
+    gateway.chat(truncated('{"answer": "cut off'))
     client = LLMClient()
-    cap = settings.llm_max_output_tokens
-    with pytest.raises(LLMError):
-        await client.chat_json(settings.llm_fast_model, "s", "u", SCHEMA, workflow="x", max_tokens=cap - 10)
-    assert [c["max_tokens"] for c in gateway.chat_calls] == [cap - 10, cap, cap]
+    with pytest.raises(LLMTruncated, match="raise the output window"):
+        await client.chat_json(settings.llm_fast_model, "s", "u", SCHEMA, workflow="x")
+    assert len(gateway.chat_calls) == 1
     gateway.chat(truncated("partial prose"))
     assert await client.chat_text(settings.llm_fast_model, "s", "u", workflow="x") == "partial prose"
-    with pytest.raises(LLMTruncated):
-        await client._completion({"model": "m", "max_tokens": 1, "messages": []}, "x")
     await client.aclose()
 
 
-async def test_chat_json_retries_then_falls_back_to_long_model(gateway):
+async def test_reasoning_that_fills_the_window_is_reported_not_non_text(gateway):
+    body = chat_response("x", finish_reason="length")
+    body["choices"][0]["message"]["content"] = None
+    gateway.chat(httpx.Response(200, json=body))
+    client = LLMClient()
+    with pytest.raises(LLMTruncated, match="while still reasoning"):
+        await client.chat_json(settings.llm_fast_model, "s", "u", SCHEMA, workflow="x")
+    with pytest.raises(LLMTruncated):
+        await client.chat_text(settings.llm_fast_model, "s", "u", workflow="x")
+    await client.aclose()
+
+
+async def test_chat_json_retries_once_on_the_same_model_then_raises(gateway):
     gateway.chat("not json at all", {"answer": "missing score"}, {"answer": "ok", "score": 0.5})
     client = LLMClient()
-    out = await client.chat_json(settings.llm_fast_model, "s", "u", SCHEMA, workflow="x")
-    assert out["answer"] == "ok"
-    models_used = [c["model"] for c in gateway.chat_calls]
-    assert models_used == [settings.llm_fast_model, settings.llm_fast_model, settings.llm_long_model]
-    await client.aclose()
-
-
-async def test_chat_json_raises_after_all_attempts(gateway):
-    gateway.chat("{bad", "{bad", "{bad")
-    client = LLMClient()
-    with pytest.raises(LLMError):
+    with pytest.raises(LLMError, match=settings.llm_fast_model):
         await client.chat_json(settings.llm_fast_model, "s", "u", SCHEMA, workflow="x")
-    assert len(gateway.chat_calls) == 3
+    assert [c["model"] for c in gateway.chat_calls] == [settings.llm_fast_model] * 2
     await client.aclose()
 
 

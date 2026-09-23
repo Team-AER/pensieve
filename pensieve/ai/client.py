@@ -21,6 +21,8 @@ log = logging.getLogger(__name__)
 
 SESSION_ID = "pensieve"
 EMBED_BATCH = 32
+JSON_ATTEMPTS = 2  # one retry on malformed output, same model
+EMBED_MAX_INPUT_TOKENS = 8_000  # bge-m3 serves an 8192-token window, independent of the chat input windows
 CHARS_PER_TOKEN = 4
 
 
@@ -283,7 +285,7 @@ class LLMClient:
         body: dict[str, Any] = {
             "model": model,
             "messages": messages,
-            "max_tokens": max_tokens,
+            "max_tokens": max(max_tokens, self.settings.llm_max_output_tokens),
             "temperature": 0.2,
         }
         effort = self.reasoning_value(model, reasoning)
@@ -305,7 +307,7 @@ class LLMClient:
         elif model == s.llm_fast_model:
             key, limit = "fast", s.llm_fast_concurrency
         else:
-            key, limit = "other", s.llm_fast_concurrency  # embeddings and fallbacks
+            key, limit = "other", s.llm_fast_concurrency  # embeddings and any other model
         sem = _SLOTS.get(f"{key}:{limit}")
         if sem is None:
             sem = _SLOTS[f"{key}:{limit}"] = asyncio.Semaphore(max(1, limit))
@@ -336,13 +338,16 @@ class LLMClient:
             content = choice["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
             raise LLMError("gateway response has no choices[0].message.content") from exc
-        if not isinstance(content, str):
-            raise LLMError("gateway returned non-text content")
         if choice.get("finish_reason") == "length":
+            # Reasoning can spend the whole window before any answer, which arrives as content null.
             raise LLMTruncated(
-                f"{workflow}: output truncated at max_tokens={body.get('max_tokens')} on {body.get('model')}",
-                content,
+                f"{workflow}: {body.get('model')} hit max_tokens={body.get('max_tokens')}"
+                f"{' while still reasoning' if content is None else ''} (effort {body.get('reasoning_effort') or 'off'});"
+                " raise the output window or lower reasoning on the Gateway card",
+                content or "",
             )
+        if not isinstance(content, str):
+            raise LLMError(f"{workflow}: {body.get('model')} returned no text content")
         return content
 
     # -- public -------------------------------------------------------------------------------------------
@@ -360,12 +365,12 @@ class LLMClient:
         reasoning: str | None = None,
         validate_with: dict | None = None,
     ) -> dict:
-        """Structured output. Retries once on malformed output, then once on the long model, then raises.
+        """Structured output on ``model`` alone. Retries once on malformed output, then raises; never switches models.
 
         ``reasoning`` is the per-call thinking level (``None`` = off, the right default for extraction work);
         ``validate_with`` optionally replaces ``schema`` for local validation so callers can validate loosely
-        here and strictly per entry themselves. A truncated answer (``finish_reason == "length"``) is retried
-        with ``max_tokens`` doubled, capped at ``settings.llm_max_output_tokens``.
+        here and strictly per entry themselves. A truncated answer raises ``LLMTruncated`` at once: the output
+        window is the admin's setting, so a retry at the same size would only fail again.
         """
         system, user = self._fit(model, system, user)
         messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
@@ -373,13 +378,9 @@ class LLMClient:
             "type": "json_schema",
             "json_schema": {"name": name, "schema": schema, "strict": True},
         }
-        attempts = [model, model]
-        if model != self.settings.llm_long_model:
-            attempts.append(self.settings.llm_long_model)
-        cap = max(self.settings.llm_max_output_tokens, max_tokens)
+        body = self._body(model, messages, max_tokens, reasoning, response_format=response_format)
         last: Exception | None = None
-        for attempt_model in attempts:
-            body = self._body(attempt_model, messages, max_tokens, reasoning, response_format=response_format)
+        for _ in range(JSON_ATTEMPTS):
             try:
                 content = await self._completion(body, workflow)
                 parsed = _extract_json(content)
@@ -387,21 +388,12 @@ class LLMClient:
                     raise LLMError("model returned non-object JSON")
                 validate_schema(parsed, validate_with or schema)
                 return parsed
-            except LLMTruncated as exc:
-                last = exc
-                grown = min(max_tokens * 2, cap)
-                log.warning(
-                    "chat_json(%s) truncated on %s at max_tokens=%s; retrying with %s",
-                    workflow,
-                    attempt_model,
-                    max_tokens,
-                    grown,
-                )
-                max_tokens = grown
+            except LLMTruncated:
+                raise
             except (LLMError, ValueError) as exc:
                 last = exc
-                log.warning("chat_json(%s) attempt on %s failed: %s", workflow, attempt_model, exc)
-        raise LLMError(f"chat_json({workflow}) failed after {len(attempts)} attempts: {last}")
+                log.warning("chat_json(%s) attempt on %s failed: %s", workflow, model, exc)
+        raise LLMError(f"chat_json({workflow}) failed on {model} after {JSON_ATTEMPTS} attempts: {last}")
 
     async def chat_text(
         self,
@@ -413,7 +405,7 @@ class LLMClient:
         workflow: str,
         reasoning: str | None = None,
     ) -> str:
-        """Free text. A truncated answer is returned as-is (with a warning) rather than discarded."""
+        """Free text. A truncated answer is returned as-is (with a warning); one with no text at all raises."""
         system, user = self._fit(model, system, user)
         messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
         try:
@@ -421,6 +413,8 @@ class LLMClient:
                 await self._completion(self._body(model, messages, max_tokens, reasoning), workflow)
             ).strip()
         except LLMTruncated as exc:
+            if not exc.content.strip():
+                raise
             log.warning("chat_text(%s): %s", workflow, exc)
             return exc.content.strip()
 
@@ -432,7 +426,7 @@ class LLMClient:
             return None
         out: list[list[float]] = []
         url = f"{self.settings.llm_base_url.rstrip('/')}/embeddings"
-        budget = self.settings.llm_max_input_tokens_short
+        budget = EMBED_MAX_INPUT_TOKENS
         for start in range(0, len(texts), EMBED_BATCH):
             batch = [truncate_to_tokens(t, budget) or " " for t in texts[start : start + EMBED_BATCH]]
             body = {"model": self.settings.llm_embedding_model, "input": batch}

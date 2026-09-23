@@ -1,4 +1,4 @@
-"""Which gateway models (how much reasoning, how many at once) Pensieve uses, chosen from the UI.
+"""Which gateway models (how much reasoning, how many at once, how big a window) Pensieve uses, chosen from the UI.
 
 The environment (`PENSIEVE_LLM_*`) supplies defaults; the ``app_settings`` row ``llm`` overrides them
 install-wide. Overrides are applied onto the cached ``Settings`` singleton, so every caller that reads
@@ -35,10 +35,15 @@ FIELDS: dict[str, str] = {
     "fast_concurrency": "llm_fast_concurrency",  # requests in flight to the fast model, per process
     "long_concurrency": "llm_long_concurrency",  # requests in flight to the long model, per process
     "ai_jobs": "ai_max_jobs",  # AI jobs the worker runs at once
+    "output_tokens": "llm_max_output_tokens",  # output window every request gets at least, thinking included
+    "input_tokens_short": "llm_max_input_tokens_short",  # prompt budget for fast-model jobs
+    "input_tokens_long": "llm_max_input_tokens_long",  # prompt budget for long-model jobs
 }
 COUNTS = ("fast_concurrency", "long_concurrency", "ai_jobs")
 MAX_COUNT = 16
 """Ceiling for every count: the AI worker is built for this many jobs and lowers its limit to the setting."""
+TOKENS = ("output_tokens", "input_tokens_short", "input_tokens_long")
+MIN_TOKENS, MAX_TOKENS = 1_024, 262_144
 # The LiteLLM proxy validates reasoning_effort against exactly these (plus "max"); ordered for the slider.
 REASONING_LADDER: list[str] = ["none", "minimal", "low", "medium", "high", "xhigh"]
 
@@ -104,7 +109,8 @@ async def apply_overrides(session: AsyncSession | None = None, *, force: bool = 
 def clean(form: dict[str, Any]) -> dict[str, str | int]:
     """Validate a form submission into an override dict. Empty = use the env default.
 
-    Reasoning values must be on the ladder; counts are whole numbers from 1 to ``MAX_COUNT``; model ids are
+    Reasoning values must be on the ladder; counts are whole numbers from 1 to ``MAX_COUNT``; token windows are
+    whole numbers from ``MIN_TOKENS`` to ``MAX_TOKENS``; model ids are
     free text (the catalog may lag the gateway) but are trimmed and capped. Unknown fields are ignored.
     """
     out: dict[str, str | int] = {}
@@ -115,6 +121,10 @@ def clean(form: dict[str, Any]) -> dict[str, str | int]:
         if field in COUNTS:
             if raw.isdigit():
                 out[field] = min(max(int(raw), 1), MAX_COUNT)
+            continue
+        if field in TOKENS:
+            if raw.isdigit():
+                out[field] = min(max(int(raw), MIN_TOKENS), MAX_TOKENS)
             continue
         if field.endswith("_reasoning"):
             if raw.isdigit():
@@ -154,7 +164,10 @@ __all__ = [
     "FIELDS",
     "KEY",
     "MAX_COUNT",
+    "MAX_TOKENS",
+    "MIN_TOKENS",
     "REASONING_LADDER",
+    "TOKENS",
     "apply_overrides",
     "clean",
     "effective",

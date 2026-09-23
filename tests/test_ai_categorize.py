@@ -70,7 +70,8 @@ async def test_tag_items_writes_item_ai(session, user, gateway):
     assert "Postgres" in body["messages"][1]["content"]
 
 
-async def test_tag_items_batches_of_five_with_sized_max_tokens(session, user, gateway):
+async def test_tag_items_batches_of_five_with_sized_max_tokens(session, user, gateway, monkeypatch):
+    monkeypatch.setattr(settings, "llm_max_output_tokens", 1)  # below every sized budget
     _, items = await seed_items(session, user, n=12)
     gateway.chat(tagging_payload([(i, [("ai", 0.9)], "article") for i in range(categorize.TAG_BATCH)]))
     rows = await categorize.tag_items(session, user, items)

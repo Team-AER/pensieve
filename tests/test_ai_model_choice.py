@@ -1,4 +1,5 @@
-"""Admin-chosen gateway models, reasoning effort and concurrency (pensieve.ai.model_choice)."""
+# ruff: noqa: F811 -- the `gateway` fixture is imported, then named as a test parameter
+"""Admin-chosen gateway models, reasoning effort, concurrency and token windows (pensieve.ai.model_choice)."""
 
 import pytest
 from sqlalchemy import select
@@ -7,6 +8,7 @@ from pensieve import models
 from pensieve.ai import model_choice
 from pensieve.ai.client import LLMClient
 from pensieve.config import get_settings
+from tests.test_ai_helpers import gateway  # noqa: F401
 
 
 @pytest.fixture(autouse=True)
@@ -100,6 +102,27 @@ def test_counts_are_clamped_whole_numbers():
     out = model_choice.clean({"fast_concurrency": "0", "long_concurrency": "99", "ai_jobs": "3"})
     assert out == {"fast_concurrency": 1, "long_concurrency": model_choice.MAX_COUNT, "ai_jobs": 3}
     assert model_choice.clean({"ai_jobs": "two", "fast_concurrency": "-1"}) == {}
+
+
+def test_token_windows_are_clamped_whole_numbers():
+    out = model_choice.clean(
+        {"output_tokens": "512", "input_tokens_short": "999999", "input_tokens_long": "40000"}
+    )
+    assert out == {
+        "output_tokens": model_choice.MIN_TOKENS,
+        "input_tokens_short": model_choice.MAX_TOKENS,
+        "input_tokens_long": 40_000,
+    }
+    assert model_choice.clean({"output_tokens": "16k"}) == {}
+
+
+async def test_saved_output_window_reaches_requests(session, gateway):
+    await model_choice.save(session, {"output_tokens": 20_000})
+    gateway.chat("ok")
+    client = LLMClient()
+    await client.chat_text(get_settings().llm_fast_model, "s", "u", workflow="x")
+    assert gateway.chat_calls[0]["max_tokens"] == 20_000
+    await client.aclose()
 
 
 async def test_saved_counts_resize_slots_and_the_ai_worker(session, monkeypatch):
