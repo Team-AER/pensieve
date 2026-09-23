@@ -71,10 +71,12 @@ class Settings(BaseSettings):
     # The LiteLLM proxy validates reasoning_effort against none/minimal/low/medium/high/xhigh/max before it
     # reaches the model, so "off" (Flash-Next's own spelling) is rejected with a 400. `none` passes through.
     llm_long_reasoning_off_value: str = "none"
-    # One GPU per route: the Ollama 27B serialises requests, so more than one in flight only stacks latency
-    # until every call times out. The vLLM route batches, so it can take a few.
-    llm_fast_concurrency: int = 1
-    llm_long_concurrency: int = 4
+    # Requests in flight per model, per process, and AI jobs the worker runs at once. Defaults only: the
+    # Gateway card (Manage -> AI and memory) overrides all three without a restart. A route that serialises
+    # (one GPU, no batching) wants 1; a batching vLLM route can take more.
+    llm_fast_concurrency: int = 2
+    llm_long_concurrency: int = 2
+    ai_max_jobs: int = 2
     llm_max_output_tokens: int = 8192  # ceiling when a truncated (finish_reason=length) JSON call is retried
     llm_embeddings_reprobe_min: int = 30  # after a 400/404 on /embeddings, do not retry for this many minutes
     llm_digest_reasoning: str = (

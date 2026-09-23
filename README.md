@@ -84,6 +84,7 @@ All application settings use the `PENSIEVE_` prefix. The most important values a
 | `PENSIEVE_LLM_API_KEY` | Gateway API key, if required |
 | `PENSIEVE_LLM_CATALOG_URL` | Optional endpoint used to populate model choices |
 | `PENSIEVE_TIMEZONE` | IANA timezone for scheduled insights |
+| `PENSIEVE_LLM_FAST_CONCURRENCY`, `PENSIEVE_LLM_LONG_CONCURRENCY`, `PENSIEVE_AI_MAX_JOBS` | Requests in flight per model and AI jobs at once (default 2 each); the Gateway card on Manage → AI and memory overrides them live |
 | `PENSIEVE_GARAGE_RPC_SECRET`, `PENSIEVE_GARAGE_ADMIN_TOKEN` | Secrets of the bundled Garage object store |
 | `PENSIEVE_S3_ACCESS_KEY`, `PENSIEVE_S3_SECRET_KEY` | The archive's bucket credentials; `storage-init` imports them into Garage on every start |
 | `PENSIEVE_GARAGE_CAPACITY_GB` | Size the Garage node advertises (default 200) |

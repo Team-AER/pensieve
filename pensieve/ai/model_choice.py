@@ -1,4 +1,4 @@
-"""Which gateway models (and how much reasoning) Pensieve uses, chosen from the UI.
+"""Which gateway models (how much reasoning, how many at once) Pensieve uses, chosen from the UI.
 
 The environment (`PENSIEVE_LLM_*`) supplies defaults; the ``app_settings`` row ``llm`` overrides them
 install-wide. Overrides are applied onto the cached ``Settings`` singleton, so every caller that reads
@@ -32,7 +32,13 @@ FIELDS: dict[str, str] = {
     "embedding": "llm_embedding_model",
     "fast_reasoning": "llm_fast_reasoning_effort",  # short structured jobs: tagging, filing, summaries, ask
     "long_reasoning": "llm_digest_reasoning",  # digest, weekly review, profile
+    "fast_concurrency": "llm_fast_concurrency",  # requests in flight to the fast model, per process
+    "long_concurrency": "llm_long_concurrency",  # requests in flight to the long model, per process
+    "ai_jobs": "ai_max_jobs",  # AI jobs the worker runs at once
 }
+COUNTS = ("fast_concurrency", "long_concurrency", "ai_jobs")
+MAX_COUNT = 16
+"""Ceiling for every count: the AI worker is built for this many jobs and lowers its limit to the setting."""
 # The LiteLLM proxy validates reasoning_effort against exactly these (plus "max"); ordered for the slider.
 REASONING_LADDER: list[str] = ["none", "minimal", "low", "medium", "high", "xhigh"]
 
@@ -95,16 +101,20 @@ async def apply_overrides(session: AsyncSession | None = None, *, force: bool = 
     return overrides()
 
 
-def clean(form: dict[str, Any]) -> dict[str, str]:
+def clean(form: dict[str, Any]) -> dict[str, str | int]:
     """Validate a form submission into an override dict. Empty = use the env default.
 
-    Reasoning values must be on the ladder; model ids are free text (the catalog may lag the gateway) but
-    are trimmed and capped. Unknown fields are ignored.
+    Reasoning values must be on the ladder; counts are whole numbers from 1 to ``MAX_COUNT``; model ids are
+    free text (the catalog may lag the gateway) but are trimmed and capped. Unknown fields are ignored.
     """
-    out: dict[str, str] = {}
+    out: dict[str, str | int] = {}
     for field in FIELDS:
         raw = str(form.get(field) or "").strip()[:200]
         if not raw or raw == "__default__":
+            continue
+        if field in COUNTS:
+            if raw.isdigit():
+                out[field] = min(max(int(raw), 1), MAX_COUNT)
             continue
         if field.endswith("_reasoning"):
             if raw.isdigit():
@@ -116,7 +126,7 @@ def clean(form: dict[str, Any]) -> dict[str, str]:
     return out
 
 
-async def save(session: AsyncSession, values: dict[str, str]) -> dict[str, Any]:
+async def save(session: AsyncSession, values: dict[str, str | int]) -> dict[str, Any]:
     """Persist the override row and apply it to this process immediately."""
     now = datetime.now(UTC)
     stmt = pg_insert(models.AppSetting).values(key=KEY, value=values, updated_at=now)
@@ -140,8 +150,10 @@ def reset_cache() -> None:
 
 
 __all__ = [
+    "COUNTS",
     "FIELDS",
     "KEY",
+    "MAX_COUNT",
     "REASONING_LADDER",
     "apply_overrides",
     "clean",

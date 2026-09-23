@@ -355,7 +355,7 @@ async def test_gateway_models_are_admin_editable(client, session, user, monkeypa
         r = await client.get("/manage/ai/gateway", headers={"HX-Request": "true"})
         assert r.status_code == 200
         assert 'name="fast"' in r.text and 'name="long_reasoning"' in r.text and 'type="range"' in r.text
-        assert "Save models" in r.text
+        assert "Save</button>" in r.text and "At once" in r.text
 
         r = await client.post(
             "/manage/ai/models",

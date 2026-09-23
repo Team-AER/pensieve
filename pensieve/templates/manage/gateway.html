@@ -32,17 +32,33 @@
     <span class="field-hint">{{ hint }}</span>
   </div>
   {% endfor %}
+  <fieldset class="field count-fields">
+    <legend>At once</legend>
+    <div class="count-grid">
+      {% for field, label in [
+        ('fast_concurrency', 'Fast model requests'),
+        ('long_concurrency', 'Long model requests'),
+        ('ai_jobs', 'AI jobs'),
+      ] %}
+      <label class="count-field" for="{{ field }}"><span>{{ label }}</span>
+        <input class="input input-sm" type="number" inputmode="numeric" id="{{ field }}" name="{{ field }}" min="1" max="{{ choice.max_count }}" step="1" value="{{ choice.effective[field] }}" {% if not choice.can_edit %}disabled{% endif %}>
+      </label>
+      {% endfor %}
+    </div>
+    <span class="field-hint">Requests each Pensieve process keeps in flight per model, and jobs the AI worker runs side by side (1–{{ choice.max_count }}). Use 1 for a model that serves one request at a time; a batching route can take more.</span>
+  </fieldset>
   <datalist id="reasoning-ticks">{% for step in choice.ladder %}<option value="{{ loop.index0 }}" label="{{ step }}"></option>{% endfor %}</datalist>
   {% if choice.can_edit %}
-  <div class="row"><button type="submit" class="btn btn-primary btn-sm">Save models</button><span class="field-hint">Applies to everyone on this Pensieve; running jobs pick it up on their next request.</span></div>
+  <div class="row"><button type="submit" class="btn btn-primary btn-sm">Save</button><span class="field-hint">Applies to everyone on this Pensieve within a minute; no restart needed.</span></div>
   {% else %}
-  <span class="field-hint">Only an admin can change the gateway models.</span>
+  <span class="field-hint">Only an admin can change the gateway settings.</span>
   {% endif %}
 </form>
 <div class="kv">
   <div><span>in use · fast</span><strong>{{ choice.effective.fast }}</strong></div>
   <div><span>in use · long</span><strong>{{ choice.effective.long }}</strong></div>
   <div><span>in use · embeddings</span><strong>{{ choice.effective.embedding }}</strong></div>
+  <div><span>at once · fast / long / jobs</span><strong>{{ choice.effective.fast_concurrency }} / {{ choice.effective.long_concurrency }} / {{ choice.effective.ai_jobs }}</strong></div>
 </div>
 <script>
   (function () {

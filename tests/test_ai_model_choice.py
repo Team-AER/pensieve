@@ -1,4 +1,4 @@
-"""Admin-chosen gateway models and reasoning effort (pensieve.ai.model_choice)."""
+"""Admin-chosen gateway models, reasoning effort and concurrency (pensieve.ai.model_choice)."""
 
 import pytest
 from sqlalchemy import select
@@ -94,3 +94,38 @@ def test_reasoning_and_slots_when_one_model_serves_both_roles(monkeypatch):
     assert client.reasoning_value("same", None) == "low"
     assert client.reasoning_value("same", "medium") == "medium"
     assert client._slot("same")._value == 4
+
+
+def test_counts_are_clamped_whole_numbers():
+    out = model_choice.clean({"fast_concurrency": "0", "long_concurrency": "99", "ai_jobs": "3"})
+    assert out == {"fast_concurrency": 1, "long_concurrency": model_choice.MAX_COUNT, "ai_jobs": 3}
+    assert model_choice.clean({"ai_jobs": "two", "fast_concurrency": "-1"}) == {}
+
+
+async def test_saved_counts_resize_slots_and_the_ai_worker(session, monkeypatch):
+    from arq.worker import Worker
+
+    from pensieve.worker import AIWorker, AIWorkerSettings, get_kwargs
+
+    s = get_settings()
+    monkeypatch.setattr(s, "llm_fast_model", "fast-m")
+    monkeypatch.setattr(s, "llm_long_model", "long-m")
+    client = LLMClient()
+    assert client._slot("fast-m")._value == 2 and client._slot("long-m")._value == 2  # defaults
+
+    await model_choice.save(session, {"fast_concurrency": 5, "long_concurrency": 1, "ai_jobs": 3})
+    assert (s.llm_fast_concurrency, s.llm_long_concurrency, s.ai_max_jobs) == (5, 1, 3)
+    assert client._slot("fast-m")._value == 5 and client._slot("long-m")._value == 1
+
+    async def polled(self):
+        return None
+
+    monkeypatch.setattr(Worker, "_poll_iteration", polled)
+    worker = AIWorker(**(get_kwargs(AIWorkerSettings) | {"max_jobs": model_choice.MAX_COUNT}))
+    assert worker.max_jobs == model_choice.MAX_COUNT
+    await worker._poll_iteration()
+    assert worker.max_jobs == 3  # built for the ceiling, runs what the Gateway card says
+
+    await model_choice.save(session, {})
+    await worker._poll_iteration()
+    assert worker.max_jobs == 2 and s.llm_fast_concurrency == 2  # cleared: back to the environment

@@ -293,15 +293,19 @@ class LLMClient:
         return body
 
     def _slot(self, model: str | None) -> asyncio.Semaphore:
-        """Process-wide in-flight limit per model, so four worker jobs do not queue behind one GPU and all time out."""
+        """Process-wide in-flight limit per model, so the worker's jobs do not queue behind one GPU and all time out.
+
+        The limits come from the Gateway card; a changed limit gets a fresh semaphore on the next request.
+        """
         s = self.settings
-        # Long first: if one model serves both roles it is the batching vLLM route, so take the larger limit.
-        if model == s.llm_long_model:
+        if model == s.llm_long_model == s.llm_fast_model:
+            key, limit = "long", max(s.llm_fast_concurrency, s.llm_long_concurrency)  # one model, both roles
+        elif model == s.llm_long_model:
             key, limit = "long", s.llm_long_concurrency
         elif model == s.llm_fast_model:
             key, limit = "fast", s.llm_fast_concurrency
         else:
-            key, limit = "other", 4
+            key, limit = "other", s.llm_fast_concurrency  # embeddings and fallbacks
         sem = _SLOTS.get(f"{key}:{limit}")
         if sem is None:
             sem = _SLOTS[f"{key}:{limit}"] = asyncio.Semaphore(max(1, limit))

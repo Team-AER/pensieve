@@ -102,7 +102,7 @@ services:
     depends_on: *ready
   worker-ai:
     <<: *app
-    command: ["arq", "pensieve.worker.AIWorkerSettings"]
+    command: ["python", "-m", "pensieve.worker", "ai"]  # arq, with max_jobs from the Gateway card
     healthcheck:
       disable: true
     depends_on: *ready

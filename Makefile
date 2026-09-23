@@ -11,7 +11,7 @@ dev:           ## run the web app with reload
 worker:        ## fetch worker (default queue)
 	uv run arq pensieve.worker.WorkerSettings
 worker-ai:     ## AI worker (queue pensieve:ai)
-	uv run arq pensieve.worker.AIWorkerSettings
+	uv run python -m pensieve.worker ai
 worker-capture: ## page capture worker (queue pensieve:capture; needs `uv sync --extra capture`)
 	PENSIEVE_S3_ENDPOINT=http://localhost:3900 PENSIEVE_BROWSER_WS=ws://localhost:3000/ uv run --extra capture arq pensieve.worker.CaptureWorkerSettings
 test:

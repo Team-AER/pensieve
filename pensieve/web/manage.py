@@ -926,6 +926,7 @@ async def gateway_status(request: Request, user: CurrentUser):
         "fast_idx": model_choice.ladder_index(model_choice.effective()["fast_reasoning"]),
         "long_idx": model_choice.ladder_index(model_choice.effective()["long_reasoning"]),
         "can_edit": user.role == UserRole.admin,
+        "max_count": model_choice.MAX_COUNT,
     }
     # The pickers list every model the gateway knows plus whatever is chosen or configured, so a model the
     # catalog is lagging on (or one typed by hand) is never silently dropped from the form.
@@ -939,7 +940,7 @@ async def gateway_status(request: Request, user: CurrentUser):
 
 @router.post("/ai/models")
 async def save_models(request: Request, user: CsrfUser, session: DB):
-    """Admin-only: choose which gateway models and reasoning efforts the whole install uses."""
+    """Admin-only: choose the gateway models, reasoning efforts and concurrency the whole install uses."""
     if user.role != UserRole.admin:
         raise HTTPException(status_code=403, detail="Only an admin can change the gateway models")
     from pensieve.ai import model_choice

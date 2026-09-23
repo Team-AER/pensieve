@@ -2,7 +2,7 @@
 
 Two processes, two queues:
   `arq pensieve.worker.WorkerSettings`    fetch worker  (feed polling, reader mode, retention; default queue)
-  `arq pensieve.worker.AIWorkerSettings`  AI worker     (tagging, clustering, digests; queue ``pensieve:ai``)
+  `python -m pensieve.worker ai`          AI worker     (tagging, clustering, digests; queue ``pensieve:ai``)
   `arq pensieve.worker.CaptureWorkerSettings`  capture worker (saved pages via the browser; ``pensieve:capture``)
 A single pool used to run both, and four half-hour tagging jobs would hold every slot while the
 per-minute fetch cron waited behind them for over an hour.
@@ -11,9 +11,13 @@ per-minute fetch cron waited behind them for over an hour.
 from __future__ import annotations
 
 import logging
+import logging.config
+import sys
 from zoneinfo import ZoneInfo
 
 from arq.connections import RedisSettings
+from arq.logs import default_log_config
+from arq.worker import Worker, get_kwargs
 
 from pensieve import queue
 from pensieve.ai.jobs import CRON_JOBS as AI_CRON_JOBS
@@ -71,7 +75,11 @@ class WorkerSettings:
 
 
 class AIWorkerSettings:
-    """AI worker: few long gateway-bound jobs; concurrency per model is capped inside ``LLMClient``."""
+    """AI worker: few long gateway-bound jobs; concurrency per model is capped inside ``LLMClient``.
+
+    Run it with ``python -m pensieve.worker ai`` so ``max_jobs`` follows the Gateway card; plain ``arq`` still
+    works but keeps the environment's value until restarted.
+    """
 
     queue_name = queue.AI_QUEUE
     functions = [*AI_FUNCTIONS]
@@ -80,7 +88,7 @@ class AIWorkerSettings:
     on_shutdown = shutdown
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
     timezone = _timezone()
-    max_jobs = 4
+    max_jobs = max(1, get_settings().ai_max_jobs)
     job_timeout = JOB_TIMEOUT_S
     keep_result = 60
 
@@ -100,3 +108,32 @@ class CaptureWorkerSettings:
     keep_result = (
         1  # the job id is capture_page:<snapshot>; a re-capture right after must not be deduplicated
     )
+
+
+class AIWorker(Worker):
+    """An arq worker whose job limit follows the Gateway card (``ai_jobs``) without a restart.
+
+    arq checks ``job_counter < max_jobs`` before it starts each job, so lowering ``max_jobs`` stops new starts
+    until running jobs drain, and raising it (up to the ceiling the semaphore was built for) starts more at the
+    next poll. The override row is re-read at most once a minute.
+    """
+
+    async def _poll_iteration(self) -> None:
+        from pensieve.ai import model_choice
+
+        await model_choice.apply_overrides()
+        self.max_jobs = min(max(1, get_settings().ai_max_jobs), model_choice.MAX_COUNT)
+        await super()._poll_iteration()
+
+
+def run_ai_worker() -> None:
+    from pensieve.ai import model_choice
+
+    logging.config.dictConfig(default_log_config(verbose=False))
+    AIWorker(**(get_kwargs(AIWorkerSettings) | {"max_jobs": model_choice.MAX_COUNT})).run()
+
+
+if __name__ == "__main__":
+    if sys.argv[1:] != ["ai"]:
+        sys.exit("usage: python -m pensieve.worker ai")
+    run_ai_worker()

@@ -473,6 +473,11 @@
   .model-form .field { gap: 6px; }
   .space-between { justify-content: space-between; }
   .slider-field output { min-width: 64px; justify-content: center; }
+  .count-fields { border: 0; padding: 0; margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+  .count-fields legend { padding: 0; margin-bottom: 6px; font-size: var(--text-md); font-weight: 600; color: var(--ink-2); }
+  .count-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: var(--space-3, 12px); }
+  .count-field { display: flex; flex-direction: column; gap: 4px; font-size: var(--text-sm); color: var(--ink-2); }
+  .count-field .input { width: 100%; font-variant-numeric: tabular-nums; }
   input.slider { -webkit-appearance: none; appearance: none; width: 100%; height: 28px; margin: 0; background: transparent; cursor: pointer; }
   input.slider:disabled { cursor: not-allowed; opacity: .55; }
   input.slider::-webkit-slider-runnable-track { height: 4px; border-radius: 2px; background: linear-gradient(to right, var(--ai) 0, var(--ai) var(--fill, 0%), var(--line-3) var(--fill, 0%), var(--line-3) 100%); }
