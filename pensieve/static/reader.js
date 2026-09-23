@@ -63,7 +63,7 @@
     // Close any open <details class="menu"> when clicking outside it.
     $$('details.menu[open]').forEach((d) => { if (!d.contains(e.target) || e.target === d) d.removeAttribute('open'); });
   });
-  const THEME_COLORS = { light: '#F3F1EA', sepia: '#EFE6D2', dark: '#171614' };
+  const THEME_COLORS = { light: '#F3F1EA', sepia: '#EFE6D2', dark: '#171614', black: '#000000' };
   function setThemeColor(theme) {
     const metas = $$('meta[name="theme-color"]');
     if (!metas.length) return;

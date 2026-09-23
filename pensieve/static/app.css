@@ -75,9 +75,9 @@
     --font-mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
   }
 
-  /* Dark: system preference (unless the account picked light or sepia) and the explicit choice. */
+  /* Dark: system preference (unless the account picked another theme) and the explicit choice. */
   @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]):not([data-theme="sepia"]) {
+    :root:not([data-theme="light"]):not([data-theme="sepia"]):not([data-theme="black"]) {
       color-scheme: dark;
       --bg: #171614; --panel: #1E1D1A; --card: #25241F; --ink: #F1EEE5; --ink-2: #D9D5CA; --muted: #A8A497;
       --faint: #8F8B7F; --line: #2E2C27; --line-2: #2A2925; --line-3: #3A3832; --accent: #7FB0CC; --accent-soft: #1F3340;
@@ -95,6 +95,17 @@
     --ok: #6FB39F; --warn: #D6B25E; --danger: #D98B6B; --danger-soft: #3A2620; --highlight: #4A3F1E; --chip: #2E2C27;
     --knob: #F1EEE5; --backdrop: rgba(0, 0, 0, 0.6);
     --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4); --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.5); --shadow-lg: 0 20px 60px rgba(0, 0, 0, 0.7);
+  }
+  /* Black: the dark set on true black for OLED screens, where black pixels are off. Surfaces that sit on the
+     page (cards, menus, chips) stay a hair above black so they still read as separate. */
+  :root[data-theme="black"] {
+    color-scheme: dark;
+    --bg: #000000; --panel: #000000; --card: #0D0D0C; --ink: #F1EEE5; --ink-2: #D9D5CA; --muted: #A8A497;
+    --faint: #8F8B7F; --line: #1F1E1B; --line-2: #171614; --line-3: #2C2A26; --accent: #7FB0CC; --accent-soft: #14232C;
+    --accent-ink: #A9CBE0; --on-accent: #10202A; --ai: #6FB39F; --ai-soft: #10201B; --ai-ink: #A6D6C7; --ai-line: #213A32;
+    --ok: #6FB39F; --warn: #D6B25E; --danger: #D98B6B; --danger-soft: #2A1A15; --highlight: #3D3418; --chip: #1A1917;
+    --knob: #F1EEE5; --backdrop: rgba(0, 0, 0, 0.7);
+    --shadow-sm: none; --shadow-md: 0 0 0 1px #2C2A26; --shadow-lg: 0 0 0 1px #2C2A26;
   }
   /* Sepia: a complete warm light set (never inherits dark values). */
   :root[data-theme="sepia"] {

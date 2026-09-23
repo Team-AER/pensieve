@@ -164,7 +164,7 @@ def snippet(text: str | None, length: int = 160) -> str:
     return text if len(text) <= length else text[: length - 1].rstrip() + "…"
 
 
-THEMES = ("auto", "light", "dark", "sepia")
+THEMES = ("auto", "light", "sepia", "dark", "black")
 
 
 def theme_for(user: User | None) -> str:

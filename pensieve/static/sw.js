@@ -1,4 +1,5 @@
-// Pensieve service worker: shell cache, stale-while-revalidate for reader GETs, offline queue for state POSTs.
+// Pensieve service worker: shell cache, network-first reader pages and stale-while-revalidate reader partials,
+// offline queue for state POSTs.
 // Registered as /sw.js?v=<build stamp>; the stamp names the cache so a new build drops the old shell.
 const BUILD = new URL(self.location.href).searchParams.get('v') || 'dev';
 const VERSION = 'pensieve-' + BUILD;
@@ -81,6 +82,29 @@ async function staleWhileRevalidate(request) {
   return new Response(OFFLINE_HTML, { status: 503, headers: { 'Content-Type': 'text/html' } });
 }
 
+// Full pages carry the account's theme and reading preferences on <html>, and the counts in the nav: a cached copy
+// would undo a change made a moment ago (pick Black, reload, get the old theme). Ask the network first, and fall
+// back to the cached page only when it fails or is slow.
+const PAGE_TIMEOUT_MS = 3500;
+async function networkFirst(request) {
+  const cache = await caches.open(VERSION);
+  const key = cacheKey(request);
+  const network = fetch(request).then((resp) => {
+    if (resp && resp.ok && resp.type === 'basic') cache.put(key, resp.clone()).catch(() => {});
+    return resp;
+  });
+  const slow = new Promise((resolve) => setTimeout(resolve, PAGE_TIMEOUT_MS, null));
+  try {
+    const resp = await Promise.race([network, slow]);
+    if (resp) return resp;
+  } catch (_) { /* offline: use the cached copy below */ }
+  const cached = await cache.match(key);
+  if (cached) return cached;
+  try { return await network; } catch (_) {
+    return new Response(OFFLINE_HTML, { status: 503, headers: { 'Content-Type': 'text/html' } });
+  }
+}
+
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   const url = new URL(req.url);
@@ -104,7 +128,7 @@ self.addEventListener('fetch', (event) => {
     } else if (isArchiveGet(url)) {
       event.respondWith(cacheFirst(req));
     } else if (isReaderGet(url) && !url.pathname.startsWith('/reader/api/')) {
-      event.respondWith(staleWhileRevalidate(req));
+      event.respondWith(req.mode === 'navigate' ? networkFirst(req) : staleWhileRevalidate(req));
     }
     return;
   }

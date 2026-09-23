@@ -279,6 +279,13 @@ async def test_account_profile_and_password(client, session, user):
     assert user.display_name == "Renamed" and user.settings["theme"] == "sepia"
     r = await client.get("/manage/account")
     assert 'data-theme="sepia"' in r.text
+    # Black (OLED) is opt-in: saved like any theme, painted true black, and the browser bar follows it.
+    await client.post("/manage/account/font", data={"theme": "black"}, headers=headers)
+    await session.refresh(user)
+    assert user.settings["theme"] == "black"
+    r = await client.get("/manage/account")
+    assert 'data-theme="black"' in r.text and '<meta name="theme-color" content="#000000">' in r.text
+    assert 'value="black" selected' in r.text and "Black (OLED)" in r.text
     r = await client.post(
         "/manage/account/password",
         data={

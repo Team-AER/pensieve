@@ -16,7 +16,7 @@
   <div class="field"><label for="display_name">Display name</label><input class="input input-sm" id="display_name" name="display_name" value="{{ user.display_name }}" autocomplete="nickname"></div>
   <div class="field-row align-start">
     <div class="field"><label for="theme">Theme</label>
-      <select class="input input-sm" id="theme" name="theme" data-pref="theme">{% for t, label in [('auto','Auto (system)'),('light','Light'),('dark','Dark'),('sepia','Sepia')] %}<option value="{{ t }}"{% if theme == t %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+      <select class="input input-sm" id="theme" name="theme" data-pref="theme">{% for t, label in [('auto','Auto (system)'),('light','Light'),('sepia','Sepia'),('dark','Dark'),('black','Black (OLED)')] %}<option value="{{ t }}"{% if theme == t %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
     <div class="field"><label for="font_size">Reading text size</label>
       <select class="input input-sm" id="font_size" name="font_size" data-pref="font">{% for f, label in [('s','Small'),('m','Medium'),('l','Large'),('xl','Extra large')] %}<option value="{{ f }}"{% if font_size == f %} selected{% endif %}>{{ label }}</option>{% endfor %}</select>
       <span class="field-hint">Also <kbd>+</kbd> / <kbd>-</kbd> in the reader.</span></div>
