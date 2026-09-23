@@ -22,7 +22,7 @@ from arq.worker import Worker, get_kwargs
 from pensieve import queue
 from pensieve.ai.jobs import CRON_JOBS as AI_CRON_JOBS
 from pensieve.ai.jobs import FUNCTIONS as AI_FUNCTIONS
-from pensieve.ai.jobs import JOB_TIMEOUT_S, reap_stale_jobs
+from pensieve.ai.jobs import job_timeout_s, reap_stale_jobs
 from pensieve.archive.jobs import CRON_JOBS as CAPTURE_CRON_JOBS
 from pensieve.archive.jobs import FUNCTIONS as CAPTURE_FUNCTIONS
 from pensieve.config import get_settings
@@ -50,7 +50,7 @@ async def ai_startup(ctx: dict) -> None:
     get_engine()
     try:
         # jobs that were running when the previous worker died never reach their own status update
-        await reap_stale_jobs(older_than_s=JOB_TIMEOUT_S)
+        await reap_stale_jobs()
     except Exception as exc:  # noqa: BLE001 - housekeeping must not stop the worker
         log.warning("startup reaper failed: %s", exc)
 
@@ -89,7 +89,7 @@ class AIWorkerSettings:
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
     timezone = _timezone()
     max_jobs = max(1, get_settings().ai_max_jobs)
-    job_timeout = JOB_TIMEOUT_S
+    job_timeout = job_timeout_s()
     keep_result = 60
 
 
@@ -111,11 +111,12 @@ class CaptureWorkerSettings:
 
 
 class AIWorker(Worker):
-    """An arq worker whose job limit follows the Gateway card (``ai_jobs``) without a restart.
+    """An arq worker whose job limit and job timeout follow the Gateway card without a restart.
 
     arq checks ``job_counter < max_jobs`` before it starts each job, so lowering ``max_jobs`` stops new starts
     until running jobs drain, and raising it (up to the ceiling the semaphore was built for) starts more at the
-    next poll. The override row is re-read at most once a minute.
+    next poll. The timeout applies to jobs started after the change; the in-progress lock arq sets per job must
+    outlive it, or a long job could be started twice. The override row is re-read at most once a minute.
     """
 
     async def _poll_iteration(self) -> None:
@@ -123,6 +124,8 @@ class AIWorker(Worker):
 
         await model_choice.apply_overrides()
         self.max_jobs = min(max(1, get_settings().ai_max_jobs), model_choice.MAX_COUNT)
+        self.job_timeout_s = job_timeout_s()
+        self.in_progress_timeout_s = self.job_timeout_s + 10
         await super()._poll_iteration()
 
 

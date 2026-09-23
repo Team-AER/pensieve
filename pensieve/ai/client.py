@@ -231,7 +231,7 @@ class LLMClient:
     @property
     def http(self) -> httpx.AsyncClient:
         if self._http is None:
-            self._http = httpx.AsyncClient(timeout=httpx.Timeout(self.settings.llm_timeout_s))
+            self._http = httpx.AsyncClient(timeout=httpx.Timeout(self.timeout_for(None)))
         return self._http
 
     async def aclose(self) -> None:
@@ -294,6 +294,17 @@ class LLMClient:
         body.update(extra)
         return body
 
+    def timeout_for(self, model: str | None) -> float:
+        """Seconds one request may take (Gateway card); a model serving both roles gets the longer limit."""
+        s = self.settings
+        if model == s.llm_long_model == s.llm_fast_model:
+            minutes = max(s.llm_fast_timeout_min, s.llm_long_timeout_min)
+        elif model == s.llm_long_model:
+            minutes = s.llm_long_timeout_min
+        else:
+            minutes = s.llm_fast_timeout_min
+        return minutes * 60.0
+
     def _slot(self, model: str | None) -> asyncio.Semaphore:
         """Process-wide in-flight limit per model, so the worker's jobs do not queue behind one GPU and all time out.
 
@@ -320,7 +331,17 @@ class LLMClient:
         url = f"{self.settings.llm_base_url.rstrip('/')}{path}"
         try:
             async with self._slot(body.get("model")):
-                resp = await self.http.post(url, json=body, headers=self._headers(workflow))
+                resp = await self.http.post(
+                    url,
+                    json=body,
+                    headers=self._headers(workflow),
+                    timeout=self.timeout_for(body.get("model")),
+                )
+        except httpx.TimeoutException as exc:
+            limit = self.timeout_for(body.get("model")) / 60
+            raise LLMError(
+                f"{body.get('model')} gave no answer within {limit:g} min; raise its timeout on the Gateway card"
+            ) from exc
         except httpx.HTTPError as exc:
             raise LLMError(f"gateway request failed: {exc!r}") from exc
         if resp.status_code >= 400:

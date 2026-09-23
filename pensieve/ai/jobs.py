@@ -34,8 +34,13 @@ log = logging.getLogger(__name__)
 HEALTH_DEFER = timedelta(minutes=10)
 ERROR_DEFER = timedelta(minutes=2)
 MAX_TRIES = 3
-JOB_TIMEOUT_S = 1800
-"""Must match ``WorkerSettings.job_timeout``; the reaper fails ``running`` mirror rows older than this."""
+
+
+def job_timeout_s() -> int:
+    """The AI worker's per-job limit (Gateway card); the reaper fails ``running`` mirror rows older than this."""
+    return get_settings().ai_job_timeout_min * 60
+
+
 JOB_NS = uuid.UUID("6f0c2a1e-6b0a-4b7e-9a51-1c1a9d3f0a11")
 DISPATCH_MINUTES = {0, 15, 30, 45}
 STATUS_DONE = "done"
@@ -205,9 +210,10 @@ async def _guarded(
         await client.aclose()
 
 
-async def reap_stale_jobs(older_than_s: int = JOB_TIMEOUT_S) -> int:
+async def reap_stale_jobs(older_than_s: int | None = None) -> int:
     """Mark ``running`` mirror rows that started more than ``older_than_s`` ago as failed (worker died or arq
     timed the job out, neither of which reaches ``_guarded``). Returns the number of rows reaped."""
+    older_than_s = older_than_s or job_timeout_s()
     cutoff = utcnow() - timedelta(seconds=older_than_s)
     async with session_scope() as session:
         rows = (

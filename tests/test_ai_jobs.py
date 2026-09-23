@@ -79,7 +79,7 @@ def test_function_registry_matches_queue_contract():
     from pensieve.worker import AIWorkerSettings, WorkerSettings
 
     assert WorkerSettings.timezone == ZoneInfo(settings.timezone)
-    assert AIWorkerSettings.job_timeout == jobs.JOB_TIMEOUT_S
+    assert AIWorkerSettings.job_timeout == jobs.job_timeout_s() == settings.ai_job_timeout_min * 60
     assert AIWorkerSettings.queue_name == "pensieve:ai" and WorkerSettings.queue_name == "arq:queue"
 
 
@@ -218,7 +218,7 @@ async def test_reaper_fails_stale_running_rows(session, user, gateway):
         kind="digest",
         user_id=user.id,
         status="running",
-        started_at=now() - timedelta(seconds=jobs.JOB_TIMEOUT_S + 5),
+        started_at=now() - timedelta(seconds=jobs.job_timeout_s() + 5),
     )
     fresh = models.AIJob(kind="digest", user_id=user.id, status="running", started_at=now())
     session.add_all([stale, fresh])

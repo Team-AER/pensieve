@@ -116,6 +116,11 @@ def test_token_windows_are_clamped_whole_numbers():
     assert model_choice.clean({"output_tokens": "16k"}) == {}
 
 
+def test_timeouts_are_clamped_minutes():
+    out = model_choice.clean({"fast_timeout": "10", "long_timeout": "0", "job_timeout": "99999"})
+    assert out == {"fast_timeout": 10, "long_timeout": 1, "job_timeout": model_choice.MAX_MINUTES}
+
+
 async def test_saved_output_window_reaches_requests(session, gateway):
     await model_choice.save(session, {"output_tokens": 20_000})
     gateway.chat("ok")
@@ -136,7 +141,9 @@ async def test_saved_counts_resize_slots_and_the_ai_worker(session, monkeypatch)
     client = LLMClient()
     assert client._slot("fast-m")._value == 2 and client._slot("long-m")._value == 2  # defaults
 
-    await model_choice.save(session, {"fast_concurrency": 5, "long_concurrency": 1, "ai_jobs": 3})
+    await model_choice.save(
+        session, {"fast_concurrency": 5, "long_concurrency": 1, "ai_jobs": 3, "job_timeout": 90}
+    )
     assert (s.llm_fast_concurrency, s.llm_long_concurrency, s.ai_max_jobs) == (5, 1, 3)
     assert client._slot("fast-m")._value == 5 and client._slot("long-m")._value == 1
 
@@ -148,7 +155,9 @@ async def test_saved_counts_resize_slots_and_the_ai_worker(session, monkeypatch)
     assert worker.max_jobs == model_choice.MAX_COUNT
     await worker._poll_iteration()
     assert worker.max_jobs == 3  # built for the ceiling, runs what the Gateway card says
+    assert worker.job_timeout_s == 90 * 60 and worker.in_progress_timeout_s > worker.job_timeout_s
 
     await model_choice.save(session, {})
     await worker._poll_iteration()
     assert worker.max_jobs == 2 and s.llm_fast_concurrency == 2  # cleared: back to the environment
+    assert worker.job_timeout_s == s.ai_job_timeout_min * 60

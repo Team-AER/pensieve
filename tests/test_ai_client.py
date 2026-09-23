@@ -141,6 +141,25 @@ async def test_reasoning_that_fills_the_window_is_reported_not_non_text(gateway)
     await client.aclose()
 
 
+def test_request_timeout_follows_the_models_role(monkeypatch):
+    client = LLMClient()
+    monkeypatch.setattr(settings, "llm_fast_model", "fast-m")
+    monkeypatch.setattr(settings, "llm_long_model", "long-m")
+    assert client.timeout_for("fast-m") == settings.llm_fast_timeout_min * 60 == 600
+    assert client.timeout_for("long-m") == settings.llm_long_timeout_min * 60 == 1800
+    assert client.timeout_for("bge-m3") == 600
+    monkeypatch.setattr(settings, "llm_long_model", "fast-m")
+    assert client.timeout_for("fast-m") == 1800
+
+
+async def test_timeout_names_the_model_and_the_setting(gateway):
+    gateway.router.post(f"{BASE}/chat/completions").mock(side_effect=httpx.ReadTimeout(""))
+    client = LLMClient()
+    with pytest.raises(LLMError, match="no answer within 10 min; raise its timeout"):
+        await client.chat_text(settings.llm_fast_model, "s", "u", workflow="x")
+    await client.aclose()
+
+
 async def test_chat_json_retries_once_on_the_same_model_then_raises(gateway):
     gateway.chat("not json at all", {"answer": "missing score"}, {"answer": "ok", "score": 0.5})
     client = LLMClient()
