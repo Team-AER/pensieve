@@ -65,11 +65,11 @@ async def _describe(session, function: str, args: list) -> tuple[str, uuid.UUID 
     return kind, user_id, user_id
 
 
-async def record(function: str, args: list, job_id: str, *, keep_existing: bool = False) -> None:
+async def record(function: str, args: list, job_id: str) -> None:
     """Write (or restart) the ledger row for one queued job. A row already queued or running is left alone."""
     async with session_scope() as session:
         row = await session.get(models.AIJob, row_id_for(job_id))
-        if row is not None and (keep_existing or row.status in ("queued", "running")):
+        if row is not None and row.status in ("queued", "running"):
             return
         kind, target_id, user_id = await _describe(session, function, args)
         if row is None:
@@ -126,7 +126,10 @@ async def requeue_lost(redis) -> int:
 
 
 async def adopt(redis) -> int:
-    """Give every AI job waiting in Redis a ledger row and the long expiry. Returns how many rows were written."""
+    """Give every AI job waiting in Redis a ledger row and the long expiry. Returns how many rows were written.
+
+    A finished row whose job id is waiting again (summary jobs reuse fixed ids) is restarted as queued.
+    """
     written = 0
     for raw in await redis.zrange(queue.AI_QUEUE, 0, -1):
         job_id = raw.decode() if isinstance(raw, bytes) else str(raw)
@@ -139,13 +142,13 @@ async def adopt(redis) -> int:
             continue
         async with session_scope() as session:
             row = await session.get(models.AIJob, row_id_for(job_id))
-            if row is not None:
-                if (
-                    row.function is None
-                ):  # a mirror row from before the ledger: keep its state, add the payload
+            if row is not None and row.status in ("queued", "running"):
+                if row.function is None:  # a pre-ledger mirror row: keep its state, add the payload
                     row.function, row.args, row.job_id = job.function, list(job.args), job_id
                 continue
-        await record(job.function, list(job.args), job_id, keep_existing=True)
+        if await redis.exists(in_progress_key_prefix + job_id):
+            continue  # running right now: the job's own mirror update owns the row
+        await record(job.function, list(job.args), job_id)
         written += 1
     if written:
         log.info("ledger: adopted %d AI jobs already waiting in Redis", written)

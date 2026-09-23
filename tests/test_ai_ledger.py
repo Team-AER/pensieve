@@ -104,15 +104,20 @@ async def test_adopt_gives_redis_jobs_rows_and_the_long_expiry(session, user):
     await redis.enqueue_job(queue.AI_PROCESS_NEW_ITEMS, str(feed.id), [str(item.id)], _job_id="old:1")
     await redis.enqueue_job(queue.FETCH_FEED, str(feed.id), _job_id="fetch:1")
     legacy = models.AIJob(id=ledger.row_id_for("old:2"), kind="summarize", user_id=user.id, status="queued")
-    session.add(legacy)
+    finished = models.AIJob(
+        id=ledger.row_id_for("again:1"), kind="summarize_items", user_id=user.id, status="done"
+    )
+    session.add_all([legacy, finished])
     await session.commit()
     await redis.enqueue_job(queue.AI_SUMMARIZE_ITEM, str(user.id), str(item.id), "", _job_id="old:2")
+    await redis.enqueue_job(queue.AI_SUMMARIZE_ITEMS, str(user.id), [str(item.id)], _job_id="again:1")
 
-    assert await ledger.adopt(redis) == 1
+    assert await ledger.adopt(redis) == 2  # old:1 is new; again:1 is a finished row waiting again
     by_job = {r.job_id: r for r in await rows(session)}
     assert by_job["old:1"].kind == "process_items" and by_job["old:1"].args == [str(feed.id), [str(item.id)]]
     assert by_job["old:2"].status == "queued" and by_job["old:2"].function == queue.AI_SUMMARIZE_ITEM
-    assert "fetch:1" not in by_job and set(redis.ttl_ms) == {"old:1", "fetch:1", "old:2"}
+    assert by_job["again:1"].status == "queued" and by_job["again:1"].args == [str(user.id), [str(item.id)]]
+    assert "fetch:1" not in by_job and set(redis.ttl_ms) == {"old:1", "fetch:1", "old:2", "again:1"}
     assert await ledger.adopt(redis) == 0  # idempotent
 
 
