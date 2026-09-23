@@ -243,7 +243,7 @@ async def test_household_users_admin_only(client, session, user):
     reader = await make_user(session, role=models.UserRole.reader)
     headers = await login(client, reader)
     r = await client.get("/manage/users")
-    assert r.status_code == 403
+    assert r.status_code == 303 and r.headers["location"] == "/" and reader.email not in r.text
     r = await client.post("/manage/users", data={"email": "x@example.com"}, headers=headers)
     assert r.status_code == 403
     await client.post("/logout", headers=headers)

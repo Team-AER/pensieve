@@ -146,6 +146,9 @@ async def test_first_sign_in_lands_somewhere_the_account_can_open(client, sessio
     # Already signed in: GET /login?next=... takes the same route.
     r = await client.get("/login?next=/manage/users")
     assert r.status_code == 303 and r.headers["location"] == "/"
+    # ...and so does opening the admin page itself while signed in as a reader.
+    r = await client.get("/manage/users", headers=HTML)
+    assert r.status_code == 303 and r.headers["location"] == "/"
 
 
 async def test_admin_keeps_admin_next_and_invite_shows_sign_in_link(client, session):

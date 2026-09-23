@@ -1326,7 +1326,9 @@ def require_admin(user: User) -> None:
 
 @router.get("/users")
 async def users_page(request: Request, user: CurrentUser, session: DB):
-    require_admin(user)
+    if user.role != UserRole.admin:
+        # A reader who opens this page's address (often the link the admin shared) goes to their Reader.
+        return RedirectResponse("/", status_code=303)
     users = list(await session.scalars(select(User).order_by(User.created_at)))
     return page(
         request,
