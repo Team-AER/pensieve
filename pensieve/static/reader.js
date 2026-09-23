@@ -606,16 +606,20 @@
     if (d) { const form = $('form', d); if (form) form.reset(); const r = $('#save-result', d); if (r) r.innerHTML = ''; if (d.open) d.close(); }
     if (location.pathname.startsWith('/reader/saved') && window.htmx) window.htmx.trigger(document.body, 'refresh-list');
   });
-  // The paper comes back whole after a story is read or removed (fresh counts): keep open what was open.
+  // The paper comes back whole after a story is read or removed (fresh counts): keep open (and unfolded) what was.
   let paperOpen = null;
   document.body.addEventListener('htmx:beforeSwap', (e) => {
     const t = e.detail && e.detail.target;
-    if (t && t.id === 'insight') paperOpen = $$('details.pstory[open], details.pbrief[open]', t).map((d) => d.id || 'brief:' + (d.closest('.psection') || {}).id);
+    if (t && t.id === 'insight') paperOpen = [
+      ...$$('details.pstory[open], details.pbrief[open]', t).map((d) => d.id || 'brief:' + (d.closest('.psection') || {}).id),
+      ...$$('.psection.unfolded', t).map((s) => 'unfold:' + s.id),
+    ];
   });
   document.body.addEventListener('htmx:afterSwap', (e) => {
     const t = e.detail && e.detail.target;
     if (!t || t.id !== 'insight' || !paperOpen) return;
     paperOpen.forEach((k) => {
+      if (k.startsWith('unfold:')) { const sec = document.getElementById(k.slice(7)); if (sec) sec.classList.add('unfolded'); return; }
       const d = k.startsWith('brief:') ? $('#' + CSS.escape(k.slice(6)) + ' details.pbrief') : document.getElementById(k);
       if (d) d.open = true;
     });

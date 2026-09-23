@@ -296,7 +296,12 @@ async def without_read(session: AsyncSession, user_id: uuid.UUID, body: dict[str
 
     kept, dropped = [], 0
     for sec in sections:
-        stories = [s for s in sec.get("stories", []) if unread(s)]
+        # Fold again from the top: the section keeps showing as many stories as before, so reading the visible
+        # ones pulls the next ones up instead of leaving only "Show more".
+        shown = sum(1 for s in sec.get("stories", []) if not s.get("folded"))
+        stories = [
+            dict(s, folded=n >= shown) for n, s in enumerate(s for s in sec.get("stories", []) if unread(s))
+        ]
         brief = [s for s in sec.get("brief", []) if unread(s)]
         dropped += len(sec.get("stories", [])) + len(sec.get("brief", [])) - len(stories) - len(brief)
         if not stories and not brief:

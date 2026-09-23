@@ -1,3 +1,4 @@
+import uuid
 from datetime import timedelta
 
 import pytest
@@ -260,3 +261,23 @@ def test_tuning_config_apply_and_summary():
     out = paper.config_from_form(form, cfg)
     assert out["tuning"] == {"tags": {"ai": -1.5}, "feeds": {}}
     assert paper.config_from_form(Form(reset_tuning="1"), cfg)["tuning"] == {"tags": {}, "feeds": {}}
+
+
+async def test_without_read_pulls_folded_stories_up(monkeypatch):
+    ids = [uuid.uuid4() for _ in range(6)]
+    stories = [
+        {"key": f"s{n}", "read": False, "folded": n >= 3, "members": [{"item_id": str(i)}]}
+        for n, i in enumerate(ids)
+    ]
+    body = {"story_count": 6, "sections": [{"key": "ai", "stories": stories, "brief": []}]}
+
+    async def read_ids(session, user_id, item_ids):
+        return set(ids[:2])  # two of the three visible stories were read
+
+    monkeypatch.setattr(paper, "_read_ids", read_ids)
+    out = await paper.without_read(None, uuid.uuid4(), body)
+    kept = out["sections"][0]["stories"]
+    assert [s["key"] for s in kept] == ["s2", "s3", "s4", "s5"]
+    # still three shown, one behind "Show more"; the stored edition is untouched
+    assert [s["folded"] for s in kept] == [False, False, False, True]
+    assert [s["folded"] for s in body["sections"][0]["stories"]] == [False, False, False, True, True, True]
