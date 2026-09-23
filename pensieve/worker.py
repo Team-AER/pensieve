@@ -53,6 +53,12 @@ async def ai_startup(ctx: dict) -> None:
         await reap_stale_jobs()
     except Exception as exc:  # noqa: BLE001 - housekeeping must not stop the worker
         log.warning("startup reaper failed: %s", exc)
+    try:
+        from pensieve.ai import ledger
+
+        await ledger.adopt(ctx["redis"])  # jobs queued before the ledger, or by a path that bypassed it
+    except Exception as exc:  # noqa: BLE001
+        log.warning("startup ledger adopt failed: %s", exc)
 
 
 async def shutdown(ctx: dict) -> None:

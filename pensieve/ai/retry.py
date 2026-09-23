@@ -111,6 +111,7 @@ async def reconcile(session: AsyncSession, user_id: uuid.UUID) -> int:
         select(models.AIJob).where(
             models.AIJob.user_id == user_id,
             models.AIJob.status == "queued",
+            models.AIJob.function.is_(None),  # ledger rows are re-sent by ledger.requeue_lost, never "lost"
             models.AIJob.run_after < now - LOST_AFTER,
         )
     )

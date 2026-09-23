@@ -178,6 +178,8 @@
   .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(96px, 1fr)); gap: 10px; }
   .stat { padding: 12px 10px; border: 1px solid var(--line); border-radius: 10px; text-align: center; background: var(--panel); }
   .stat-n { font-family: var(--font-display); font-size: 24px; line-height: 1.1; }
+  .stats-quad { grid-template-columns: repeat(2, 1fr); }
+  .stat-sub { font-size: 11px; margin-top: 2px; }
   .kv { display: flex; flex-direction: column; gap: 6px; font-size: var(--text-sm); color: var(--muted); }
   .kv > div { display: flex; justify-content: space-between; gap: 12px; }
   .kv b, .kv strong { color: var(--ink); font-weight: 600; }

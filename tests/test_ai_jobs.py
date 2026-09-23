@@ -42,13 +42,15 @@ async def seed(session, user, n=2):
 
 @pytest.fixture(autouse=True)
 def enqueued(monkeypatch):
-    """Record what a job hands to the queue when its ctx carries no arq redis (never touch a real Redis)."""
+    """Record what a job hands to the ledger when its ctx carries no arq redis (never touch a real Redis or DB row)."""
     calls = []
 
-    async def fake_enqueue(function, *args, _job_id=None, **kwargs):
-        calls.append((function, args, _job_id))
+    async def fake_enqueue(function, *args, job_id=None, redis=None):
+        if redis is not None:  # a test's own FakeRedis in ctx sees the job as the worker's pool would
+            return await redis.enqueue_job(function, *args, _job_id=job_id)
+        calls.append((function, args, job_id))
 
-    monkeypatch.setattr(jobs.queue, "enqueue", fake_enqueue)
+    monkeypatch.setattr(jobs.ledger, "enqueue", fake_enqueue)
     return calls
 
 
@@ -72,7 +74,8 @@ def test_function_registry_matches_queue_contract():
         queue.AI_SUMMARY_SWEEP,
     ]
     names = {c.coroutine.__name__: c for c in CRON_JOBS}
-    assert set(names) == {"ai_dispatch_daily", "ai_dispatch_weekly", "ai_summary_sweep"}
+    assert set(names) == {"ai_dispatch_daily", "ai_dispatch_weekly", "ai_summary_sweep", "ai_requeue_lost"}
+    assert names["ai_requeue_lost"].minute == set(range(2, 60, 5))
     assert names["ai_summary_sweep"].minute == {5, 35} and names["ai_summary_sweep"].hour is None
     assert names["ai_dispatch_weekly"].weekday == 6 and names["ai_dispatch_weekly"].hour == 8
     assert names["ai_dispatch_daily"].minute == {0, 15, 30, 45} and names["ai_dispatch_daily"].hour is None

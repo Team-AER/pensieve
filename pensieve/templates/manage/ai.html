@@ -5,7 +5,7 @@
 <div class="page-head">
   <div class="page-head-text">
     <h1>AI and memory</h1>
-    <p class="page-summary">{{ stats.queued }} queued · {{ stats.running }} running · {{ stats.failed }} failed{% if profile %} · profile v{{ profile.version }}{% endif %}</p>
+    <p class="page-summary">{{ stats.queued }} pending · {{ stats.running }} running · {{ stats.failed }} failed{% if profile %} · profile v{{ profile.version }}{% endif %}</p>
   </div>
   <div class="page-head-actions"><span class="chip chip-ai">{{ m.icon('sparkle', 12) }} local gateway only</span></div>
 </div>
@@ -35,9 +35,10 @@
 </section>
 <section class="card section">
   <div class="card-head"><h2>Queue</h2></div>
-  <div class="stats">
-    {% for k in ['queued','running','done','failed'] %}<div class="stat"><div class="stat-n">{{ stats[k] }}</div><div class="eyebrow">{{ k }}</div></div>{% endfor %}
+  <div class="stats stats-quad">
+    {% for k, label in [('queued', 'pending'), ('running', 'running'), ('done', 'done'), ('failed', 'failed')] %}<div class="stat"><div class="stat-n">{{ stats[k] }}</div><div class="eyebrow">{{ label }}</div>{% if k == 'queued' and stats.queued %}<div class="stat-sub faint">{% if stats.pending_articles %}{{ stats.pending_articles }} article{{ 's' if stats.pending_articles != 1 }} · {% endif %}oldest {{ stats.pending_since|timeago }}</div>{% endif %}</div>{% endfor %}
   </div>
+  {% if stats.queued %}<p class="field-hint">Pending jobs are kept in the database until they run, so a restart or a long backlog never drops them; the AI worker takes {{ settings.ai_max_jobs }} at a time.</p>{% endif %}
   {% if stats.failed %}
   <div class="queue-failed">
     <div class="row space-between queue-failed-head">

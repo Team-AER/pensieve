@@ -36,9 +36,14 @@ def queue_for(function: str) -> str:
     return FETCH_QUEUE
 
 
-async def enqueue(function: str, *args: Any, _job_id: str | None = None, **kwargs: Any) -> None:
+async def enqueue(function: str, *args: Any, _job_id: str | None = None, **kwargs: Any) -> Any:
+    """Queue a job; AI jobs go through the durable ledger (``pensieve.ai.ledger``) so arq can never lose them."""
+    if function.startswith("ai_") and not kwargs:
+        from pensieve.ai import ledger
+
+        return await ledger.enqueue(function, *args, job_id=_job_id)
     pool = await get_pool()
-    await pool.enqueue_job(function, *args, _job_id=_job_id, _queue_name=queue_for(function), **kwargs)
+    return await pool.enqueue_job(function, *args, _job_id=_job_id, _queue_name=queue_for(function), **kwargs)
 
 
 # Job names (contract between packages). Implementations live in fetch/jobs.py and ai/jobs.py.

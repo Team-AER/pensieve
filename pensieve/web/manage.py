@@ -12,9 +12,10 @@ from typing import Annotated, Any
 import httpx
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse, Response
-from sqlalchemy import delete, func, select
+from sqlalchemy import case, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from pensieve.ai import ledger
 from pensieve.ai import retry as ai_retry
 from pensieve.auth import (
     generate_api_token,
@@ -845,6 +846,9 @@ async def ai_page(request: Request, user: CurrentUser, session: DB):
     profile = await session.scalar(
         select(Profile).where(Profile.user_id == user.id).order_by(Profile.version.desc()).limit(1)
     )
+    from pensieve.ai import model_choice
+
+    await model_choice.apply_overrides(session)  # the hint names the Gateway card's job limit
     # A failed job whose work a later run already did is settled first, so the count is what is still missing.
     if await ai_retry.reconcile(session, user.id):
         await session.commit()
@@ -858,6 +862,27 @@ async def ai_page(request: Request, user: CurrentUser, session: DB):
             continue
         key = "failed" if status_ == "partial" else status_
         stats[key] = stats.get(key, 0) + int(n)
+    # Waiting work comes from the durable ledger, so a deep backlog shows in full, with the articles it covers.
+    pending = (
+        await session.execute(
+            select(
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                AIJob.kind.in_(ledger.ITEM_LIST_KINDS)
+                                & (func.jsonb_typeof(AIJob.args[1]) == "array"),
+                                func.jsonb_array_length(AIJob.args[1]),
+                            )
+                        )
+                    ),
+                    0,
+                ),
+                func.min(AIJob.created_at),
+            ).where(AIJob.user_id == user.id, AIJob.status == "queued")
+        )
+    ).one()
+    stats["pending_articles"], stats["pending_since"] = int(pending[0]), pending[1]
     recent_failed = list(
         await session.scalars(
             select(AIJob).where(ai_retry.failed_filter(user.id)).order_by(AIJob.created_at.desc()).limit(8)
