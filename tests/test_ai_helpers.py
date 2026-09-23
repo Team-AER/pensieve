@@ -28,7 +28,7 @@ def now() -> datetime:
 
 
 def vec(angle: float = 0.0) -> list[float]:
-    """Deterministic 768-dim unit vector in the plane of dims 0 and 1: cosine(vec(a), vec(b)) == cos(a - b)."""
+    """Deterministic unit vector in the plane of dims 0 and 1: cosine(vec(a), vec(b)) == cos(a - b)."""
     v = [0.0] * EMBEDDING_DIMS
     v[0], v[1] = math.cos(angle), math.sin(angle)
     return v

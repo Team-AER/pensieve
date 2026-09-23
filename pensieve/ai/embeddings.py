@@ -1,4 +1,4 @@
-"""Item embeddings (nomic-embed-text, 768 dims) and pgvector nearest-neighbour queries."""
+"""Item embeddings (BGE M3, 1024 dims) and pgvector nearest-neighbour queries."""
 
 from __future__ import annotations
 

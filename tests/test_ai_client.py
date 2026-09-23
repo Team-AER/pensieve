@@ -173,7 +173,11 @@ async def test_http_error_becomes_llm_error(gateway):
 async def test_embed_batches_and_dims(gateway):
     client = LLMClient()
     vectors = await client.embed([f"text {i}" for i in range(70)], workflow="embed")
-    assert vectors is not None and len(vectors) == 70 and all(len(v) == 768 for v in vectors)
+    assert (
+        vectors is not None
+        and len(vectors) == 70
+        and all(len(v) == settings.llm_embedding_dims for v in vectors)
+    )
     assert [len(c["input"]) for c in gateway.embed_calls] == [32, 32, 6]
     assert all(c["model"] == settings.llm_embedding_model for c in gateway.embed_calls)
     assert client.embeddings_available is True

@@ -37,7 +37,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from pensieve.db import Base
 
-EMBEDDING_DIMS = 768
+EMBEDDING_DIMS = 1024
 
 #: items.search_vector: title (A), feed or saved-page text (B), archived page text of a feed item (C).
 SEARCH_VECTOR_SQL = (

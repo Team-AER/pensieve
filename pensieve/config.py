@@ -50,8 +50,8 @@ class Settings(BaseSettings):
     llm_fast_reasoning_effort: str | None = (
         "none"  # Qwen routes think by default; short structured jobs must not
     )
-    llm_embedding_model: str = "nomic-embed-text"
-    llm_embedding_dims: int = 768  # fixed by the pgvector column; changing it needs a migration
+    llm_embedding_model: str = "bge-m3"
+    llm_embedding_dims: int = 1024  # fixed by the pgvector column; changing it needs a migration
     llm_timeout_s: float = 240.0  # per request; a 27B on Ollama needs well over a minute for a 5-item batch
     llm_max_input_tokens_short: int = 8_000
     llm_max_input_tokens_long: int = 32_000
