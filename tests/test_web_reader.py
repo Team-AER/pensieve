@@ -169,3 +169,29 @@ async def test_search_finds_by_title(client, session, user):
     assert "No matches" in r.text
     r = await client.get("/search?q=zzzzqqq", headers=HX)
     assert "No matches" in r.text
+
+
+async def test_row_states_for_restored_pages(client, session, user):
+    feed = await seed_feed(session, user, "Feed")
+    read = await seed_item(session, feed, "Read one")
+    starred = await seed_item(session, feed, "Starred one")
+    plain = await seed_item(session, feed, "Plain one")
+    other = await make_user(session)
+    theirs = await seed_item(session, await seed_feed(session, other, "Theirs"), "Their read one")
+    ids = {"read": str(read.id), "starred": str(starred.id), "plain": str(plain.id), "theirs": str(theirs.id)}
+    session.add_all(
+        [
+            models.ItemState(user_id=user.id, item_id=read.id, is_read=True),
+            models.ItemState(user_id=user.id, item_id=starred.id, is_starred=True),
+            models.ItemState(user_id=other.id, item_id=theirs.id, is_read=True),
+        ]
+    )
+    await session.commit()
+    await login(client, user)
+    r = await client.get("/reader/states", params={"ids": ",".join([*ids.values(), "not-a-uuid"])})
+    assert r.status_code == 200
+    assert r.json() == {
+        "read": [ids["read"]],
+        "starred": [ids["starred"]],
+    }  # another user's state never shows
+    assert (await client.get("/reader/states")).json() == {"read": [], "starred": []}
