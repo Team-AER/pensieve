@@ -14,7 +14,7 @@ import pytest
 import respx
 
 from pensieve import models
-from pensieve.ai.client import reset_embedding_probe
+from pensieve.ai.client import reset_catalog_cache, reset_embedding_probe
 from pensieve.config import get_settings
 from pensieve.models import EMBEDDING_DIMS
 
@@ -144,9 +144,11 @@ def truncated(payload: dict | str) -> httpx.Response:
 @pytest.fixture
 def gateway():
     reset_embedding_probe()  # the probe is process-wide; a 404 in one test must not short-circuit the next
+    reset_catalog_cache()
     with respx.mock(assert_all_called=False, assert_all_mocked=True) as router:
         yield Gateway(router)
     reset_embedding_probe()
+    reset_catalog_cache()
 
 
 # ---------------------------------------------------------------------------

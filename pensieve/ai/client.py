@@ -64,6 +64,12 @@ def reset_embedding_probe() -> None:
     _EMBED_PROBE["checked_at"] = 0.0
 
 
+def reset_catalog_cache() -> None:
+    """Tests: forget the catalog's per-model output floors and when it was read."""
+    _OUTPUT_FLOORS.clear()
+    _CATALOG_READ["at"] = 0.0
+
+
 def approx_tokens(text: str) -> int:
     return len(text) // CHARS_PER_TOKEN
 
@@ -169,6 +175,11 @@ def _extract_json(content: str) -> Any:
 
 _EFFORTS: dict[str, list[str]] = {}
 """Per-model ``reasoning_efforts`` the catalog advertises (process-wide, refreshed by every ``health()``)."""
+_OUTPUT_FLOORS: dict[str, int] = {}
+"""Per-model ``max_output_tokens`` the catalog advertises: every chat request asks for at least this much, since a
+reasoning model spends output tokens before its answer (Gemma 32K, Qwen 64K on the gateway)."""
+_CATALOG_READ = {"at": 0.0}
+CATALOG_TTL_S = 600
 _EFFORT_WARNED: set[tuple[str, str]] = set()
 _EFFORT_LADDER = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
 _EFFORT_ALIASES = {"off": "none"}  # a route may spell "off" in its catalog; LiteLLM validates "none"
@@ -328,6 +339,10 @@ class LLMClient:
         from pensieve.ai.model_choice import apply_overrides
 
         await apply_overrides()  # admin-chosen models/effort, refreshed at most once a minute per process
+        if path == "/chat/completions":
+            if time.monotonic() - _CATALOG_READ["at"] > CATALOG_TTL_S:
+                await self.health()
+            body["max_tokens"] = max(body.get("max_tokens") or 0, _OUTPUT_FLOORS.get(body.get("model"), 0))
         url = f"{self.settings.llm_base_url.rstrip('/')}{path}"
         try:
             async with self._slot(body.get("model")):
@@ -493,6 +508,8 @@ class LLMClient:
             efforts = _catalog_efforts(payload)
             if efforts:
                 _EFFORTS.update(efforts)
+            _OUTPUT_FLOORS.update(_catalog_outputs(payload))
+            _CATALOG_READ["at"] = time.monotonic()
             return {"ok": True, "models": _catalog_models(payload), "latency_ms": latency, "efforts": efforts}
         except Exception as exc:  # noqa: BLE001 - health must never raise
             log.warning("gateway health check failed: %r", exc)
@@ -503,6 +520,19 @@ def _catalog_rows(payload: Any) -> list:
     if isinstance(payload, dict):
         return payload.get("data") or payload.get("models") or payload.get("model_list") or []
     return payload if isinstance(payload, list) else []
+
+
+def _catalog_outputs(payload: Any) -> dict[str, int]:
+    """{model id: max_output_tokens} for catalog rows that advertise one."""
+    out: dict[str, int] = {}
+    for row in _catalog_rows(payload):
+        if not isinstance(row, dict):
+            continue
+        name = row.get("id") or row.get("model_name") or row.get("name")
+        value = row.get("max_output_tokens")
+        if name and isinstance(value, int) and value > 0:
+            out[str(name)] = value
+    return out
 
 
 def _catalog_efforts(payload: Any) -> dict[str, list[str]]:

@@ -11,7 +11,7 @@ from pensieve.ai.client import (
     validate_schema,
 )
 from pensieve.config import get_settings
-from tests.test_ai_helpers import BASE, chat_response, gateway, truncated  # noqa: F401
+from tests.test_ai_helpers import BASE, CATALOG, chat_response, gateway, truncated  # noqa: F401
 
 settings = get_settings()
 SCHEMA = {
@@ -115,6 +115,22 @@ async def test_every_request_gets_at_least_the_output_window(gateway):
     await client.chat_json(settings.llm_fast_model, "s", "u", SCHEMA, workflow="x", max_tokens=100)
     await client.chat_text(settings.llm_fast_model, "s", "u", workflow="x", max_tokens=window * 2)
     assert [c["max_tokens"] for c in gateway.chat_calls] == [window, window * 2]
+    await client.aclose()
+
+
+async def test_chat_requests_ask_for_at_least_the_catalog_output(gateway):
+    """A reasoning model spends output before its answer, so the gateway's published output is the floor."""
+    gateway.router.get(CATALOG).mock(
+        return_value=httpx.Response(
+            200, json={"data": [{"id": settings.llm_fast_model, "max_output_tokens": 65_536}]}
+        )
+    )
+    gateway.chat("ok")
+    client = LLMClient()
+    await client.chat_text(settings.llm_fast_model, "s", "u", workflow="x")
+    await client.chat_text("model-the-catalog-does-not-list", "s", "u", workflow="x")
+    assert [c["max_tokens"] for c in gateway.chat_calls] == [65_536, settings.llm_max_output_tokens]
+    assert len([c for c in gateway.router.calls if c.request.url == CATALOG]) == 1  # read once, then cached
     await client.aclose()
 
 
