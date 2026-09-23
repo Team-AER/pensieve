@@ -44,12 +44,16 @@ USER_KINDS = {
 }
 
 
-def _untagged(feed_id: uuid.UUID, user_id: uuid.UUID, before: datetime | None = None):
-    """Items of ``feed_id`` with no item_ai row (never tagged), newest first."""
+def untagged(feed_id: uuid.UUID, user_id: uuid.UUID, before: datetime | None = None):
+    """Items of ``feed_id`` that were never tagged, newest first. A summary-only item_ai row is not tagging."""
     stmt = select(models.Item.id).where(
         models.Item.feed_id == feed_id,
         ~select(models.ItemAI.item_id)
-        .where(models.ItemAI.item_id == models.Item.id, models.ItemAI.user_id == user_id)
+        .where(
+            models.ItemAI.item_id == models.Item.id,
+            models.ItemAI.user_id == user_id,
+            models.ItemAI.prompt_version != "",
+        )
         .exists(),
     )
     if before is not None:
@@ -69,7 +73,15 @@ async def _summary_missing(session: AsyncSession, user_id: uuid.UUID, item_id: u
 
 
 async def _covered(session: AsyncSession, row: models.AIJob) -> bool:
-    """Has the work this failed row stood for been done since?"""
+    """Has the work this failed row stood for been done since?
+
+    Tagging is judged by the data alone: a later ``done`` job for the same feed can still have left items
+    untagged, so it does not count.
+    """
+    if row.kind == "process_items" and row.target_id is not None and row.user_id is not None:
+        if await session.get(models.Feed, row.target_id) is None:
+            return True
+        return await session.scalar(untagged(row.target_id, row.user_id, row.created_at).limit(1)) is None
     later_success = await session.scalar(
         select(models.AIJob.id)
         .where(
@@ -85,11 +97,6 @@ async def _covered(session: AsyncSession, row: models.AIJob) -> bool:
         return True
     if row.target_id is None or row.user_id is None:
         return False
-    if row.kind == "process_items":
-        if await session.get(models.Feed, row.target_id) is None:
-            return True
-        left = await session.scalar(_untagged(row.target_id, row.user_id, row.created_at).limit(1))
-        return left is None
     if row.kind in SUMMARY_KINDS:
         return not await _summary_missing(session, row.user_id, row.target_id)
     return False
@@ -156,7 +163,7 @@ async def retry_failed(session: AsyncSession, user: models.User) -> dict[str, in
     # Tagging (embed + tag + cluster): every untagged item of each feed that failed.
     feeds = {r.target_id for r in rows if r.kind == "process_items" and r.target_id}
     for feed_id in feeds:
-        ids = [str(i) for i in (await session.scalars(_untagged(feed_id, user.id))).all()]
+        ids = [str(i) for i in (await session.scalars(untagged(feed_id, user.id))).all()]
         for n, chunk in enumerate(_chunks(ids, cap)):
             await enqueue(queue.AI_PROCESS_NEW_ITEMS, f"{feed_id}:{n}", str(feed_id), chunk)
 

@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 
 from pensieve import models
-from pensieve.ai import categorize, insights, memory, paper
+from pensieve.ai import categorize, insights, memory, paper, retry
 from pensieve.ai.client import LLMClient
 from pensieve.config import get_settings
 from pensieve.db import dispose_engine, session_scope
@@ -135,7 +135,7 @@ async def cmd_tag(args: argparse.Namespace) -> int:
 
 
 async def cmd_backfill(args: argparse.Namespace) -> int:
-    """Enqueue process jobs for every item of the user that has no item_ai row yet, newest first, in capped chunks."""
+    """Enqueue process jobs for every never-tagged item of the user, newest first, in capped chunks."""
     from pensieve import queue
 
     cap = get_settings().ai_max_items_per_job
@@ -144,16 +144,7 @@ async def cmd_backfill(args: argparse.Namespace) -> int:
         feeds = list((await session.scalars(select(models.Feed).where(models.Feed.user_id == user.id))).all())
         total = 0
         for feed in feeds:
-            untagged = (
-                select(models.Item.id)
-                .where(
-                    models.Item.feed_id == feed.id,
-                    ~select(models.ItemAI.item_id)
-                    .where(models.ItemAI.item_id == models.Item.id, models.ItemAI.user_id == user.id)
-                    .exists(),
-                )
-                .order_by(models.Item.published_at.desc())
-            )
+            untagged = retry.untagged(feed.id, user.id)
             if args.limit:
                 untagged = untagged.limit(args.limit)
             ids = [str(i) for i in (await session.scalars(untagged)).all()]

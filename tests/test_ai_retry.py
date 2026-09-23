@@ -1,8 +1,20 @@
 from datetime import UTC, datetime, timedelta
 
 from pensieve import models, queue
+from pensieve.ai import prompts
 from pensieve.ai import retry as ai_retry
 from tests.test_web_support import login, memory_limiter, seed_feed, seed_item  # noqa: F401
+
+
+def tagged_row(user, item, **kw):
+    return models.ItemAI(
+        user_id=user.id,
+        item_id=item.id,
+        tags=["x"],
+        confidences={"x": 0.9},
+        prompt_version=prompts.PROMPT_VERSION,
+        **kw,
+    )
 
 
 def job(user, kind, target, status="failed", **kw):
@@ -15,7 +27,7 @@ async def test_reconcile_settles_failures_a_later_run_fixed(session, user):
     tagged = await seed_item(session, feed, "Tagged already")
     untagged = await seed_item(session, feed, "Never tagged")
     lonely = await seed_item(session, feed, "No summary yet")
-    session.add(models.ItemAI(user_id=user.id, item_id=tagged.id, tags=["x"], confidences={"x": 0.9}))
+    session.add(tagged_row(user, tagged))
     process = job(user, "process_items", feed.id)
     summary = job(user, "summarize", lonely.id)
     filing = job(user, "file_feed", feed.id, created_at=datetime.now(UTC) - timedelta(hours=2))
@@ -31,12 +43,37 @@ async def test_reconcile_settles_failures_a_later_run_fixed(session, user):
     assert lost.status == "failed" and lost.last_error.startswith("lost from the queue")
 
     # The missing work gets done elsewhere (a backfill tags the item, the sweep writes the summary).
-    session.add(models.ItemAI(user_id=user.id, item_id=untagged.id, tags=["y"], confidences={"y": 0.8}))
-    session.add(models.ItemAI(user_id=user.id, item_id=lonely.id, tags=[], confidences={}, summary="- done"))
+    session.add(tagged_row(user, untagged))
+    session.add(tagged_row(user, lonely, summary="- done"))
     await session.commit()
     assert await ai_retry.reconcile(session, user.id) == 3
     await session.commit()
     assert {process.status, summary.status, lost.status} == {"resolved"}
+
+
+async def test_a_later_done_job_does_not_cover_items_still_untagged(session, user):
+    feed = await seed_feed(session, user, "Feed")
+    await seed_item(session, feed, "Left out by the model")
+    summarised = await seed_item(session, feed, "Summary only")
+    session.add(models.ItemAI(user_id=user.id, item_id=summarised.id, tags=[], confidences={}, summary="- s"))
+    failed = job(user, "process_items", feed.id, created_at=datetime.now(UTC) + timedelta(seconds=1))
+    session.add_all(
+        [
+            failed,
+            job(
+                user,
+                "process_items",
+                feed.id,
+                status="done",
+                created_at=datetime.now(UTC) + timedelta(minutes=1),
+            ),
+        ]
+    )
+    await session.commit()
+
+    assert await ai_retry.reconcile(session, user.id) == 0
+    assert failed.status == "failed"  # both items still lack tags: a summary-only row is not tagging
+    assert len((await session.scalars(ai_retry.untagged(feed.id, user.id))).all()) == 2
 
 
 async def test_retry_button_requeues_missing_work_and_corrects_counts(client, session, user, monkeypatch):

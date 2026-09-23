@@ -1,8 +1,10 @@
 # ruff: noqa: F811 -- the `gateway` fixture is imported, then named as a test parameter
+import pytest
 from sqlalchemy import select
 
 from pensieve import models
 from pensieve.ai import categorize, prompts
+from pensieve.ai.client import LLMError
 from pensieve.config import get_settings
 from tests.test_ai_helpers import (
     gateway,  # noqa: F401
@@ -119,17 +121,28 @@ async def test_off_list_content_type_and_malformed_entry_do_not_fail_batch(sessi
     payload["items"].insert(
         1, {"index": 1, "tags": [{"name": "ai", "confidence": "high"}], "content_type": 3}
     )
-    gateway.chat(payload)
+    gateway.chat(payload, tagging_payload([(0, [("web", 0.7)], "article")]))
     rows = await categorize.tag_items(session, user, items)
     by_item = {r.item_id: r for r in rows}
-    assert set(by_item) == {items[0].id, items[2].id}  # the malformed entry is skipped, not the batch
+    assert set(by_item) == {i.id for i in items}  # the malformed entry is retried alone, not the batch
     assert by_item[items[0].id].tags == ["ai"] and by_item[items[0].id].content_type is None  # coerced
-    assert by_item[items[2].id].content_type == "article"
-    assert len(gateway.chat_calls) == 1
+    assert by_item[items[1].id].tags == ["web"] and by_item[items[2].id].content_type == "article"
+    assert len(gateway.chat_calls) == 2
     # the wire schema no longer carries an enum, so one stray label cannot reject the response
     schema = gateway.chat_calls[0]["response_format"]["json_schema"]["schema"]
     assert "enum" not in schema["properties"]["items"]["items"]["properties"]["content_type"]
     assert "newsletter" not in prompts.CONTENT_TYPES and "article" in prompts.ITEM_TAGGING_SYSTEM
+
+
+async def test_items_the_model_keeps_leaving_out_raise_after_the_rest_are_written(session, user, gateway):
+    _, items = await seed_items(session, user, n=3)
+    gateway.chat(tagging_payload([(0, [("ai", 0.9)], "article")]))  # every answer tags index 0 only
+    with pytest.raises(LLMError, match="left out or mangled 1 of 3 items"):
+        await categorize.tag_items(session, user, items)
+    # one batch of 3, then items 1 and 2 retried in one batch of 2: item 1 lands as its index 0, item 2 never does
+    assert len(gateway.chat_calls) == 2
+    rows = (await session.scalars(select(models.ItemAI).where(models.ItemAI.user_id == user.id))).all()
+    assert {r.item_id for r in rows if categorize.is_tagged(r)} == {items[0].id, items[1].id}
 
 
 async def test_tag_items_respects_toggles(session, user, gateway):

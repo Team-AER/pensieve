@@ -20,6 +20,7 @@ log = logging.getLogger(__name__)
 
 AUTO_FILE_CONFIDENCE = 0.9
 TAG_BATCH = 5
+TAG_RETRY_BATCH = 2  # items the model left out or mangled get one more, smaller batch
 TAG_TEXT_CHARS = 700  # title + lead paragraph is enough to tag; the fast model is slow on long batches
 TAG_TOKENS_PER_ITEM = 160
 TAG_TOKENS_HEADROOM = 200
@@ -315,7 +316,8 @@ async def tag_items(
     """Tag ``items`` in batches of ``TAG_BATCH``; writes/updates ``item_ai`` rows. Respects ``tag_items`` toggle.
 
     Items already tagged at the current ``PROMPT_VERSION`` are skipped unless ``force`` (a retried job must not
-    re-pay for batches that succeeded). A malformed entry in a batch is skipped, not the batch.
+    re-pay for batches that succeeded). An item the model leaves out or mangles is retried once in a smaller batch;
+    if any are still missing, ``LLMError`` is raised after every batch that worked has been written.
     """
     if not items or not ai_on(user, "tag_items"):
         return []
@@ -340,8 +342,9 @@ async def tag_items(
     examples = await tagging_examples(session, user)
 
     written: list[models.ItemAI] = []
-    for start in range(0, len(todo), TAG_BATCH):
-        batch = todo[start : start + TAG_BATCH]
+
+    async def run_batch(batch: list[models.Item]) -> list[models.Item]:
+        """Tag one batch; returns the items the model left out or mangled."""
         payload = [(i, it.title, (it.content_text or "")[:TAG_TEXT_CHARS]) for i, it in enumerate(batch)]
         try:
             result = await client.chat_json(
@@ -359,9 +362,11 @@ async def tag_items(
             raise
         by_index = {int(entry["index"]): entry for entry in result["items"] if _entry_ok(entry)}
         values: list[dict] = []
+        missed: list[models.Item] = []
         for i, item in enumerate(batch):
             entry = by_index.get(i)
             if entry is None:
+                missed.append(item)
                 continue
             tags: list[str] = []
             confidences: dict[str, float] = {}
@@ -388,7 +393,7 @@ async def tag_items(
                 }
             )
         if not values:
-            continue
+            return missed
         # Upsert rather than add(): two jobs can tag the same item at once (a backfill chunk and the
         # fetch-time job, or a retry racing its predecessor), and the pkey (user_id, item_id) would raise.
         stmt = pg_insert(models.ItemAI).values(values)
@@ -411,4 +416,18 @@ async def tag_items(
         for row in rows:
             existing[row.item_id] = row
         written.extend(rows)
+        return missed
+
+    missed: list[models.Item] = []
+    for start in range(0, len(todo), TAG_BATCH):
+        missed += await run_batch(todo[start : start + TAG_BATCH])
+    if missed:
+        log.info("tag_items: retrying %d items the model left out or mangled", len(missed))
+        still: list[models.Item] = []
+        for start in range(0, len(missed), TAG_RETRY_BATCH):
+            still += await run_batch(missed[start : start + TAG_RETRY_BATCH])
+        if still:
+            raise LLMError(
+                f"tag_items: the model left out or mangled {len(still)} of {len(todo)} items, retry included"
+            )
     return written

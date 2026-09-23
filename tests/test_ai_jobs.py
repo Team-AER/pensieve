@@ -146,6 +146,24 @@ async def test_process_new_items_retries_on_llm_error_then_finishes(session, use
     assert row.status == "partial" and row.attempts == jobs.MAX_TRIES and "tag failed" in row.last_error
 
 
+async def test_items_the_model_leaves_out_are_never_done(session, user, gateway):
+    feed, items = await seed(session, user, n=3)
+    # the model answers for an index that is not in the batch, so every item is left out on every try
+    stray = {"items": [{"index": 9, "tags": [{"name": "ai", "confidence": 0.9}], "content_type": "article"}]}
+    gateway.chat_by_workflow({"tag_items": stray, "cluster": {"same_story": False, "headline": ""}})
+    with pytest.raises(Retry):
+        await jobs.ai_process_new_items({"job_try": 1}, str(feed.id), [str(i.id) for i in items])
+    row = await ai_job(session, "process_items", feed.id)
+    assert row.status == "queued" and "left out or mangled" in row.last_error
+    await jobs.ai_process_new_items({"job_try": jobs.MAX_TRIES}, str(feed.id), [str(i.id) for i in items])
+    row = await ai_job(session, "process_items", feed.id)
+    # embeddings were written, tagging was not: partial, never done
+    assert (
+        row.status == "partial"
+        and "tag failed: tag_items: the model left out or mangled 3 of 3" in row.last_error
+    )
+
+
 async def test_process_new_items_all_steps_failing_is_failed(session, user, gateway):
     feed, items = await seed(session, user)
     gateway.embeddings(available=True)
