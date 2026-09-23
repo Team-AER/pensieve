@@ -1,6 +1,6 @@
 """The durable AI queue (pensieve.ai.ledger): rows written at enqueue, lost arq jobs re-sent, Redis jobs adopted."""
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 from arq.constants import job_key_prefix
 from arq.jobs import serialize_job
@@ -20,11 +20,12 @@ class FakeRedis:
         self.jobs: dict[str, bytes] = {}
         self.sent: list[tuple] = []
         self.ttl_ms: dict[str, int] = {}
+        self.enqueued_at = datetime(2026, 9, 1, 8, 0, tzinfo=UTC)
 
     async def enqueue_job(self, function, *args, _job_id=None, _queue_name=None, _expires=None):
         if _job_id in self.jobs:
             return None
-        self.jobs[_job_id] = serialize_job(function, args, {}, 1, 0)
+        self.jobs[_job_id] = serialize_job(function, args, {}, 1, int(self.enqueued_at.timestamp() * 1000))
         self.sent.append((function, args, _job_id, _queue_name, _expires))
         return object()
 
@@ -117,6 +118,8 @@ async def test_adopt_gives_redis_jobs_rows_and_the_long_expiry(session, user):
     assert by_job["old:1"].kind == "process_items" and by_job["old:1"].args == [str(feed.id), [str(item.id)]]
     assert by_job["old:2"].status == "queued" and by_job["old:2"].function == queue.AI_SUMMARIZE_ITEM
     assert by_job["again:1"].status == "queued" and by_job["again:1"].args == [str(user.id), [str(item.id)]]
+    # the Pending card's "oldest" must show when the job was really queued, not when it was adopted
+    assert by_job["old:1"].created_at == by_job["again:1"].created_at == redis.enqueued_at
     assert "fetch:1" not in by_job and set(redis.ttl_ms) == {"old:1", "fetch:1", "old:2", "again:1"}
     assert await ledger.adopt(redis) == 0  # idempotent
 

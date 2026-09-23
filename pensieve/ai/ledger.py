@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from arq.constants import in_progress_key_prefix, job_key_prefix
@@ -65,8 +65,11 @@ async def _describe(session, function: str, args: list) -> tuple[str, uuid.UUID 
     return kind, user_id, user_id
 
 
-async def record(function: str, args: list, job_id: str) -> None:
-    """Write (or restart) the ledger row for one queued job. A row already queued or running is left alone."""
+async def record(function: str, args: list, job_id: str, *, queued_at: datetime | None = None) -> None:
+    """Write (or restart) the ledger row for one queued job. A row already queued or running is left alone.
+
+    ``queued_at`` is when the job really entered the queue (arq's enqueue time, for an adopted job); now otherwise.
+    """
     async with session_scope() as session:
         row = await session.get(models.AIJob, row_id_for(job_id))
         if row is not None and row.status in ("queued", "running"):
@@ -75,7 +78,7 @@ async def record(function: str, args: list, job_id: str) -> None:
         if row is None:
             row = models.AIJob(id=row_id_for(job_id))
             session.add(row)
-        now = utcnow()
+        now = queued_at or utcnow()
         row.kind, row.target_id, row.user_id = kind, target_id, user_id
         row.status, row.attempts, row.last_error = "queued", 0, None
         row.function, row.args, row.job_id = function, args, job_id
@@ -145,10 +148,12 @@ async def adopt(redis) -> int:
             if row is not None and row.status in ("queued", "running"):
                 if row.function is None:  # a pre-ledger mirror row: keep its state, add the payload
                     row.function, row.args, row.job_id = job.function, list(job.args), job_id
+                if row.status == "queued" and row.created_at > job.enqueue_time:
+                    row.created_at = job.enqueue_time  # adopted earlier and stamped with the adopt time
                 continue
         if await redis.exists(in_progress_key_prefix + job_id):
             continue  # running right now: the job's own mirror update owns the row
-        await record(job.function, list(job.args), job_id)
+        await record(job.function, list(job.args), job_id, queued_at=job.enqueue_time)
         written += 1
     if written:
         log.info("ledger: adopted %d AI jobs already waiting in Redis", written)
