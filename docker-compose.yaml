@@ -21,7 +21,7 @@ x-app: &app
     PENSIEVE_S3_ENDPOINT: http://garage:3900
     PENSIEVE_GARAGE_ADMIN_URL: http://garage:3903
     PENSIEVE_BROWSER_WS: ws://browser:3000/
-    PENSIEVE_TIKA_URL: http://10.0.1.69:9998/tika
+    PENSIEVE_TIKA_URL: ${PENSIEVE_TIKA_URL:-}
   restart: unless-stopped
   init: true
 
