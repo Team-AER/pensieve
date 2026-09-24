@@ -421,8 +421,18 @@
     .toolbar-more { display: inline-block; }
     .article-foot { display: flex; gap: 8px; flex: 0 0 auto; padding: 8px 16px; border-top: 1px solid var(--line); background: var(--panel); }
     .article-foot .btn { height: 44px; border-radius: 10px; }
-    .article-foot .btn-icon { width: 44px; }
+    .article-foot .btn-icon { width: 44px; flex: 0 0 44px; }
     .article-foot .grow { flex: 1; }
+    .article-foot [hidden] { display: none; }
+    /* Star and share live in the thumb's reach, either side of the main action; the header keeps read, text and more. */
+    .article-head .toolbar > :is([data-action="star"], [data-action="share"]) { display: none; }
+    .article-foot .btn-primary { min-width: 0; white-space: nowrap; overflow: hidden; }
+    .foot-short { display: none; }
+    .foot-star .ic-star-filled { display: none; }
+    .article-foot .foot-star[aria-pressed="true"] { color: var(--warn); background: color-mix(in srgb, var(--warn) 12%, var(--panel)); border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
+    .foot-star[aria-pressed="true"] .ic-star { display: none; }
+    .foot-star[aria-pressed="true"] .ic-star-filled { display: inline; }
+    .foot-star.pop svg { animation: foot-star-pop 0.36s cubic-bezier(0.3, 1.7, 0.5, 1); }
     .keybar { display: none; }
     .manage { flex-direction: column; }
     .manage-nav { width: 100%; border-right: 0; border-bottom: 1px solid var(--line); flex-direction: row; flex-wrap: nowrap; gap: 8px; padding: 10px 16px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; background: var(--bg); }
@@ -447,6 +457,12 @@
     /* The generic bottom-sheet rules below position it; only the sizing differs from a menu list. */
     .reading-menu .menu-body { width: auto; gap: 10px; padding: 6px 16px 16px; }
     .reading-row .seg-btn { min-height: 36px; height: 36px; }
+  }
+  @keyframes foot-star-pop { 0% { transform: scale(0.55); } 60% { transform: scale(1.22); } 100% { transform: scale(1); } }
+  @media (max-width: 379.98px) {
+    .article-foot { gap: 6px; padding: 8px 12px; }
+    .foot-long { display: none; }
+    .foot-short { display: inline; }
   }
   @media (max-width: 419.98px) {
     .item .item-snippet { display: none; }

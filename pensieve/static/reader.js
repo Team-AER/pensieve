@@ -576,7 +576,7 @@
     e.preventDefault();
     const what = b.dataset.articleNav;
     if (what === 'prev') move(-1, true);
-    else if (what === 'note') { const n = articleButton('note'); if (n) n.click(); }
+    else if (what === 'note' || what === 'star' || what === 'share') { const n = articleButton(what); if (n) n.click(); }
     else if (what === 'read-next') {
       const art = currentArticle();
       if (art && art.dataset.read !== '1') { const r = articleButton('read'); if (r) r.click(); }
@@ -585,6 +585,31 @@
       move(1, true);
     }
   });
+
+  // The footer's star follows the open article (starred from the footer, the s key, a row swipe or another device),
+  // and share shows only for items with a link. A star made here pops; one already there on opening does not.
+  let footSeen = { id: null, on: false }, footPane = null;
+  const footObserver = window.MutationObserver ? new MutationObserver(() => syncFoot()) : null;
+  function syncFoot() {
+    const star = $('.article-foot [data-article-nav="star"]'); if (!star) return;
+    const pane = $('#article');
+    if (footObserver && pane && pane !== footPane) { // a boosted page brings a new pane
+      footObserver.disconnect(); footPane = pane;
+      footObserver.observe(pane, { subtree: true, attributes: true, attributeFilter: ['data-starred'] });
+    }
+    const art = currentArticle();
+    const id = art ? art.dataset.id : null, on = !!art && art.dataset.starred === '1';
+    star.hidden = !articleButton('star');
+    star.setAttribute('aria-pressed', on ? 'true' : 'false');
+    star.setAttribute('aria-label', on ? 'Starred, tap to unstar' : 'Star');
+    if (on && id === footSeen.id && !footSeen.on) { star.classList.remove('pop'); void star.offsetWidth; star.classList.add('pop'); }
+    footSeen = { id, on };
+    const sh = $('.article-foot [data-article-nav="share"]'); if (sh) sh.hidden = !articleButton('share');
+  }
+  document.addEventListener('animationend', (e) => { if (e.target.closest && e.target.closest('.foot-star')) e.target.closest('.foot-star').classList.remove('pop'); });
+  document.body.addEventListener('htmx:afterSettle', syncFoot);
+  document.body.addEventListener('item-state', () => setTimeout(syncFoot));
+  syncFoot();
 
   // ---- Phones: every screen's top and bottom bars slide away while reading down, and return on the way back up ----
   // On phones the document scrolls (web.css), so the browser's own toolbar shrinks along with ours. The bars also
