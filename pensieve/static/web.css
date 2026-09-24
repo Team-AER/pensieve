@@ -291,8 +291,14 @@
   .pstory-body { display: flex; flex-direction: column; gap: 12px; padding: 12px 14px 14px 34px; }
   .pstory-summary { font-size: var(--text-base); line-height: 1.5; color: var(--ink); }
   .pstory-bullets { margin: 0; padding-left: 1.2em; display: flex; flex-direction: column; gap: 4px; }
-  .pstory-why { margin: 8px 0 0; color: var(--ink-2); }
+  .pstory-why { margin: 14px 0 0; color: var(--ink-2); }
   .pstory-why .eyebrow { margin-right: 6px; }
+  .pstory-why-none { margin-top: 6px; }
+  .pstory-why .nowrap { white-space: nowrap; }
+  .pstory-rewrite { display: inline-flex; vertical-align: middle; margin: -4px 0 -2px; }
+  /* Drawn small so it sits in the line of text; the ::after keeps a 44px target for fingers. */
+  .pstory-rewrite .btn.btn-icon { position: relative; width: 28px; min-width: 28px; height: 28px; min-height: 28px; color: var(--ai); }
+  .pstory-rewrite .btn.btn-icon::after { content: ""; position: absolute; inset: -8px; }
   .pstory-sources { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: var(--text-md); }
   .pstory-source { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; }
   .pstory-source a { color: var(--accent); }
@@ -304,12 +310,6 @@
   .pstory-tuned { margin: 0; }
   .pstory-boost.up { background: var(--ok-soft, var(--accent-soft)); color: var(--ok-ink, var(--accent-ink)); }
   .pstory-boost.down { background: var(--line-2); color: var(--muted); }
-  .pstory-feedback { margin-top: 6px; }
-  .pstory-feedback > summary { display: inline-flex; list-style: none; cursor: pointer; }
-  .pstory-feedback > summary::-webkit-details-marker { display: none; }
-  .pstory-feedback-form { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 6px; }
-  .pstory-feedback-form .input { flex: 1 1 260px; }
-  .pstory-feedback .field-hint { margin-top: 4px; }
   .pstory-summary form.inline { display: inline; margin-left: 6px; }
   .paper-stand form.inline { display: inline; }
   .btn-link { background: none; border: 0; padding: 0; font: inherit; color: var(--accent); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
@@ -522,7 +522,7 @@
   .ctxmenu .menu-item > span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
   .ctxmenu .menu-sep { height: 1px; background: var(--line-2); margin: 4px 2px; }
   .ctxmenu .menu-head { padding: 6px 10px 4px; font-size: var(--text-xs, 11px); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  #confirm-input { margin-top: 12px; }
+  #confirm-input { margin-top: 12px; width: 100%; }
 }
 
 /* Auto Reader view and the web-page fallback (partials/body.html) */

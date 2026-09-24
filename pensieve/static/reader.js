@@ -321,8 +321,15 @@
     const question = e.detail.question || src.getAttribute('hx-confirm');
     if (!question) return;
     e.preventDefault();
-    confirmDialog({ title: src.dataset.confirmTitle, body: question, label: src.dataset.confirmLabel, danger: src.hasAttribute('data-confirm-danger') })
-      .then((ok) => { if (ok) e.detail.issueRequest(true); });
+    // data-confirm-prompt adds an optional text field; its value goes out as the form's hidden "note".
+    const prompt = src.dataset.confirmPrompt;
+    confirmDialog({ title: src.dataset.confirmTitle, body: question, label: src.dataset.confirmLabel, danger: src.hasAttribute('data-confirm-danger'),
+      input: prompt === undefined ? undefined : '', placeholder: prompt })
+      .then((ok) => {
+        if (ok === false || ok === undefined || ok === null) return;
+        if (prompt !== undefined) { const note = src.querySelector('input[name="note"]'); if (note) note.value = typeof ok === 'string' ? ok : ''; }
+        e.detail.issueRequest(true);
+      });
   });
 
   // ---- Menus: aria-expanded, arrow keys, Escape restores focus ----

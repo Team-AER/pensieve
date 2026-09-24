@@ -629,11 +629,37 @@ def summary_prefs_from_form(form, current: dict) -> dict:
     return summary_prefs(models.User(settings={"summaries": out}))
 
 
+#: Words a finished sentence does not end on: a bullet or why ending on one (or on a comma, colon or dash) was cut
+#: off mid-sentence by the model ("The report highlights the emergence of").
+_DANGLING_WORDS = (
+    "a an the of to in on at for from with by as and or but nor than that which who whose its their his her our "
+    "your this these those is are was were be been being into onto about over under between across via per "
+    "including such like"
+)
+_DANGLING = frozenset(_DANGLING_WORDS.split())
+
+
+def cut_off(text: str) -> bool:
+    """True when ``text`` stops mid-sentence. Fragments under three words are not judged."""
+    t = (text or "").strip()
+    if len(t.split()) < 3:
+        return False
+    if t[-1] in ",:;-–—(/&":
+        return True
+    if t[-1] in ".!?…\"'”’)]":
+        return False
+    return t.split()[-1].lower() in _DANGLING
+
+
 def _summary_entry_ok(entry: object, bullets: int = 3) -> bool:
     try:
         validate_schema(entry, prompts.item_summary_entry_schema(bullets))
     except LLMError as exc:
         log.warning("summarize_items: skipping malformed entry: %s", exc)
+        return False
+    cut = [str(b) for b in entry["bullets"] if cut_off(str(b))]  # type: ignore[index]
+    if cut or cut_off(str(entry.get("why_it_matters") or "")):  # type: ignore[union-attr]
+        log.warning("summarize_items: entry %s stops mid-sentence, asking again", entry.get("index"))  # type: ignore[union-attr]
         return False
     return True
 
@@ -860,23 +886,31 @@ async def summarize_item(
     settings = get_settings()
     profile = await profile_text(session, user.id)
     prefs = summary_prefs(user)
-    result = await client.chat_json(
-        settings.llm_fast_model,
-        prompts.item_summary_system(prefs["bullets"], prefs["why"]),
-        prompts.item_summary_user(
-            profile,
-            item.title,
-            item.full_text[:SUMMARY_TEXT_CHARS],
-            focus=prefs["focus"],
-            hint=" ".join(hint.split())[:SUMMARY_FOCUS_CHARS],
-        ),
-        prompts.item_summary_schema(prefs["bullets"]),
-        max_tokens=SUMMARY_TOKENS_PER_ITEM * 2 + SUMMARY_TOKENS_HEADROOM,
-        workflow="summarize_item",
-        name="item_summary",
-    )
-    why = "" if prefs["why"] == "off" else str(result["why_it_matters"])
-    markdown = render_summary([str(b) for b in result["bullets"]], why)
+    for attempt in range(2):
+        result = await client.chat_json(
+            settings.llm_fast_model,
+            prompts.item_summary_system(prefs["bullets"], prefs["why"]),
+            prompts.item_summary_user(
+                profile,
+                item.title,
+                item.full_text[:SUMMARY_TEXT_CHARS],
+                focus=prefs["focus"],
+                hint=" ".join(hint.split())[:SUMMARY_FOCUS_CHARS],
+            ),
+            prompts.item_summary_schema(prefs["bullets"]),
+            max_tokens=SUMMARY_TOKENS_PER_ITEM * 2 + SUMMARY_TOKENS_HEADROOM,
+            workflow="summarize_item",
+            name="item_summary",
+        )
+        bullets = [str(b) for b in result["bullets"]]
+        why = "" if prefs["why"] == "off" else str(result["why_it_matters"])
+        if not any(cut_off(b) for b in bullets) and not cut_off(why):
+            break
+        log.warning("summarize_item %s: the model stopped mid-sentence (attempt %d)", item.id, attempt + 1)
+    # Still cut after the retry: keep the finished bullets rather than print half a sentence.
+    bullets = [b for b in bullets if not cut_off(b)] or bullets
+    why = "" if cut_off(why) else why
+    markdown = render_summary(bullets, why)
     row = await session.scalar(
         select(models.ItemAI).where(models.ItemAI.user_id == user.id, models.ItemAI.item_id == item.id)
     )

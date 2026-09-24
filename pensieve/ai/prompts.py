@@ -258,11 +258,13 @@ _WHY_CLAUSE = {
     "personal": (
         "then one or two sentences on why it matters to this specific reader given their profile and stated "
         "focus (or to a technical reader in general when both are empty). Never restate the bullets in the why; "
-        "say what it changes for them, or say plainly that it is routine"
+        "say what it changes for them, what they can use, learn or watch from it. Keep the why constructive: "
+        "never dismiss the article (no 'routine', 'nothing new', 'not relevant', 'safe to skip'); find the angle "
+        "that earns their attention"
     ),
     "general": (
         "then one sentence on why it matters to a technical reader in general (ignore the reader profile for "
-        "this part)"
+        "this part), constructive and never dismissive"
     ),
     "off": "and set why_it_matters to an empty string",
 }
@@ -272,7 +274,7 @@ _NUMBER_WORDS = {2: "two", 3: "three", 5: "five"}
 def item_summary_system(bullets: int = 3, why: str = "personal") -> str:
     n = _NUMBER_WORDS.get(bullets, str(bullets))
     return (
-        f"Summarise the article in exactly {n} crisp bullets (facts, not opinions), "
+        f"Summarise the article in exactly {n} crisp bullets (facts, not opinions; each a complete sentence), "
         + _WHY_CLAUSE.get(why, _WHY_CLAUSE["personal"])
         + ". "
         + _JSON_ONLY
@@ -282,7 +284,8 @@ def item_summary_system(bullets: int = 3, why: str = "personal") -> str:
 def item_summary_batch_system(bullets: int = 3, why: str = "personal") -> str:
     n = _NUMBER_WORDS.get(bullets, str(bullets))
     return (
-        f"Summarise each article for one reader: exactly {n} crisp bullets of facts (not opinions), "
+        f"Summarise each article for one reader: exactly {n} crisp bullets of facts (not opinions; each a "
+        "complete sentence), "
         + _WHY_CLAUSE.get(why, _WHY_CLAUSE["personal"])
         + ". Return one entry per article, keyed by its index; never merge articles. "
         + _JSON_ONLY

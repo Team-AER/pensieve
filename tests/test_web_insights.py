@@ -146,7 +146,8 @@ async def test_paper_compiles_on_open_and_renders_sections(client, session, user
     assert "3 stories from 4 items" in r.text
     assert r.text.index('id="sec-ai"') < r.text.index('id="sec-apple"')
     assert "Big launch everywhere" in r.text and "2 sources" in r.text
-    assert "Launch bullet" in r.text and "Because you follow launches." in r.text
+    # the why's last word shares a nowrap span with the rewrite icon
+    assert "Launch bullet" in r.text and "Because you follow" in r.text and "launches." in r.text
     assert "Big launch again" in r.text and "Lone AI post" in r.text and "no summary yet" in r.text
     assert 'id="paper-settings"' in r.text and 'name="section" value="ai"' in r.text
     edition = await session.scalar(
@@ -385,7 +386,11 @@ async def test_paper_summary_prefs_rewrite_and_missing(client, session, user, mo
     w = await seed_paper(session, user)
     headers = await login(client, user)
     r = await client.get("/insights")
-    assert "2 without a summary" in r.text and "write them now" in r.text and "Not quite" in r.text
+    assert (
+        "2 without a summary" in r.text
+        and "write them now" in r.text
+        and 'data-confirm-title="Rewrite this summary?"' in r.text
+    )
     edition = await session.scalar(
         select(models.Insight).where(models.Insight.user_id == user.id, models.Insight.kind == "paper")
     )
@@ -409,7 +414,7 @@ async def test_paper_summary_prefs_rewrite_and_missing(client, session, user, mo
     assert (
         'value="5" selected' in r.text and 'value="general" selected' in r.text and "homelab stuff" in r.text
     )
-    # "Not quite" on the story's why: a correction and a rewrite job carrying the note
+    # Rewrite on the story's why: a correction and a rewrite job carrying the dialog's note
     key = f"c:{w['cluster'].id}"
     r = await client.post(
         f"/insights/paper/{edition.id}/rewrite",
@@ -444,7 +449,7 @@ async def test_paper_summary_prefs_rewrite_and_missing(client, session, user, mo
     r = await client.get(
         f"/insights/paper/{edition.id}/summary", params={"key": key, "n": 2}, headers=headers | HX
     )
-    assert "New bullet" in r.text and "Better why." in r.text and "Rewriting" not in r.text
+    assert "New bullet" in r.text and "Better" in r.text and "why." in r.text and "Rewriting" not in r.text
     await session.refresh(edition)
     story = next(s for sec in edition.body["sections"] for s in sec["stories"] if s["key"] == key)
     assert story["summary"].startswith("- New bullet") and "rewrite_of" not in story

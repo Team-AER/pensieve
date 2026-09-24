@@ -6,20 +6,18 @@
 {% if story.summary %}
   {% set blocks = story.summary|summary_blocks %}
   <ul class="pstory-bullets">{% for b in blocks.bullets %}<li>{{ b }}</li>{% endfor %}</ul>
+  {# Rewrite: an icon at the end of the why (or under the bullets when the why is off) asks through the themed
+     dialog, with an optional note on what was off; the note is kept as a correction. #}
+  {% set rewrite %}<form class="pstory-rewrite" hx-post="/insights/paper/{{ edition.id }}/rewrite" hx-target="#{{ sum_id }}" hx-swap="outerHTML" method="post" action="/insights/paper/{{ edition.id }}/rewrite"
+      hx-confirm="Pensieve asks the model to write this summary again. Say what was off, if anything: your note is kept as a correction, so the reader profile and later why-it-matters lines learn from it too."
+      data-confirm-title="Rewrite this summary?" data-confirm-label="Rewrite" data-confirm-prompt="What was off? e.g. I don't care about funding rounds (optional)">{{ m.csrf_field(csrf_token) }}<input type="hidden" name="key" value="{{ story.key }}"><input type="hidden" name="note" value=""><button class="btn btn-sm btn-icon btn-ghost" type="submit" title="Rewrite this summary" aria-label="Rewrite this summary">{{ m.icon('refresh', 14) }}</button></form>{% endset %}
   {% if blocks.why and show_why %}
-  <p class="pstory-why"><span class="eyebrow eyebrow-ai">{{ m.icon('sparkle', 12) }} Why it matters</span> {{ blocks.why }}</p>
+  {% set why_words = blocks.why.rsplit(' ', 1) %}
+  {# The icon rides on the why's last word, so a wrap never leaves it alone on a line. #}
+  <div class="pstory-why"><span class="eyebrow eyebrow-ai">{{ m.icon('sparkle', 12) }} Why it matters</span> {% if why_words|length > 1 %}{{ why_words[0] }} {% endif %}<span class="nowrap">{{ why_words[-1] }} {{ rewrite }}</span></div>
+  {% else %}
+  <div class="pstory-why pstory-why-none">{{ rewrite }}</div>
   {% endif %}
-  <details class="pstory-feedback">
-    <summary class="btn btn-sm btn-ghost" title="Tell the model what it got wrong and have this summary rewritten">{{ m.icon('refresh', 14) }} Not quite</summary>
-    <form class="pstory-feedback-form" hx-post="/insights/paper/{{ edition.id }}/rewrite" hx-target="#{{ sum_id }}" hx-swap="outerHTML" method="post" action="/insights/paper/{{ edition.id }}/rewrite">
-      {{ m.csrf_field(csrf_token) }}
-      <input type="hidden" name="key" value="{{ story.key }}">
-      <label class="sr-only" for="{{ sum_id }}-note">What was off?</label>
-      <input class="input input-sm" id="{{ sum_id }}-note" type="text" name="note" maxlength="400" placeholder="What was off? e.g. I don't care about funding rounds (optional)">
-      <button class="btn btn-sm btn-ai" type="submit">{{ m.icon('sparkle', 14) }} Rewrite</button>
-    </form>
-    <p class="field-hint">Your note is kept as a correction, so the reader profile and future why-it-matters lines learn from it too.</p>
-  </details>
 {% elif error %}
   <p class="muted small" role="alert">{{ m.icon('warning', 14) }} {{ error }}</p>
   <form hx-post="/insights/paper/{{ edition.id }}/summarize" hx-target="#{{ sum_id }}" hx-swap="outerHTML" method="post" action="/insights/paper/{{ edition.id }}/summarize">{{ m.csrf_field(csrf_token) }}<input type="hidden" name="key" value="{{ story.key }}"><button class="btn btn-sm btn-ai" type="submit">{{ m.icon('refresh', 14) }} Retry</button></form>
