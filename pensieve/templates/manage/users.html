@@ -30,7 +30,11 @@
   <tbody>
   {% for u in users %}
   <tr>
-    <td class="cell-full"><div class="cell-primary">{{ m.avatar(u, 'sm') }}<div class="cell-text"><span class="cell-title">{{ u.display_name or u.email }}{% if u.id == user.id %} <span class="chip chip-sm">you</span>{% endif %}</span><span class="cell-sub">{{ u.email }}</span></div></div></td>
+    <td class="cell-full"><div class="cell-primary">{{ m.avatar(u, 'sm') }}<div class="cell-text"><span class="cell-title">{{ u.display_name or u.email }}{% if u.id == user.id %} <span class="chip chip-sm">you</span>{% endif %}</span><span class="cell-sub">{{ u.email }}</span></div>
+      <details class="menu menu-left">
+        <summary class="btn btn-sm btn-icon btn-ghost" aria-label="Rename {{ u.display_name or u.email }}" title="Rename" aria-haspopup="menu">{{ m.icon('note', 14) }}</summary>
+        <div class="menu-body" role="menu" aria-label="Rename"><form method="post" action="/manage/users/{{ u.id }}/name" class="menu-form" style="min-width: 280px">{{ m.csrf_field(csrf_token) }}<label class="sr-only" for="name-{{ u.id }}">Name</label><input class="input input-sm" id="name-{{ u.id }}" name="display_name" value="{{ u.display_name }}" maxlength="120" placeholder="{{ u.email.split('@')[0] }}"><button class="btn btn-sm" type="submit">Save</button></form></div>
+      </details></div></td>
     <td data-th="Role"><form method="post" action="/manage/users/{{ u.id }}/role" class="row">{{ m.csrf_field(csrf_token) }}<span class="chip chip-sm{% if u.role.value == 'admin' %} chip-accent{% endif %}">{{ u.role.value|capitalize }}</span>{% if u.id != user.id %}<button class="btn btn-sm" type="submit">Make {{ 'reader' if u.role.value == 'admin' else 'admin' }}</button>{% endif %}</form></td>
     <td data-th="AI"><form method="post" action="/manage/users/{{ u.id }}/ai" class="row">{{ m.csrf_field(csrf_token) }}<span class="chip chip-sm{% if u.ai_enabled %} chip-ai{% endif %}">{{ 'on' if u.ai_enabled else 'off' }}</span><button class="btn btn-sm" type="submit">{{ 'Disable' if u.ai_enabled else 'Enable' }}</button></form></td>
     <td data-th="Joined">{{ u.created_at|timeago }}</td>

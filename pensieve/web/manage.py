@@ -1417,6 +1417,22 @@ async def _target_user(session: AsyncSession, user_id: uuid.UUID) -> User:
     return target
 
 
+@router.post("/users/{user_id}/name")
+async def rename_user(
+    request: Request,
+    user_id: uuid.UUID,
+    user: CsrfUser,
+    session: DB,
+    display_name: Annotated[str, Form()] = "",
+):
+    """Fix how a household member is named (the invite's optional name, or the email's local part)."""
+    require_admin(user)
+    target = await _target_user(session, user_id)
+    target.display_name = display_name.strip()[:120] or target.email.split("@")[0]
+    await session.commit()
+    return back("/manage/users", "user_saved")
+
+
 @router.post("/users/{user_id}/role")
 async def toggle_role(
     request: Request,

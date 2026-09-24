@@ -246,6 +246,8 @@ async def test_household_users_admin_only(client, session, user):
     assert r.status_code == 303 and r.headers["location"] == "/" and reader.email not in r.text
     r = await client.post("/manage/users", data={"email": "x@example.com"}, headers=headers)
     assert r.status_code == 403
+    r = await client.post(f"/manage/users/{user.id}/name", data={"display_name": "Hijack"}, headers=headers)
+    assert r.status_code == 403
     await client.post("/logout", headers=headers)
     headers = await login(client, user)  # admin
     r = await client.get("/manage/users")
@@ -260,8 +262,17 @@ async def test_household_users_admin_only(client, session, user):
     assert new is not None and new.role == models.UserRole.reader
     await client.post(f"/manage/users/{new.id}/role", headers=headers)
     await client.post(f"/manage/users/{new.id}/ai", headers=headers)
+    r = await client.post(
+        f"/manage/users/{new.id}/name", data={"display_name": "  Newton  "}, headers=headers
+    )
+    assert r.status_code == 303 and "user_saved" in r.headers["location"]
     await session.refresh(new)
-    assert new.role == models.UserRole.admin and new.ai_enabled is False
+    assert new.role == models.UserRole.admin and new.ai_enabled is False and new.display_name == "Newton"
+    r = await client.get("/manage/users")
+    assert f'action="/manage/users/{new.id}/name"' in r.text and 'value="Newton"' in r.text
+    await client.post(f"/manage/users/{new.id}/name", data={"display_name": " "}, headers=headers)
+    await session.refresh(new)
+    assert new.display_name == "new"  # blank falls back to the email's local part, as on invite
     r = await client.post(f"/manage/users/{user.id}/delete", headers=headers)
     assert "yourself" in r.headers["location"]
     await client.post(f"/manage/users/{new.id}/delete", headers=headers)
