@@ -9,7 +9,7 @@
   {# Rewrite: an icon at the end of the why (or under the bullets when the why is off) asks through the themed
      dialog, with an optional note on what was off; the note is kept as a correction. #}
   {% set rewrite %}<form class="pstory-rewrite" hx-post="/insights/paper/{{ edition.id }}/rewrite" hx-target="#{{ sum_id }}" hx-swap="outerHTML" method="post" action="/insights/paper/{{ edition.id }}/rewrite"
-      hx-confirm="Pensieve asks the model to write this summary again. Say what was off, if anything: your note is kept as a correction, so the reader profile and later why-it-matters lines learn from it too."
+      hx-confirm="Pensieve asks the model to write this summary again. Say what was off, if anything: your note is kept as a correction, so later summaries learn from it too."
       data-confirm-title="Rewrite this summary?" data-confirm-label="Rewrite" data-confirm-prompt="What was off? e.g. I don't care about funding rounds (optional)">{{ m.csrf_field(csrf_token) }}<input type="hidden" name="key" value="{{ story.key }}"><input type="hidden" name="note" value=""><button class="btn btn-sm btn-icon btn-ghost" type="submit" title="Rewrite this summary" aria-label="Rewrite this summary">{{ m.icon('refresh', 14) }}</button></form>{% endset %}
   {% if blocks.why and show_why %}
   {% set why_words = blocks.why.rsplit(' ', 1) %}
@@ -24,7 +24,7 @@
 {% elif pending %}
   <p class="muted small ai-pending" hx-get="/insights/paper/{{ edition.id }}/summary?key={{ story.key|urlencode }}&n={{ n or 1 }}" hx-trigger="every 2s" hx-target="#{{ sum_id }}" hx-swap="outerHTML" aria-busy="true"><span class="live-dot"></span> {{ 'Rewriting' if story.rewrite_of else 'Summarizing' }}… the local model usually takes a few seconds.</p>
 {% else %}
-  <p class="muted small">No summary yet{% if summaries_on is defined and not summaries_on %} (summaries are off){% else %}; it is queued, or the model missed it and the half-hourly sweep will retry{% endif %}.
+  <p class="muted small">No summary yet{% if summaries_on is defined and not summaries_on %} (summaries are off){% else %}; it is queued, or Pensieve will try again shortly{% endif %}.
   <form class="inline" hx-post="/insights/paper/{{ edition.id }}/summarize" hx-target="#{{ sum_id }}" hx-swap="outerHTML" method="post" action="/insights/paper/{{ edition.id }}/summarize">{{ m.csrf_field(csrf_token) }}<input type="hidden" name="key" value="{{ story.key }}"><button class="btn btn-sm btn-ai" type="submit">{{ m.icon('sparkle', 14) }} Summarize now</button></form></p>
 {% endif %}
 </div>

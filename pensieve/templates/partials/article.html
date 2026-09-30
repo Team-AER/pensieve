@@ -27,20 +27,15 @@
     <div id="article-cluster" class="article-cluster"></div>
   </header>
   {% if related %}
-  <aside class="memory" aria-label="From your memory">
-    <div class="memory-icon">{{ m.icon('mark', 20) }}</div>
-    <div class="col" style="gap:6px">
-      <div class="eyebrow eyebrow-ai">From your memory</div>
-      {% for r in related %}
-      <div class="memory-row">
-        {% set rid = r.item.id if r.item is defined else (r.item_id if r.item_id is defined else None) %}
-        {% set rtitle = r.item.title if r.item is defined else (r.title if r.title is defined else '') %}
-        {% if rid %}<a href="/items/{{ rid }}" hx-get="/items/{{ rid }}" hx-target="#article" hx-swap="innerHTML show:#article:top">{{ rtitle }}</a>{% else %}{{ rtitle }}{% endif %}
-        {% if r.reason is defined and r.reason %}<span class="muted">— {{ r.reason }}</span>{% endif %}
-        {% if r.read_at is defined and r.read_at %}<span class="faint">{{ r.read_at|timeago }}</span>{% endif %}
-      </div>
-      {% endfor %}
+  <aside class="memory" aria-labelledby="memory-{{ item.id }}">
+    <div class="memory-label" id="memory-{{ item.id }}">Related in your reading</div>
+    {% for r in related %}
+    <div class="memory-row">
+      <a href="/items/{{ r.item.id }}" hx-get="/items/{{ r.item.id }}" hx-target="#article" hx-swap="innerHTML show:#article:top">{{ r.item.title or '(untitled)' }}</a>
+      {% if r.item.published_at %}<span class="faint">{{ r.item.published_at|timeago }}</span>{% endif %}
+      {% if r.note and (r.note.body or r.note.quote) %}<div class="memory-note muted">Your note: {{ (r.note.body or r.note.quote)|truncate(140) }}</div>{% endif %}
     </div>
+    {% endfor %}
   </aside>
   {% endif %}
   <div id="summary-{{ item.id }}" class="summary-slot">{% if ai and ai.summary %}{% with pending=False, error=None %}{% include "partials/summary.html" %}{% endwith %}{% endif %}</div>

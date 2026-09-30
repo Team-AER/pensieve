@@ -480,7 +480,7 @@
         const bar = document.getElementById('toolbar-' + id); // empty when the offline queue took the request
         if (bar && html.trim()) { bar.innerHTML = html; if (window.htmx) window.htmx.process(bar); }
       });
-    }).catch(() => { row.classList.toggle(cls, on); toast('That did not save', { kind: 'error' }); });
+    }).catch(() => { row.classList.toggle(cls, on); toast("That didn't save", { kind: 'error' }); });
     toast(done, opts && opts.undo ? { action: { label: 'Undo', run: () => toggleRowState(action, row) } } : undefined);
     announce(done);
     return true;
@@ -535,12 +535,12 @@
     if (typeof d.starred === 'boolean') { toast(d.starred ? 'Starred' : 'Unstarred'); announce(d.starred ? 'Starred' : 'Unstarred'); }
     else if (typeof d.read === 'boolean' && !(d.read && Date.now() - autoOpenAt < 2000)) { toast(d.read ? 'Marked read' : 'Marked unread'); announce(d.read ? 'Marked read' : 'Marked unread'); }
   });
-  document.body.addEventListener('list-changed', () => toast('Unmerged from its story group'));
+  document.body.addEventListener('list-changed', () => toast('Split from its story'));
   // Feedback for actions whose responses carry no HX-Trigger: summarize, tags, notes, reader mode.
   document.body.addEventListener('htmx:afterRequest', (e) => {
     const elt = e.detail && e.detail.elt; const xhr = e.detail && e.detail.xhr; if (!elt || !xhr) return;
     const path = (e.detail.pathInfo && e.detail.pathInfo.requestPath) || '';
-    if (xhr.status >= 400) { toast(xhr.status === 403 ? 'Session expired, reload the page' : 'That didn\'t work (' + xhr.status + ')', { kind: 'error' }); return; }
+    if (xhr.status >= 400) { toast(xhr.status === 403 ? 'Your session expired. Reload to sign in again.' : 'That didn\'t work (' + xhr.status + ')', { kind: 'error' }); return; }
     if (/\/summarize$/.test(path)) toast('Summary requested', { kind: 'ai' });
     else if (/\/rewrite$/.test(path)) toast('Rewrite requested; your note is kept as a correction', { kind: 'ai' });
     else if (/\/tag$/.test(path)) { const op = elt.querySelector && elt.querySelector('[name="op"]'); toast(op && op.value === 'remove' ? 'Tag removed' : 'Tag added'); }
@@ -575,7 +575,7 @@
     const xhr = e.detail && e.detail.xhr;
     if (xhr && (xhr.status === 401 || xhr.status === 403)) window.location.reload();
   });
-  document.body.addEventListener('htmx:sendError', () => toast('You seem to be offline; changes are queued', { kind: 'error' }));
+  document.body.addEventListener('htmx:sendError', () => toast("You're offline. You can keep reading; changes will sync when you're back.", { kind: 'error' }));
 
   // ---- Mobile article footer: previous / mark read + next / note ----
   document.addEventListener('click', (e) => {
@@ -1246,7 +1246,7 @@
 
   // ---- Offline queue replay ----
   window.addEventListener('online', () => { toast('Back online'); if (navigator.serviceWorker && navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage({ type: 'replay' }); });
-  window.addEventListener('offline', () => toast('You are offline; reading works, changes queue', { kind: 'error', ttl: 5000 }));
+  window.addEventListener('offline', () => toast("You're offline. You can keep reading; changes will sync when you're back.", { kind: 'error', ttl: 5000 }));
 
   // ---- Initial state ----
   function init() {
@@ -1284,8 +1284,8 @@
   const refreshList = () => { if (window.htmx) window.htmx.trigger(document.body, 'refresh-list'); };
   const copy = (text) => {
     const done = () => toast('Link copied');
-    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, () => toast('Could not copy the link'));
-    else { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); done(); } catch (_) { toast('Could not copy the link'); } ta.remove(); }
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, () => toast("Couldn't copy the link"));
+    else { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); done(); } catch (_) { toast("Couldn't copy the link"); } ta.remove(); }
   };
   const nameOf = (el) => { const n = el.querySelector('.ellipsis, .btn-label'); return (n ? n.textContent : el.textContent).trim(); };
 
@@ -1358,7 +1358,7 @@
     const on = row.classList.contains(action === 'star' ? 'starred' : 'read');
     const path = '/items/' + id + '/' + (action === 'star' ? (on ? 'unstar' : 'star') : (on ? 'unread' : 'read'));
     post(path).then((r) => {
-      if (!r.ok) { toast('That did not save'); return; }
+      if (!r.ok) { toast("That didn't save"); return; }
       row.classList.toggle(action === 'star' ? 'starred' : 'read', !on);
       toast(action === 'star' ? (on ? 'Unstarred' : 'Starred') : (on ? 'Marked unread' : 'Marked read'));
       countsChanged();
@@ -1404,18 +1404,18 @@
       { head: name },
       { label: 'Open', run: () => { a.click(); } },
       { label: 'Mark all as read', run: () => markView('/reader/feed/' + id + '/mark-read', name) },
-      { label: 'Refresh now', run: () => post('/manage/feeds/' + id + '/refresh').then((r) => toast(r.ok ? 'Fetching ' + name : 'Could not queue a refresh')) },
+      { label: 'Refresh now', run: () => post('/manage/feeds/' + id + '/refresh').then((r) => toast(r.ok ? 'Fetching ' + name : "Couldn't queue a refresh")) },
       '-',
       { label: 'Rename…', run: () => ask({ title: 'Rename feed', body: 'Shown in the sidebar and lists.', input: name, label: 'Rename' }).then((v) => { if (typeof v === 'string' && v && v !== name) post('/manage/feeds/' + id + '/rename', { title: v }).then((r) => { if (r.ok) { toast('Renamed to ' + v); countsChanged(); } }); }) },
       { label: 'Move to folder…', run: () => {
-        const choices = folderChoices().map((c) => ({ label: c.label, run: () => post('/manage/feeds/' + id + '/move', { folder_id: c.id }).then((r) => { if (r.ok) { toast('Moved to ' + c.label); countsChanged(); } else toast('Could not move the feed'); }) }));
+        const choices = folderChoices().map((c) => ({ label: c.label, run: () => post('/manage/feeds/' + id + '/move', { folder_id: c.id }).then((r) => { if (r.ok) { toast('Moved to ' + c.label); countsChanged(); } else toast("Couldn't move the feed"); }) }));
         if (!choices.length) { toast('No folders yet. Create one under Manage → Folders.'); return; }
         const rect = a.getBoundingClientRect(); build([{ head: 'Move ' + name + ' to' }].concat(choices), rect.right, rect.top);
       } },
-      { label: 'Pause fetching', run: () => post('/manage/feeds/' + id + '/pause').then((r) => toast(r.ok ? 'Paused ' + name : 'Could not pause')) },
-      { label: 'Resume fetching', run: () => post('/manage/feeds/' + id + '/resume').then((r) => toast(r.ok ? 'Resumed ' + name : 'Could not resume')) },
+      { label: 'Pause fetching', run: () => post('/manage/feeds/' + id + '/pause').then((r) => toast(r.ok ? 'Paused ' + name : "Couldn't pause")) },
+      { label: 'Resume fetching', run: () => post('/manage/feeds/' + id + '/resume').then((r) => toast(r.ok ? 'Resumed ' + name : "Couldn't resume")) },
       '-',
-      { label: 'Unsubscribe…', danger: true, run: () => ask({ title: 'Unsubscribe from ' + name + '?', body: 'Its items are removed from your library too, including starred ones.', label: 'Unsubscribe', danger: true }).then((ok) => { if (ok === true) post('/manage/feeds/' + id + '/unsubscribe').then((r) => { if (r.ok) { toast('Unsubscribed from ' + name); countsChanged(); if (here) location.href = '/reader/unread'; } else toast('Could not unsubscribe'); }); }) },
+      { label: 'Unsubscribe…', danger: true, run: () => ask({ title: 'Unsubscribe from ' + name + '?', body: 'Its items are removed from your library too, including starred ones.', label: 'Unsubscribe', danger: true }).then((ok) => { if (ok === true) post('/manage/feeds/' + id + '/unsubscribe').then((r) => { if (r.ok) { toast('Unsubscribed from ' + name); countsChanged(); if (here) location.href = '/reader/unread'; } else toast("Couldn't unsubscribe"); }); }) },
     ];
   }
   function folderItems(a) {
@@ -1427,7 +1427,7 @@
       { label: 'Mark all as read', run: () => markView('/reader/folder/' + id + '/mark-read', name) },
       '-',
       { label: 'Rename…', run: () => ask({ title: 'Rename folder', input: name, label: 'Rename' }).then((v) => { if (typeof v === 'string' && v && v !== name) post('/manage/folders/' + id + '/rename', { name: v }).then((r) => { if (r.ok) { toast('Renamed to ' + v); countsChanged(); } }); }) },
-      { label: 'Delete folder…', danger: true, run: () => ask({ title: 'Delete ' + name + '?', body: 'Its feeds stay subscribed and move to Inbox.', label: 'Delete folder', danger: true }).then((ok) => { if (ok === true) post('/manage/folders/' + id + '/delete').then((r) => { if (r.ok) { toast('Deleted ' + name); countsChanged(); if (here) location.href = '/reader/unread'; } else toast('Could not delete the folder'); }); }) },
+      { label: 'Delete folder…', danger: true, run: () => ask({ title: 'Delete ' + name + '?', body: 'Its feeds stay subscribed and move to Inbox.', label: 'Delete folder', danger: true }).then((ok) => { if (ok === true) post('/manage/folders/' + id + '/delete').then((r) => { if (r.ok) { toast('Deleted ' + name); countsChanged(); if (here) location.href = '/reader/unread'; } else toast("Couldn't delete the folder"); }); }) },
     ];
   }
   function articleItems() {

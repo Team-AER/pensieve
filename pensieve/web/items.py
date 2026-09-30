@@ -444,7 +444,7 @@ async def unmerge(
         await ai_unmerge(session, user, item.id)
         await session.commit()
     except ImportError:
-        error = "Unmerge is not available yet."
+        error = "Splitting stories isn't available yet."
     except Exception as exc:  # noqa: BLE001
         log.warning("unmerge failed for %s: %s", item.id, exc)
         error = "Couldn't split this story out of its group."

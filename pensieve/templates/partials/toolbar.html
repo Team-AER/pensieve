@@ -21,7 +21,7 @@
 {% if item.url %}<button type="button" class="btn btn-sm toolbar-secondary" data-action="save-link" hx-post="/items/{{ item.id }}/save-link" hx-swap="none" hx-indicator="this" title="Save to My list with a full copy (b saves any link)" aria-label="Save to My list">{{ m.icon('bookmark-plus') }}<span class="btn-label">Save</span></button>{% endif %}{% endif %}
 {% if item.url %}<a class="btn btn-sm toolbar-secondary" data-action="open" href="{{ item.url }}" target="_blank" rel="noopener noreferrer" hx-boost="false" aria-label="Open original in a new tab">{{ m.icon('external') }}<span class="btn-label">Open original</span></a>{% endif %}
 {% if cluster and cluster.source_count > 1 %}
-<button type="button" class="btn btn-sm toolbar-secondary" data-action="unmerge" hx-post="/items/{{ item.id }}/unmerge" hx-target="#toolbar-{{ item.id }}" hx-swap="innerHTML" hx-confirm="Split this item out of its story group? Pensieve won't merge it again." data-confirm-title="Unmerge this item?" data-confirm-label="Unmerge" aria-label="Unmerge from its story group">{{ m.icon('split') }}<span class="btn-label">Unmerge</span></button>
+<button type="button" class="btn btn-sm toolbar-secondary" data-action="unmerge" hx-post="/items/{{ item.id }}/unmerge" hx-target="#toolbar-{{ item.id }}" hx-swap="innerHTML" hx-confirm="Split this item out of its story group? Pensieve won't merge it again." data-confirm-title="Split from story?" data-confirm-label="Split" aria-label="Split from its story group">{{ m.icon('split') }}<span class="btn-label">Split from story</span></button>
 {% endif %}
 {% include "partials/reading_menu.html" %}
 <details class="menu toolbar-more">
@@ -33,7 +33,7 @@
     {% if item.url %}<button type="button" class="menu-item" role="menuitem" hx-post="/items/{{ item.id }}/save-link" hx-swap="none">{{ m.icon('bookmark-plus', 14) }} Save to My list</button>{% endif %}{% endif %}
     {% if item.url %}<button type="button" class="menu-item" role="menuitem" hx-post="/items/{{ item.id }}/recapture" hx-target="#body-{{ item.id }}" hx-swap="innerHTML">{{ m.icon('archive', 14) }} {{ 'Capture the page again' if snapshot is defined and snapshot else 'Keep an archived copy' }}</button>{% endif %}
     {% if item.url %}<a class="menu-item" role="menuitem" href="{{ item.url }}" target="_blank" rel="noopener noreferrer" hx-boost="false">{{ m.icon('external', 14) }} Open original</a>{% endif %}
-    {% if cluster and cluster.source_count > 1 %}<button type="button" class="menu-item" role="menuitem" hx-post="/items/{{ item.id }}/unmerge" hx-target="#toolbar-{{ item.id }}" hx-swap="innerHTML" hx-confirm="Split this item out of its story group? Pensieve won't merge it again." data-confirm-title="Unmerge this item?" data-confirm-label="Unmerge">{{ m.icon('split', 14) }} Unmerge</button>{% endif %}
+    {% if cluster and cluster.source_count > 1 %}<button type="button" class="menu-item" role="menuitem" hx-post="/items/{{ item.id }}/unmerge" hx-target="#toolbar-{{ item.id }}" hx-swap="innerHTML" hx-confirm="Split this item out of its story group? Pensieve won't merge it again." data-confirm-title="Split from story?" data-confirm-label="Split">{{ m.icon('split', 14) }} Split from story</button>{% endif %}
   </div>
 </details>
 {% if error is defined and error %}<span class="toolbar-error" role="alert">{{ error }}</span>{% endif %}

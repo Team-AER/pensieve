@@ -56,7 +56,7 @@
   {% for name, n in nav.ai_tags %}
   <a class="nav-item{% if view.kind == 'tag' and view.key == name %} active{% endif %}" href="/reader/tag/{{ name|urlencode }}" {% if view.kind == 'tag' and view.key == name %}aria-current="page"{% endif %}><span class="row"><span class="ai-mark">{{ m.icon('sparkle') }}</span> <span class="ellipsis">{{ name }}</span></span><span class="count">{{ n }}</span></a>
   {% else %}
-  <div class="nav-empty muted">Tags appear here once the tagger has run.</div>
+  <div class="nav-empty muted">Suggested tags appear here as new articles arrive.</div>
   {% endfor %}
 </div>
 {% if nav.inbox %}

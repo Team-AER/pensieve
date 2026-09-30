@@ -115,8 +115,9 @@
   .tags-row form { display: inline; }
   .tag-input { width: 84px; height: 24px; border-radius: 12px; outline: 0; padding: 0 10px; font-size: var(--text-sm); }
   .tag-input:focus { width: 140px; border-style: solid; border-color: var(--accent); box-shadow: none; }
-  .memory-icon { color: var(--ai); flex: 0 0 auto; padding-top: 2px; }
-  .memory-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+  .memory-label { font-size: var(--text-sm); color: var(--muted); }
+  .memory-row { display: flex; flex-wrap: wrap; column-gap: 8px; align-items: baseline; }
+  .memory-note { flex-basis: 100%; font-size: var(--text-sm); }
   .ai-card { border: 1px solid var(--ai-line); background: var(--ai-soft); border-radius: 12px; padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; font-size: 14px; color: var(--ink); }
   .ai-card-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: var(--text-sm); }
   .ai-summary p { margin: 0 0 6px; }

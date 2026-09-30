@@ -29,14 +29,14 @@
     </ul>
 </section>
 <section class="card section" aria-labelledby="tags-h">
-  <div class="card-head"><h2 id="tags-h">Tags</h2><span class="faint">AI tags are the tagger's label set</span></div>
+  <div class="card-head"><h2 id="tags-h">Tags</h2><span class="faint">Pensieve picks AI tags from this list</span></div>
   <form method="post" action="/manage/tags" class="col">{{ m.csrf_field(csrf_token) }}
     <div class="field-row">
       <div class="field grow"><label for="new-tag">New tag</label><input class="input input-sm" id="new-tag" name="name" placeholder="e.g. Local LLM" required></div>
       <div class="field fixed"><label for="new-tag-kind">Kind</label><select class="input input-sm" id="new-tag-kind" name="kind"><option value="user">user</option><option value="ai">ai</option></select></div>
     </div>
     <div class="field-row">
-      <div class="field grow"><label for="new-tag-desc">Description</label><input class="input input-sm" id="new-tag-desc" name="description" placeholder="What the tagger should look for (ai tags)"></div>
+      <div class="field grow"><label for="new-tag-desc">Description</label><input class="input input-sm" id="new-tag-desc" name="description" placeholder="What this AI tag should cover"></div>
       <div class="field fixed"><button class="btn btn-primary" type="submit">{{ m.icon('plus', 14) }} Add</button></div>
     </div>
   </form>
@@ -49,7 +49,7 @@
       </form>
       <form method="post" action="/manage/tags/{{ t.id }}/delete" hx-confirm="Delete tag {{ t.name }}?" data-confirm-title="Delete tag?" data-confirm-label="Delete" data-confirm-danger>{{ m.csrf_field(csrf_token) }}<button class="btn btn-sm btn-icon btn-danger" type="submit" aria-label="Delete tag {{ t.name }}">{{ m.icon('trash', 14) }}</button></form>
     </li>
-  {% else %}<li>{{ m.empty_state('No tags yet', 'User tags are yours to apply; AI tags tell the tagger what to look for.', 'tag', compact=True) }}</li>{% endfor %}
+  {% else %}<li>{{ m.empty_state('No tags yet', 'User tags are yours to apply; AI tags are the ones Pensieve can suggest.', 'tag', compact=True) }}</li>{% endfor %}
   </ul>
 </section>
 </div>

@@ -202,7 +202,28 @@ async def test_related_history_failures_are_swallowed(client, session, user, mon
     fake_module(monkeypatch, "pensieve.ai.service", related_history=related_history)
     await login(client, user)
     r = await client.get(f"/items/{item.id}", headers=HX)
-    assert r.status_code == 200 and "From your memory" not in r.text
+    assert r.status_code == 200 and "Related in your reading" not in r.text
+
+
+async def test_related_panel_shows_titles_and_notes(client, session, user, monkeypatch):
+    from pensieve.ai.memory import RelatedItem
+
+    feed = await seed_feed(session, user, "Feed")
+    item = await seed_item(session, feed, "Today")
+    older = await seed_item(session, feed, "Older piece")
+    note = models.Note(user_id=user.id, item_id=older.id, body="Worth revisiting for the migration")
+    session.add(note)
+    await session.commit()
+
+    async def related_history(session_, user_, item_, limit=5):
+        return [RelatedItem(item=older, note=note, similarity=0.9)]
+
+    fake_module(monkeypatch, "pensieve.ai.service", related_history=related_history)
+    await login(client, user)
+    r = await client.get(f"/items/{item.id}", headers=HX)
+    assert r.status_code == 200 and "Related in your reading" in r.text
+    assert "Older piece" in r.text and f'hx-get="/items/{older.id}"' in r.text
+    assert "Your note: Worth revisiting for the migration" in r.text
 
 
 async def test_boosted_deep_link_renders_the_whole_reader(client, session, user):

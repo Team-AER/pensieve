@@ -5,7 +5,7 @@
   {% set blocks = ai.summary|summary_blocks %}
   <div class="ai-summary">
     {% if blocks.bullets %}<ul class="ai-summary-bullets">{% for b in blocks.bullets %}<li>{{ b }}</li>{% endfor %}</ul>{% endif %}
-    {% if blocks.why %}<p class="ai-summary-why"><span class="eyebrow eyebrow-ai">Why it matters to you</span>{{ blocks.why }}</p>{% endif %}
+    {% if blocks.why %}<p class="ai-summary-why"><span class="eyebrow eyebrow-ai">Why it matters</span>{{ blocks.why }}</p>{% endif %}
   </div>
 </section>
 {% elif error %}

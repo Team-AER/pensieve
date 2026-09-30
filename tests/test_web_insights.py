@@ -495,6 +495,10 @@ async def test_paper_summary_prefs_rewrite_and_missing(client, session, user, mo
     }
     r = await client.get(f"/insights/{edition.id}?summaries=2", headers=headers)
     assert "Queued summaries for 2 stories" in r.text
+    r = await client.get(f"/insights/{edition.id}?summaries=0", headers=headers)
+    assert "Every story already has a summary." in r.text
+    r = await client.get(f"/insights/{edition.id}?summaries=failed", headers=headers)
+    assert "Couldn&#39;t reach the AI queue" in r.text or "Couldn't reach the AI queue" in r.text
     # why "off" hides the why paragraph even when the stored summary carries one
     user.settings = dict(user.settings, summaries={"why": "off"})
     await session.commit()

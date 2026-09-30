@@ -495,6 +495,8 @@ async def write_missing_summaries(request: Request, insight_id: uuid.UUID, user:
             queued += len(chunk)
         except Exception as exc:  # noqa: BLE001
             log.warning("could not enqueue missing summaries: %s", exc)
+            if not queued:
+                return RedirectResponse(f"/insights/{edition.id}?summaries=failed", status_code=303)
             break
     return RedirectResponse(f"/insights/{edition.id}?summaries={queued}", status_code=303)
 

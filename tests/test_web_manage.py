@@ -191,7 +191,7 @@ async def test_tags_and_rules(client, session, user):
 async def test_ai_settings_and_profile(client, session, user):
     headers = await login(client, user)
     r = await client.get("/manage/ai")
-    assert r.status_code == 200 and "Reader profile" in r.text and "/manage/ai/gateway" in r.text
+    assert r.status_code == 200 and "Your interests" in r.text and "/manage/ai/gateway" in r.text
     r = await client.post(
         "/manage/ai/settings", data={"auto_file": "1", "digest": "1", "digest_time": "08:15"}, headers=headers
     )
@@ -211,7 +211,7 @@ async def test_ai_settings_and_profile(client, session, user):
     )
     assert [p.version for p in profiles] == [1, 2] and all(p.edited_by_user for p in profiles)
     r = await client.get("/manage/ai")
-    assert "Likes databases and Rust." in r.text and "v2" in r.text
+    assert "Likes databases and Rust." in r.text and "edited by you" in r.text
 
 
 async def test_token_create_and_revoke(client, session, user):
@@ -366,7 +366,7 @@ async def test_gateway_models_are_admin_editable(client, session, user, monkeypa
         r = await client.get("/manage/ai/gateway", headers={"HX-Request": "true"})
         assert r.status_code == 200
         assert 'name="fast"' in r.text and 'name="long_reasoning"' in r.text and 'type="range"' in r.text
-        assert "Save</button>" in r.text and "At once" in r.text
+        assert "Save</button>" in r.text and "Parallel requests" in r.text
 
         r = await client.post(
             "/manage/ai/models",

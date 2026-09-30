@@ -23,7 +23,7 @@
   </div>
 </form>
 <form class="ask-form" hx-post="/ask" hx-target="#ask-result" hx-swap="innerHTML" hx-indicator="#ask-spinner">
-  <label class="ask-toggle"><input type="checkbox" class="checkbox" data-toggle="#ask-body"> <span class="chip chip-ai">{{ m.icon('sparkle', 12) }} Ask my reading</span></label>
+  <label class="ask-toggle"><input type="checkbox" class="checkbox" data-toggle="#ask-body"> <span class="chip chip-ai">{{ m.icon('sparkle', 12) }} Ask about your reading</span></label>
   <div id="ask-body" class="hidden col">
     <label class="sr-only" for="ask-question">Question</label>
     <textarea class="input textarea input-sm" id="ask-question" name="question" rows="2" placeholder="What did I read about Postgres upgrades last month?">{{ q }}</textarea>

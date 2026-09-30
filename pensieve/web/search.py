@@ -132,7 +132,7 @@ async def ask(
             answer = getattr(result, "text", str(result))
             citations = list(getattr(result, "citations", []) or [])
         except ImportError:
-            error = "Ask my reading isn't available yet."
+            error = "Asking about your reading isn't available yet."
         except Exception as exc:  # noqa: BLE001
             log.warning("ask_reading failed: %s", exc)
             error = "The AI gateway didn't answer. Try again in a moment."
