@@ -250,6 +250,33 @@ async def test_paper_read_marks_every_copy_of_the_article(client, session, user)
         assert state is None or not state.is_read, title
 
 
+async def test_paper_read_link_reads_every_copy_when_the_article_opens(client, session, user):
+    """Opening a story from the paper is reading it: the article's mark-read-on-open reads its other copies too,
+    so the story leaves today's paper like Mark read. Opening it in Reader reads only the item opened."""
+    w = await seed_paper(session, user)
+    headers = await login(client, user)
+    r = await client.get("/insights")
+    edition = await session.scalar(
+        select(models.Insight).where(models.Insight.user_id == user.id, models.Insight.kind == "paper")
+    )
+    assert f'data-edition="{edition.id}"' in r.text  # reader.js refetches it after Back
+    s1, s2 = w["s1"].id, w["s2"].id
+    assert f'href="/items/{s1}?from=paper"' in r.text and f'href="/items/{s2}?from=paper"' in r.text
+    r = await client.get(f"/items/{s1}?from=paper", headers={**HX, "HX-Boosted": "true"})
+    assert f'hx-post="/items/{s1}/open?copies=1"' in r.text
+    r = await client.get(f"/items/{s1}", headers=HX)
+    assert f'hx-post="/items/{s1}/open"' in r.text
+    r = await client.post(f"/items/{s1}/open?copies=1", headers=headers | HX)
+    assert r.status_code == 200 and "item-state" in r.headers.get("HX-Trigger", "")
+    for iid in (s1, s2):
+        state = await session.get(models.ItemState, (user.id, iid))
+        assert state is not None and state.is_read
+    single = await session.get(models.ItemState, (user.id, w["single"].id))
+    assert single is None or not single.is_read
+    r = await client.get("/insights")
+    assert "Big launch everywhere" not in r.text and "Lone AI post" in r.text
+
+
 async def test_paper_front_page_daily_limits_and_sources(client, session, user):
     w = await seed_paper(session, user)
     extra = [await seed_item(session, w["a"], f"Alpha extra {n}") for n in range(3)]

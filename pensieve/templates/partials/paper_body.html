@@ -19,7 +19,7 @@
   <div class="insight-actions">{% include "partials/paper_switch.html" %}</div>
 </div>
 {% else %}
-<header class="insights-head paper-head">
+<header class="insights-head paper-head"{% if is_today %} data-edition="{{ edition.id }}"{% endif %}>
   <div class="insight-header">
     <div class="eyebrow eyebrow-ai">{{ m.icon('digest', 14) }} The paper{% if not is_today %} · earlier edition{% endif %}</div>
     <h1 class="insight-title">{{ edition.period|date_long }}</h1>

@@ -8,7 +8,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Form, HTTPException, Request
+from fastapi import APIRouter, Form, HTTPException, Query, Request
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
@@ -27,7 +27,7 @@ from pensieve.models import (
     Snapshot,
     User,
 )
-from pensieve.web.queries import get_state, get_user_item, set_read, set_starred, upsert_states
+from pensieve.web.queries import get_state, get_user_item, set_read, set_starred, upsert_states, with_copies
 from pensieve.web.templating import DB, CsrfUser, CurrentUser, hx_trigger, is_htmx, render
 
 log = logging.getLogger(__name__)
@@ -132,20 +132,25 @@ async def article(
     user: CurrentUser,
     session: DB,
     keep_unread: int = 0,
+    source: Annotated[str, Query(alias="from")] = "",
 ):
     """Render the article. Pure: marking it read is a separate ``POST /items/{id}/open`` the partial fires
-    after it renders (unless ``keep_unread=1``), so prefetches, caches and crawlers never change state."""
+    after it renders (unless ``keep_unread=1``), so prefetches, caches and crawlers never change state.
+    ``from=paper``: opened from a paper story, so opening it reads every copy, like the paper's Mark read."""
     item, feed = await load_item(session, user, item_id)
     ctx = await article_context(session, user, item, feed)
     # Opening a saved link must not archive it (read = Archive for Save link); that stays an explicit action.
     ctx["auto_open"] = not keep_unread and not ctx["is_read"] and not ctx["is_saved"]
+    ctx["open_copies"] = source == "paper"
     if is_htmx(request):
         return render(request, "partials/article.html", ctx, user=user)
     # Deep link: render the whole reader with the article open.
     from pensieve.web.reader import render_reader, resolve_view
 
     view = await resolve_view(session, user, "all", None)
-    article_html = render(request, "partials/article.html", ctx, user=user).body.decode()
+    article_html = render(
+        request, "partials/article.html", {**ctx, "embedded": True}, user=user
+    ).body.decode()
     return await render_reader(request, session, user, view, article_html=article_html)
 
 
@@ -155,13 +160,16 @@ async def open_item(
     item_id: uuid.UUID,
     user: CsrfUser,
     session: DB,
+    copies: int = 0,
 ):
-    """The read side effect of opening an article: marks it read once and returns the refreshed toolbar."""
+    """The read side effect of opening an article: marks it read once and returns the refreshed toolbar.
+    ``copies=1`` (opened from the paper) reads the story's other copies too."""
     item, feed = await load_item(session, user, item_id)
     state = await get_state(session, user, item.id)
     headers = None
     if not (state and state.is_read):
-        await set_read(session, user.id, [item.id], True)
+        ids = await with_copies(session, user.id, [item.id]) if copies else [item.id]
+        await set_read(session, user.id, ids, True)
         await session.commit()
         headers = state_headers(item, is_read=True)
     return await _toolbar_response(request, session, user, item, feed, headers)

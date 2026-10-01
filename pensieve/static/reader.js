@@ -208,7 +208,7 @@
   document.body.addEventListener('htmx:beforeRequest', (e) => {
     progressStart();
     const src = e.detail && e.detail.elt;
-    if (src && src.getAttribute && /\/open$/.test(src.getAttribute('hx-post') || '')) autoOpenAt = Date.now();
+    if (src && src.getAttribute && /\/open(\?|$)/.test(src.getAttribute('hx-post') || '')) autoOpenAt = Date.now();
     const t = e.detail && e.detail.target;
     if (t && (t.id === 'list' || t.id === 'article' || t.id === 'nav')) t.setAttribute('aria-busy', 'true');
     const elt = e.detail && e.detail.elt;
@@ -220,8 +220,16 @@
     if (t && t.removeAttribute) t.removeAttribute('aria-busy');
     const elt = e.detail && e.detail.elt;
     if (elt && elt.removeAttribute) elt.removeAttribute('aria-busy');
+    // The article's mark-read-on-open fires once: a snapshot of the page (Back, Forward) must not read it again.
+    if (elt && elt.hidden && /\/open(\?|$)/.test(elt.getAttribute('hx-post') || '')) elt.remove();
   });
   document.body.addEventListener('htmx:sendAbort', () => progressEnd());
+  // htmx snapshots the page for Back while the navigation that leaves it is still in flight: the page came back with
+  // the clicked button spinning (and, busy, unclickable) and the progress bar stuck. Snapshot them idle.
+  document.body.addEventListener('htmx:beforeHistorySave', () => {
+    $$('.btn[aria-busy], #list[aria-busy], #article[aria-busy], #nav[aria-busy]').forEach((n) => n.removeAttribute('aria-busy'));
+    const p = progressEl(); if (p) p.classList.remove('on', 'done');
+  });
   // Skeleton rows while a list pane reloads (only for full list swaps, not paging).
   document.body.addEventListener('htmx:beforeRequest', (e) => {
     const t = e.detail && e.detail.target;
@@ -827,13 +835,17 @@
   // Back onto a reader page restores htmx's snapshot of it, taken before whatever was read since (in the paper, in
   // another tab): bring the rows' read and star marks and the counts up to date in place. Refetching the list
   // instead would drop the pages loaded below and the reader's place in them.
-  // htmx snapshots the page's markup and the window's scroll, not a pane's own: keep the list pane's in the markup.
+  // htmx snapshots the page's markup and the window's scroll, not an element's own: keep the list pane's and the
+  // page body's (the paper scrolls inside main on wide screens) in the markup.
+  const OWN_SCROLL = ['#list-body', '#main'];
   document.body.addEventListener('htmx:beforeHistorySave', () => {
-    const lb = $('#list-body'); if (lb) lb.dataset.scrollTop = String(Math.round(lb.scrollTop));
+    OWN_SCROLL.forEach((sel) => { const el = $(sel); if (el && el.scrollTop) el.dataset.scrollTop = String(Math.round(el.scrollTop)); });
   });
   document.body.addEventListener('htmx:historyRestore', () => {
-    const lb = $('#list-body');
-    if (lb && lb.dataset.scrollTop) { lb.scrollTop = Number(lb.dataset.scrollTop); delete lb.dataset.scrollTop; }
+    OWN_SCROLL.forEach((sel) => {
+      const el = $(sel);
+      if (el && el.dataset.scrollTop) { el.scrollTop = Number(el.dataset.scrollTop); delete el.dataset.scrollTop; }
+    });
     const shown = $$('#list-body .item[data-id]');
     if (!shown.length) return;
     if (window.htmx) window.htmx.trigger(document.body, 'counts-changed');
@@ -845,6 +857,23 @@
         shown.forEach((r) => { r.classList.toggle('read', read.has(r.dataset.id)); r.classList.toggle('starred', starred.has(r.dataset.id)); });
       })
       .catch(() => {});
+  });
+  // Today's paper leaves out what has been read anywhere, but its snapshot predates the story just opened from it:
+  // fetch the same edition again (no recompile) so stories read since leave, the next one taking the opened one's
+  // place on screen (paperPlace). A Back that missed htmx's cache already came from the server.
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest && e.target.closest('.pstory[id] a[href^="/items/"]');
+    const ins = a && $('#insight');
+    if (ins) ins.dataset.opened = a.closest('.pstory[id]').id;
+  });
+  document.body.addEventListener('htmx:historyRestore', (e) => {
+    const ins = $('#insight'), head = ins && $('[data-edition]', ins);
+    if (!head || !window.htmx || (e.detail && e.detail.cacheMiss)) return;
+    const opened = ins.dataset.opened; delete ins.dataset.opened;
+    setTimeout(() => { // after htmx puts the window's scroll back (phones)
+      const anchor = (opened && document.getElementById(opened)) || $$('.pstory[id], .psection[id]', ins).find((n) => n.getBoundingClientRect().bottom > 0);
+      window.htmx.ajax('GET', '/insights/' + head.dataset.edition, { source: anchor || ins, target: '#insight', swap: 'innerHTML' });
+    }, 0);
   });
   document.body.addEventListener('paper-tuned-more', () => toast('More like this: its tag and sources gained weight'));
   document.body.addEventListener('paper-tuned-less', () => toast('Less of this: its tag and sources lost weight'));

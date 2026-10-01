@@ -314,7 +314,13 @@ env = _build_env()
 
 
 def is_htmx(request: Request) -> bool:
-    return request.headers.get("hx-request") == "true" and request.headers.get("hx-boosted") != "true"
+    """A partial swap. Boosted navigation and a Back that missed htmx's history cache both want the whole page."""
+    h = request.headers
+    return (
+        h.get("hx-request") == "true"
+        and h.get("hx-boosted") != "true"
+        and h.get("hx-history-restore-request") != "true"
+    )
 
 
 def render(

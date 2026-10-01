@@ -1,11 +1,13 @@
 {% import "_macros.html" as m %}
-<div id="article-toolbar" hx-swap-oob="innerHTML" class="grow">
+{# Out of band when swapped into a reader page; left in place inside a full page (reader.js moves it to the pane head),
+   where a boosted swap would otherwise look for #article-toolbar on the page being left and drop the toolbar. #}
+<div id="article-toolbar"{% if not (embedded is defined and embedded) %} hx-swap-oob="innerHTML"{% endif %} class="grow">
   <div class="toolbar" id="toolbar-{{ item.id }}" role="toolbar" aria-label="Article actions">
     {% include "partials/toolbar.html" %}
   </div>
 </div>
 <article class="article" id="article-{{ item.id }}" data-id="{{ item.id }}" data-url="{{ item.url or '' }}" data-cluster="{{ cluster.id if cluster else '' }}" data-read="{{ 1 if is_read else 0 }}" data-starred="{{ 1 if is_starred else 0 }}" aria-labelledby="article-title-{{ item.id }}">
-  {% if auto_open is defined and auto_open %}<span hidden hx-post="/items/{{ item.id }}/open" hx-trigger="load" hx-target="#toolbar-{{ item.id }}" hx-swap="innerHTML"></span>{% endif %}
+  {% if auto_open is defined and auto_open %}<span hidden hx-post="/items/{{ item.id }}/open{% if open_copies is defined and open_copies %}?copies=1{% endif %}" hx-trigger="load" hx-target="#toolbar-{{ item.id }}" hx-swap="innerHTML"></span>{% endif %}
   <header class="article-header">
     <div class="article-meta">
       {% if is_saved %}

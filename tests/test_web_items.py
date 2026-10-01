@@ -237,6 +237,16 @@ async def test_boosted_deep_link_renders_the_whole_reader(client, session, user)
     assert r.status_code == 200 and "Deep link" in r.text
     assert "<html" in r.text and 'id="article-toolbar"' in r.text and "pane-nav" in r.text
     assert "Mark read" in r.text  # the toolbar is present, with the read toggle
+    # ...and not out of band: the boosted swap would look for #article-toolbar on the page being left (the paper,
+    # the digest), find none and drop the toolbar, and the mark-read-on-open aimed at it with it.
+    assert 'id="article-toolbar" hx-swap-oob' not in r.text
+    assert f'hx-post="/items/{item.id}/open"' in r.text
+    # The pane swap still sends it out of band, into the reader's head.
+    r = await client.get(f"/items/{item.id}", headers=HX)
+    assert 'id="article-toolbar" hx-swap-oob="innerHTML"' in r.text
+    # A Back that missed htmx's history cache asks the server for the page: the whole page, not the partial.
+    r = await client.get(f"/items/{item.id}", headers={**HX, "HX-History-Restore-Request": "true"})
+    assert "<html" in r.text and "pane-nav" in r.text
 
 
 async def test_thin_items_open_reader_view_automatically(client, session, user, monkeypatch):

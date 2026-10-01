@@ -23,13 +23,13 @@
     <ul class="pstory-sources" aria-label="Copies of this story">
       {% for mbr in story.members %}
       <li class="pstory-source{% if mbr.read %} read{% endif %}">
-        <a href="/items/{{ mbr.item_id }}" class="plain">{{ mbr.title }}</a>
+        <a href="/items/{{ mbr.item_id }}?from=paper" class="plain">{{ mbr.title }}</a>
         <span class="faint">{{ mbr.feed }} · {{ mbr.published_at|timeago }}</span>
       </li>
       {% endfor %}
     </ul>
     <div class="pstory-actions">
-      <a class="btn btn-sm" href="/items/{{ story.item_id }}">{{ m.icon('reader', 14) }} Read</a>
+      <a class="btn btn-sm" href="/items/{{ story.item_id }}?from=paper">{{ m.icon('reader', 14) }} Read</a>
       {% if not story.read %}
       <form hx-post="/insights/paper/{{ edition.id }}/read" hx-target="#{{ sid }}" hx-swap="outerHTML" method="post" action="/insights/paper/{{ edition.id }}/read">{{ m.csrf_field(csrf_token) }}<input type="hidden" name="key" value="{{ story.key }}"><button class="btn btn-sm" type="submit" title="Mark every copy read; it leaves today's paper">{{ m.icon('check-circle', 14) }} Mark read</button></form>
       {% endif %}
