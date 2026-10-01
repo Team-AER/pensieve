@@ -7,6 +7,7 @@
     <span class="pstory-dot" aria-hidden="true"></span>
     <span class="pstory-main">
       <span class="pstory-title">{{ story.title }}</span>
+      {% if section is defined and section and section.kind == 'front' and story.summary and config.show_summaries %}{% set dek = (story.summary|summary_blocks).bullets %}{% if dek %}<span class="pstory-dek">{{ dek[0] }}</span>{% endif %}{% endif %}
       <span class="pstory-meta">
         {% if story.sources > 1 %}<span class="sources" role="note">{{ story.sources }} sources</span>{% if story.copies > story.sources %}<span class="faint">· {{ story.copies }} copies</span>{% endif %}{% else %}<span class="faint">{{ story.feeds[0].title if story.feeds else '' }}</span>{% endif %}
         {% if story.tag and (section is not defined or section is none or section.kind != 'tag' or story.tag != section.key) %}<span class="chip chip-ai chip-sm">{{ story.tag }}</span>{% endif %}

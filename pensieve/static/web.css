@@ -318,6 +318,15 @@
   .tune-rows { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 6px 0; }
   .tune-row { display: inline-flex; align-items: center; gap: 6px; }
   .tune-weight { width: 72px; }
+  /* The front page reads like one: full-size stories with a dek. The sections under it are plain headlines. */
+  .psection-front .psection-head { border-bottom-color: var(--accent); }
+  .pstory-dek { font-size: var(--text-md); line-height: 1.45; color: var(--ink-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .pstory[open] .pstory-dek { display: none; }
+  .psection:not(.psection-front) .pstories { gap: 6px; }
+  .psection:not(.psection-front) .pstory-head { padding: 9px 14px; }
+  .psection:not(.psection-front) .pstory-title { font-size: 15.5px; }
+  .psection:not(.psection-front) .pstory-dot { margin-top: 7px; }
+  .psection:not(.psection-front) .pstory-main { gap: 2px; }
   .pbrief { border-top: 1px dashed var(--line-3); padding-top: 8px; }
   .pbrief-head { font-size: var(--text-md); font-weight: 600; color: var(--muted); cursor: pointer; padding: 4px 0; }
   .pstories-brief { margin-top: 8px; }
@@ -330,7 +339,15 @@
   .section-row .check { min-height: 0; padding: 0; }
   .section-limit { height: 30px; padding: 0 8px; }
   .section-row [data-move="up"] .ic { transform: rotate(-90deg); }
-  .muted-feeds { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 2px 12px; margin-top: 6px; max-height: 220px; overflow-y: auto; }
+  .source-rows { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; max-height: 300px; overflow-y: auto; }
+  .source-row { display: grid; grid-template-columns: minmax(0, 1fr) 76px 44px; gap: 6px; align-items: center; padding: 3px 6px; border-radius: 8px; }
+  .source-row:nth-child(even) { background: var(--panel); }
+  .source-row-head { font-size: var(--text-sm); color: var(--faint); position: sticky; top: 0; z-index: 1; background: var(--card); }
+  .source-row-head span:not(:first-child) { text-align: center; }
+  .source-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .source-name .faint { font-size: var(--text-sm); }
+  .source-limit { height: 30px; padding: 0 8px; }
+  .source-mute { justify-content: center; min-height: 0; padding: 0; }
 
   /* ---- Error page ---- */
   .error-page { min-height: 100dvh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 40px 24px; text-align: center; }
@@ -753,6 +770,7 @@
     .psection-actions .btn-label { display: none; }
     .pstory-body { padding-left: 14px; }
     .section-row { grid-template-columns: minmax(0, 1fr) 64px 36px 36px; }
+    .source-row { grid-template-columns: minmax(0, 1fr) 64px 44px; }
     .story-title { display: block; padding: 2px 0; }
     .insight-card { padding: 16px; }
 

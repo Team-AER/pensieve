@@ -140,6 +140,10 @@ async def seed_paper(session, user):
 
 async def test_paper_compiles_on_open_and_renders_sections(client, session, user):
     w = await seed_paper(session, user)
+    user.settings = {
+        "paper": {"front_page": 0, "min_section": 1}
+    }  # three stories would all make the front page
+    await session.commit()
     headers = await login(client, user)
     r = await client.get("/insights")
     assert r.status_code == 200 and "The paper" in r.text
@@ -183,6 +187,8 @@ async def test_paper_compiles_on_open_and_renders_sections(client, session, user
 
 async def test_paper_drops_stories_read_in_reader(client, session, user):
     w = await seed_paper(session, user)
+    user.settings = {"paper": {"front_page": 0, "min_section": 1}}
+    await session.commit()
     headers = await login(client, user)
     r = await client.get("/insights")
     assert 'id="sec-apple"' in r.text and "3 stories" in r.text
@@ -242,6 +248,51 @@ async def test_paper_read_marks_every_copy_of_the_article(client, session, user)
     for title, iid in unread.items():
         state = await session.get(models.ItemState, (user.id, iid))
         assert state is None or not state.is_read, title
+
+
+async def test_paper_front_page_daily_limits_and_sources(client, session, user):
+    w = await seed_paper(session, user)
+    extra = [await seed_item(session, w["a"], f"Alpha extra {n}") for n in range(3)]
+    session.add_all(
+        [models.ItemAI(user_id=user.id, item_id=i.id, tags=["ai"], confidences={"ai": 0.5}) for i in extra]
+    )
+    user.settings = {"paper": {"front_page": 2}}
+    await session.commit()
+    headers = await login(client, user)
+    r = await client.get("/insights")
+    assert r.status_code == 200
+    # the front page comes first (chip and section) and shows the summary's first bullet as a dek
+    assert r.text.index('href="#sec-front-page"') < r.text.index('href="#sec-ai"')
+    assert r.text.index('id="sec-front-page"') < r.text.index('id="sec-ai"')
+    assert "Your best 2 from every section" in r.text and 'class="pstory-dek">Launch bullet<' in r.text
+    front = r.text.split('id="sec-front-page"')[1].split("<section")[0]
+    assert "Mark front page read" in front and "Turn off section" not in front
+    # Customize lists sources busiest first with their volume and an "A day" box
+    sources = r.text.split('class="source-rows"')[1]
+    assert sources.index("Alpha") < sources.index("Beta") and "5 a week" in sources
+    assert f'name="feed_limit:{w["a"].id}"' in sources and 'name="front_page"' in r.text
+    edition = await session.scalar(
+        select(models.Insight).where(models.Insight.user_id == user.id, models.Insight.kind == "paper")
+    )
+    r = await client.post(
+        f"/insights/paper/{edition.id}/read", data={"section": "front-page"}, headers=headers | HX
+    )
+    assert r.status_code == 200 and 'id="sec-front-page"' not in r.text
+    # a daily limit of 1 on Alpha: one Alpha single stays, the rest are held back and named in the masthead
+    r = await client.post(
+        "/insights/paper/settings",
+        data={"group_by": "tag", "window_hours": "24", "per_section": "4", "min_sources": "1", "front_page": "0",
+              "show_summaries": "1", "auto_sections": "1", f"feed_limit:{w['a'].id}": "1",
+              f"feed_limit:{w['b'].id}": ""},
+        headers=headers,
+    )  # fmt: skip
+    assert r.status_code == 303
+    await session.refresh(user)
+    cfg = user.settings["paper"]
+    assert cfg["front_page"] == 0 and cfg["feed_limits"] == {str(w["a"].id): 1}
+    r = await client.get("/insights")
+    # Alpha has four singles: its best one stays (a read one first), three are held back and named in the masthead
+    assert "Daily limits held back 3 stories" in r.text and "Alpha 3" in r.text
 
 
 async def test_paper_settings_reorder_hide_and_mute(client, session, user):

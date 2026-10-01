@@ -391,7 +391,8 @@ async def test_daily_paper_job(session, user, gateway):
     row = await ai_job(session, "paper", user.id)
     assert row.status == "done" and "2 stories" in row.last_error and gateway.chat_calls == []
     edition = await session.scalar(select(models.Insight).where(models.Insight.kind == "paper"))
-    assert edition is not None and [s["key"] for s in edition.body["sections"]] == ["ai", "other"]
+    # two unread stories both fit on the front page, so no section is left under it
+    assert edition is not None and [s["key"] for s in edition.body["sections"]] == ["front-page"]
 
 
 async def test_jobs_skip_when_ai_disabled(session, user, gateway):

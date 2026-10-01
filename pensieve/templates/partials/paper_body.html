@@ -26,6 +26,7 @@
     <div class="paper-stand">
       {{ body.story_count }} stor{{ 'y' if body.story_count == 1 else 'ies' }} from {{ body.item_count }} item{{ 's' if body.item_count != 1 }} in the last {{ body.window.hours if body.window and body.window.hours else config.window_hours }} hours{% if body.unread_count is defined %} · {{ body.unread_count }} unread{% endif %}
       · updated {{ edition.generated_at|timeago }}
+      {% if held_back %}{% set held_n = held_back|sum(attribute='count') %}<br><button type="button" class="btn-link" data-open-dialog="#paper-settings" title="Daily limits keep only a busy source's best stories; change them under Customize → Sources">Daily limits held back {{ held_n }} stor{{ 'y' if held_n == 1 else 'ies' }}</button><span class="faint">: {% for h in held_back %}{{ h.title }} {{ h.count }}{{ ' · ' if not loop.last }}{% endfor %}. They stay unread in Reader.</span>{% endif %}
       {% if missing_summaries and summaries_on %} · <form class="inline" method="post" action="/insights/paper/{{ edition.id }}/summaries" hx-boost="false">{{ m.csrf_field(csrf_token) }}<button class="btn-link" type="submit" title="Queue the eager summaries again for every story that has none">{{ missing_summaries }} without a summary · write them now</button></form>{% endif %}
     </div>
     {% if body.lede %}<p class="insight-summary">{{ body.lede }}</p>{% endif %}

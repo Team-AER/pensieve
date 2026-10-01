@@ -17,13 +17,31 @@ Body shape of an ``Insight`` of kind ``paper``::
 
 A ``Story`` is ``{"key", "cluster_id", "item_id", "title", "sources", "feeds": [{"id", "title"}], "tags",
 "tag", "published_at", "summary", "summary_item_id", "read", "members": [{"item_id", "title", "feed_id",
-"feed", "published_at", "read"}], "folded": bool, "boost": float}``. ``brief`` holds the stories whose
-*effective* sources (``sources + boost``) are under ``min_sources``.
+"feed", "published_at", "read"}], "folded": bool, "boost": float, "interest": float, "score": float,
+"kept": bool}``. ``brief`` holds the stories whose *effective* sources (``sources + boost``) are under
+``min_sources``.
+
+Ranking. ``interest`` is the digest's *affinity* (``insights.Affinity``: closeness to what the reader opens and
+stars) of the story's best copy. ``score`` = the story's interest percentile within the edition (0..1, so the
+embedding model's cosine scale does not matter) + ``SOURCE_WEIGHT`` per extra source (up to four) +
+``TUNE_WEIGHT`` * boost. Sections list stories by score, but each further single-source story from a feed already
+listed above loses ``SAME_SOURCE_STEP``, so one busy feed cannot fill a section's visible rows.
+
+Front page (``config["front_page"]`` stories, 0 = off): the best-scoring unread stories across every section, at
+most ``FRONT_PER_SOURCE`` from one feed, moved out of their sections into a first section of kind ``front``.
+In tag mode, a tag left with fewer than ``config["min_section"]`` stories after that joins "Everything else"
+(its rows show their tag), so a day of thirty tags does not become thirty one-line sections.
+
+Daily limits (``config["feed_limits"] = {feed_id: n}``): a limited feed's single-source stories are cut to its
+``n`` a day (scaled to the window) best, already-read ones counted first so the day's picks stay put while the
+reader works through them. The rest leave the paper (``body["held_back"]``; still unread in Reader), and the
+ones kept are marked ``kept``: never folded behind "Show more" and never sent to "In brief". Stories with more
+than one source are never held back.
 
 Tuning ("more of this" / "less of this") lives in ``config["tuning"] = {"tags": {tag: w}, "feeds": {id: w}}``,
 ``w`` in [-3, 3]. A story's ``boost`` is its tags' weights (scaled by how strongly it carries each tag) plus the
-mean weight of its feeds; it counts like extra (or missing) sources when ranking and when splitting main from
-brief, and orders the automatic sections. Every tune is also recorded as a ``Correction`` so the profile refresh
+mean weight of its feeds; it counts like extra (or missing) sources when splitting main from brief, adds to the
+score, and orders the automatic sections. Every tune is also recorded as a ``Correction`` so the profile refresh
 sees it and the why-it-matters follows.
 """
 
@@ -41,19 +59,39 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from pensieve import models
 from pensieve.ai.common import utcnow
-from pensieve.ai.insights import _ai_rows, _hidden_ids, _items_between, _tz, _upsert_insight, digest_window
+from pensieve.ai.insights import (
+    _ai_rows,
+    _hidden_ids,
+    _items_between,
+    _tz,
+    _upsert_insight,
+    digest_window,
+    load_affinity,
+)
 
 log = logging.getLogger(__name__)
 
 KIND = "paper"
 WINDOW_CHOICES = (24, 48, 72)
 GROUP_CHOICES = ("tag", "folder")
-DEFAULT_PER_SECTION = 8
+DEFAULT_PER_SECTION = 4
 MAX_PER_SECTION = 50
 DEFAULT_MIN_SOURCES = 1
 MAX_MIN_SOURCES = 10
+DEFAULT_FRONT_PAGE = 10
+DEFAULT_MIN_SECTION = 3
+MAX_MIN_SECTION = 10
+MAX_FRONT_PAGE = 30
+FRONT_PER_SOURCE = 2
+MAX_FEED_LIMIT = 50
+SOURCE_WEIGHT = 0.15
+MAX_EXTRA_SOURCES = 4
+TUNE_WEIGHT = 0.2
+SAME_SOURCE_STEP = 0.1
 OTHER_KEY = "other"
 OTHER_TITLE = "Everything else"
+FRONT_KEY = "front-page"
+FRONT_TITLE = "Front page"
 TUNE_MAX = 3.0
 TUNE_STEP_TAG = 1.0
 TUNE_STEP_FEED = 0.5
@@ -132,10 +170,23 @@ def paper_config(user: models.User | None) -> dict[str, Any]:
         weight = _clamp_weight(w)
         if weight:
             tuning["feeds"][key] = weight
+    limits_raw = raw.get("feed_limits") if isinstance(raw.get("feed_limits"), dict) else {}
+    limits: dict[str, int] = {}
+    for fid, n in limits_raw.items():
+        try:
+            key = str(uuid.UUID(str(fid)))
+        except ValueError:
+            continue
+        limit = _clamp(n, 0, MAX_FEED_LIMIT, 0)
+        if limit:
+            limits[key] = limit
     return {
         "group_by": raw.get("group_by") if raw.get("group_by") in GROUP_CHOICES else "tag",
         "window_hours": _nearest_window(raw.get("window_hours")),
         "per_section": _clamp(raw.get("per_section"), 1, MAX_PER_SECTION, DEFAULT_PER_SECTION),
+        "front_page": _clamp(raw.get("front_page"), 0, MAX_FRONT_PAGE, DEFAULT_FRONT_PAGE),
+        "min_section": _clamp(raw.get("min_section"), 1, MAX_MIN_SECTION, DEFAULT_MIN_SECTION),
+        "feed_limits": limits,
         "min_sources": _clamp(raw.get("min_sources"), 1, MAX_MIN_SOURCES, DEFAULT_MIN_SOURCES),
         "show_summaries": bool(raw.get("show_summaries", True)),
         "hide_read": bool(raw.get("hide_read", False)),
@@ -163,6 +214,8 @@ def config_from_form(form: Any, current: dict[str, Any]) -> dict[str, Any]:
     out["group_by"] = group_by if group_by in GROUP_CHOICES else current["group_by"]
     out["window_hours"] = _nearest_window(form.get("window_hours") or current["window_hours"])
     out["per_section"] = _clamp(form.get("per_section"), 1, MAX_PER_SECTION, current["per_section"])
+    out["front_page"] = _clamp(form.get("front_page"), 0, MAX_FRONT_PAGE, current["front_page"])
+    out["min_section"] = _clamp(form.get("min_section"), 1, MAX_MIN_SECTION, current["min_section"])
     out["min_sources"] = _clamp(form.get("min_sources"), 1, MAX_MIN_SOURCES, current["min_sources"])
     for key in ("show_summaries", "hide_read", "auto_sections"):
         out[key] = str(form.get(key) or "") in {"1", "on", "true"}
@@ -187,6 +240,12 @@ def config_from_form(form: Any, current: dict[str, Any]) -> dict[str, Any]:
         except ValueError:
             continue
     out["muted_feeds"] = muted
+    # a blank or 0 "a day" box lifts that feed's limit; feeds not in the form keep theirs
+    limits = dict(current["feed_limits"])
+    for name in form:
+        if name.startswith("feed_limit:"):
+            limits[name[len("feed_limit:") :]] = _clamp(form.get(name), 0, MAX_FEED_LIMIT, 0)
+    out["feed_limits"] = limits
     tuning = {"tags": dict(current["tuning"]["tags"]), "feeds": dict(current["tuning"]["feeds"])}
     for name in form:
         if name.startswith("tune_tag:"):
@@ -297,11 +356,15 @@ async def without_read(session: AsyncSession, user_id: uuid.UUID, body: dict[str
     kept, dropped = [], 0
     for sec in sections:
         # Fold again from the top: the section keeps showing as many stories as before, so reading the visible
-        # ones pulls the next ones up instead of leaving only "Show more".
-        shown = sum(1 for s in sec.get("stories", []) if not s.get("folded"))
-        stories = [
-            dict(s, folded=n >= shown) for n, s in enumerate(s for s in sec.get("stories", []) if unread(s))
-        ]
+        # ones pulls the next ones up instead of leaving only "Show more". Kept stories (daily limits) always
+        # show and take no row from the others.
+        shown = sum(1 for s in sec.get("stories", []) if not s.get("folded") and not s.get("kept"))
+        stories, n = [], 0
+        for s in sec.get("stories", []):
+            if not unread(s):
+                continue
+            stories.append(dict(s, folded=not s.get("kept") and n >= shown))
+            n += not s.get("kept")
         brief = [s for s in sec.get("brief", []) if unread(s)]
         dropped += len(sec.get("stories", [])) + len(sec.get("brief", [])) - len(stories) - len(brief)
         if not stories and not brief:
@@ -360,6 +423,7 @@ async def compile_paper(
     ai_rows = await _ai_rows(session, user.id, ids)
     read_ids = await _read_ids(session, user.id, ids)
     membership = await _memberships(session, user.id, ids)
+    affinity = await load_affinity(session, user.id, ids)
 
     # one story per cluster (members limited to the window), plus one per standalone item
     groups: dict[uuid.UUID | None, list] = defaultdict(list)
@@ -416,6 +480,11 @@ async def compile_paper(
                 "summary_item_id": str(summary_item.id) if summary_item else None,
                 "read": all(member_read.values()),
                 "boost": 0.0,
+                "interest": max(
+                    affinity(m.id, m.feed_id, ai_rows[m.id].tags if m.id in ai_rows else []) for m in members
+                ),
+                "score": 0.0,
+                "kept": False,
                 "members": [
                     {
                         "item_id": str(m.id),
@@ -433,6 +502,14 @@ async def compile_paper(
 
     for story in stories:
         story["boost"] = story_boost(story, cfg["tuning"])
+    percentiles = _percentiles([s["interest"] for s in stories])
+    for story, pct in zip(stories, percentiles, strict=True):
+        extra_sources = min(story["sources"], 1 + MAX_EXTRA_SOURCES) - 1
+        story["score"] = round(pct + SOURCE_WEIGHT * extra_sources + TUNE_WEIGHT * story["boost"], 4)
+    # best first; a tie keeps the newest story first (items arrive newest first, and sorts are stable)
+    stories.sort(key=lambda s: -s["score"])
+
+    stories, held_back = _apply_feed_limits(stories, cfg, feeds)
 
     # section of a story: its heaviest tag among the enabled sections (tag mode) or its feed's folder
     configured = {s["key"]: s for s in cfg["sections"]}
@@ -456,12 +533,8 @@ async def compile_paper(
     for story in stories:
         by_section[section_of(story)].append(story)
 
-    def effective_sources(story: dict[str, Any]) -> float:
-        return story["sources"] + story["boost"]
-
-    def rank(story: dict[str, Any]) -> tuple:
-        top = max(story["tag_weight"].values(), default=0.0)
-        return (-effective_sources(story), -story["sources"], -story["copies"], -top)
+    def in_main(story: dict[str, Any]) -> bool:
+        return story["kept"] or story["sources"] + story["boost"] >= cfg["min_sources"]
 
     tag_tuning = cfg["tuning"]["tags"]
     ordered_keys = [k for k in enabled_keys if k in by_section]
@@ -480,19 +553,48 @@ async def compile_paper(
     if OTHER_KEY in by_section:
         ordered_keys.append(OTHER_KEY)
 
+    front: list[dict[str, Any]] = []
+    if cfg["front_page"]:
+        candidates = [s for k in ordered_keys for s in by_section[k] if in_main(s) and not s["read"]]
+        candidates.sort(key=lambda s: -s["score"])
+        front = _spread(candidates, cfg["front_page"], FRONT_PER_SOURCE)
+        picked = {s["key"] for s in front}
+        for k in ordered_keys:
+            by_section[k] = [s for s in by_section[k] if s["key"] not in picked]
+
+    if cfg["group_by"] == "tag" and cfg["min_section"] > 1:
+        small = [k for k in ordered_keys if k != OTHER_KEY and 0 < len(by_section[k]) < cfg["min_section"]]
+        for k in small:
+            by_section[OTHER_KEY].extend(by_section.pop(k))
+            ordered_keys.remove(k)
+        if small and OTHER_KEY not in ordered_keys:
+            ordered_keys.append(OTHER_KEY)
+
     sections: list[dict[str, Any]] = []
-    for key in ordered_keys:
-        # stable sort: ties on every rank key keep the newest story first
-        rows = sorted(
-            sorted(by_section.get(key, []), key=lambda s: s["published_at"], reverse=True), key=rank
+    if front:
+        sections.append(
+            {
+                "key": FRONT_KEY,
+                "title": FRONT_TITLE,
+                "kind": "front",
+                "count": len(front),
+                "unread": len(front),
+                "stories": front,
+                "brief": [],
+            }
         )
+    for key in ordered_keys:
+        rows = by_section.get(key, [])
         if not rows:
             continue
+        rows = sorted(rows, key=lambda s: -s["score"])
         limit = (configured.get(key) or {}).get("limit") or cfg["per_section"]
-        main = [s for s in rows if effective_sources(s) >= cfg["min_sources"]]
-        brief = [s for s in rows if effective_sources(s) < cfg["min_sources"]]
-        for n, s in enumerate(main):
-            s["folded"] = n >= limit
+        main = _spread([s for s in rows if in_main(s)])
+        brief = [s for s in rows if not in_main(s)]
+        shown = 0
+        for s in main:
+            s["folded"] = not s["kept"] and shown >= limit
+            shown += not s["kept"]
         kind = "other" if key == OTHER_KEY else ("folder" if cfg["group_by"] == "folder" else "tag")
         sections.append(
             {
@@ -513,12 +615,87 @@ async def compile_paper(
         "story_count": len(stories),
         "item_count": len(items),
         "unread_count": len(ids) - sum(1 for i in ids if i in read_ids),
+        "held_back": held_back,
         "window": {"start": start.isoformat(), "end": end.isoformat(), "hours": cfg["window_hours"]},
         "hidden": hidden_keys,
         "lede": lede,
         "config": cfg,
         "compiled_at": utcnow().isoformat(),
     }
+
+
+def _percentiles(values: list[float]) -> list[float]:
+    """Each value's rank among ``values`` as 0..1 (ties share their mean rank; a lone value or all-equal is 0.5)."""
+    n = len(values)
+    if n < 2:
+        return [0.5] * n
+    below = Counter()
+    same = Counter(values)
+    ordered = sorted(same)
+    seen = 0
+    for v in ordered:
+        below[v] = seen
+        seen += same[v]
+    return [round((below[v] + (same[v] - 1) / 2) / (n - 1), 4) for v in values]
+
+
+def _spread(rows: list[dict[str, Any]], limit: int | None = None, per_source: int | None = None) -> list:
+    """``rows`` (best first) re-ordered so one feed cannot take every top slot: each further single-source story
+    from a feed already placed loses ``SAME_SOURCE_STEP``. With ``limit``, only that many are returned, and at most
+    ``per_source`` stories (any number of sources) share a representative feed."""
+    pool = list(rows)
+    singles: Counter = Counter()  # single-source stories placed per feed: the step
+    placed: Counter = Counter()  # every story placed per representative feed: the cap
+    out: list[dict[str, Any]] = []
+    while pool and (limit is None or len(out) < limit):
+        if per_source is not None:
+            pool = [s for s in pool if placed[s["feed_id"]] < per_source]
+            if not pool:
+                break
+
+        def adjusted(s: dict[str, Any]) -> float:
+            return s["score"] - (SAME_SOURCE_STEP * singles[s["feed_id"]] if s["sources"] == 1 else 0.0)
+
+        best = max(range(len(pool)), key=lambda n: (adjusted(pool[n]), -n))
+        story = pool.pop(best)
+        out.append(story)
+        placed[story["feed_id"]] += 1
+        singles[story["feed_id"]] += story["sources"] == 1
+    return out
+
+
+def _apply_feed_limits(
+    stories: list[dict[str, Any]], cfg: dict[str, Any], feeds: dict[uuid.UUID, models.Feed]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Cut each limited feed's single-source stories to its daily allowance (module docstring). ``stories`` come
+    best first. Returns the stories left, in the same order, and ``[{"feed_id", "title", "count", "limit"}]``
+    for every feed that had stories held back, most held back first."""
+    limits = cfg["feed_limits"]
+    if not limits:
+        return stories, []
+    scale = cfg["window_hours"] / 24
+    by_feed: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for story in stories:
+        if story["sources"] == 1 and story["feed_id"] in limits:
+            by_feed[story["feed_id"]].append(story)
+    dropped: set[str] = set()
+    held: list[dict[str, Any]] = []
+    for fid, rows in by_feed.items():
+        allowance = math.ceil(limits[fid] * scale)
+        # what was already read counts first: the day's picks do not change under the reader
+        rows = sorted(rows, key=lambda s: not s["read"])
+        for s in rows[:allowance]:
+            s["kept"] = True
+        extra = rows[allowance:]
+        dropped.update(s["key"] for s in extra)
+        if extra:
+            feed = feeds.get(uuid.UUID(fid))
+            held.append(
+                {"feed_id": fid, "title": (feed.title or feed.url) if feed else "", "count": len(extra),
+                 "limit": limits[fid]}
+            )  # fmt: skip
+    held.sort(key=lambda h: (-h["count"], h["title"]))
+    return [s for s in stories if s["key"] not in dropped], held
 
 
 async def latest_lede(session: AsyncSession, user_id: uuid.UUID, day: date) -> str:
