@@ -134,6 +134,27 @@ async def test_chat_requests_ask_for_at_least_the_catalog_output(gateway):
     await client.aclose()
 
 
+async def test_catalog_is_read_on_a_host_that_just_booted(gateway, monkeypatch):
+    """time.monotonic() counts from boot. On a fresh CI runner it was under the catalog TTL, so "never read"
+    (0.0) looked fresh, the catalog was skipped and requests went out without the model's output floor."""
+    from types import SimpleNamespace
+
+    from pensieve.ai import client as client_mod
+
+    clock = iter(5.0 + n / 100 for n in range(1000))  # five seconds after boot
+    monkeypatch.setattr(client_mod, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+    gateway.router.get(CATALOG).mock(
+        return_value=httpx.Response(
+            200, json={"data": [{"id": settings.llm_fast_model, "max_output_tokens": 65_536}]}
+        )
+    )
+    gateway.chat("ok")
+    client = LLMClient()
+    await client.chat_text(settings.llm_fast_model, "s", "u", workflow="x")
+    assert [c["max_tokens"] for c in gateway.chat_calls] == [65_536]
+    await client.aclose()
+
+
 async def test_truncation_surfaces_at_once(gateway):
     gateway.chat(truncated('{"answer": "cut off'))
     client = LLMClient()

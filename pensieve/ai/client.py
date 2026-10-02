@@ -24,6 +24,9 @@ EMBED_BATCH = 32
 JSON_ATTEMPTS = 2  # one retry on malformed output, same model
 EMBED_MAX_INPUT_TOKENS = 8_000  # bge-m3 serves an 8192-token window, independent of the chat input windows
 CHARS_PER_TOKEN = 4
+# "Never read" for a monotonic timestamp. Not 0.0: time.monotonic() counts from boot, so for the first TTL after a
+# host (or CI runner) boots, now - 0.0 looked fresh and the catalog was never read.
+NEVER = float("-inf")
 
 
 class LLMError(Exception):
@@ -67,7 +70,7 @@ def reset_embedding_probe() -> None:
 def reset_catalog_cache() -> None:
     """Tests: forget the catalog's per-model output floors and when it was read."""
     _OUTPUT_FLOORS.clear()
-    _CATALOG_READ["at"] = 0.0
+    _CATALOG_READ["at"] = NEVER
 
 
 def approx_tokens(text: str) -> int:
@@ -178,7 +181,7 @@ _EFFORTS: dict[str, list[str]] = {}
 _OUTPUT_FLOORS: dict[str, int] = {}
 """Per-model ``max_output_tokens`` the catalog advertises: every chat request asks for at least this much, since a
 reasoning model spends output tokens before its answer (Gemma 32K, Qwen 64K on the gateway)."""
-_CATALOG_READ = {"at": 0.0}
+_CATALOG_READ = {"at": NEVER}
 CATALOG_TTL_S = 600
 _EFFORT_WARNED: set[tuple[str, str]] = set()
 _EFFORT_LADDER = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]

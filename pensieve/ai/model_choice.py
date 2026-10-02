@@ -24,6 +24,7 @@ log = logging.getLogger(__name__)
 
 KEY = "llm"
 TTL_S = 60.0
+NEVER = float("-inf")  # never loaded; not 0.0, which looks fresh for TTL_S after the host boots
 
 # override field -> Settings attribute it shadows
 FIELDS: dict[str, str] = {
@@ -53,7 +54,7 @@ MAX_MINUTES = 1_440
 REASONING_LADDER: list[str] = ["none", "minimal", "low", "medium", "high", "xhigh"]
 
 _env_defaults: dict[str, Any] = {}
-_cache: dict[str, Any] = {"loaded_at": 0.0, "values": {}}
+_cache: dict[str, Any] = {"loaded_at": NEVER, "values": {}}
 
 
 def env_defaults() -> dict[str, Any]:
@@ -165,7 +166,7 @@ def reset_cache() -> None:
     if _env_defaults:
         _apply({})
     _env_defaults.clear()
-    _cache.update(loaded_at=0.0, values={})
+    _cache.update(loaded_at=NEVER, values={})
 
 
 __all__ = [
