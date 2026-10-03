@@ -204,6 +204,31 @@ async def test_summarize_item_stores_markdown(session, user, gateway):
     assert gateway.chat_requests[0].headers["X-Workflow"] == "summarize_item"
 
 
+async def test_summarize_item_asks_again_when_cut_mid_sentence(session, user, gateway):
+    feed = make_feed(user, "Feed")
+    session.add(feed)
+    await session.flush()
+    item = make_item(feed, "Agents", "lots of text " * 100)
+    session.add(item)
+    await session.commit()
+    cut = {"bullets": ["One.", "Two.", "The report highlights the emergence of"], "why_it_matters": "Useful."}
+    whole = {"bullets": ["One.", "Two.", "Three."], "why_it_matters": "Useful."}
+    gateway.chat(cut, whole)
+    md = await service.summarize_item(session, user, item)
+    assert "- Three." in md and "emergence of" not in md and len(gateway.chat_calls) == 2
+    # cut again on the retry: keep the finished bullets, never half a sentence
+    gateway.chat(cut)
+    md = await service.summarize_item(session, user, item)
+    assert md.startswith("- One.\n- Two.\n\n") and "emergence of" not in md
+
+
+def test_cut_off_spots_sentences_that_stop_midway():
+    assert insights.cut_off("The report highlights the emergence of")
+    assert insights.cut_off("Prices rose sharply,") and insights.cut_off("Including support for")
+    assert not insights.cut_off("It ships in May.") and not insights.cut_off("Apple releases iOS 27")
+    assert not insights.cut_off("Costs rose 12%") and not insights.cut_off("")
+
+
 def batch_summaries(indexes):
     return {
         "items": [{"index": i, "bullets": [f"b{i}", "x", "y"], "why_it_matters": f"why {i}"} for i in indexes]
@@ -292,8 +317,11 @@ async def test_summarize_items_retries_entries_the_model_missed(session, user, g
         n = body["messages"][1]["content"].count("### Article ")
         calls.append(n)
         if len(calls) == 1:
-            # first batch of 4: index 1 dropped, index 3 malformed (two bullets instead of three)
+            # first batch of 4: index 1 stops mid-sentence, index 3 malformed (two bullets instead of three)
             payload = batch_summaries([0, 2])
+            payload["items"].append(
+                {"index": 1, "bullets": ["a", "b", "The emergence of"], "why_it_matters": "w"}
+            )
             payload["items"].append({"index": 3, "bullets": ["only", "two"], "why_it_matters": "w"})
             return httpx.Response(200, json=chat_response(payload))
         return httpx.Response(200, json=chat_response(batch_summaries(range(n))))

@@ -1,16 +1,18 @@
 {% import "_macros.html" as m %}
 {% set sec_id = 'sec-' ~ section.key|replace(' ', '-') %}
-<section class="psection" id="{{ sec_id }}" aria-labelledby="{{ sec_id }}-h" data-key="{{ section.key }}">
+{% set front = section.kind == 'front' %}
+<section class="psection{% if front %} psection-front{% endif %}" id="{{ sec_id }}" aria-labelledby="{{ sec_id }}-h" data-key="{{ section.key }}">
   <header class="psection-head">
     <h2 class="psection-title" id="{{ sec_id }}-h">{{ section.title }}</h2>
-    <span class="psection-count">{{ section.count }} stor{{ 'y' if section.count == 1 else 'ies' }}{% if section.unread %} · {{ section.unread }} unread{% endif %}</span>
+    {% if front %}<span class="psection-count">Your best {{ section.count }} from every section, by what you open and star</span>
+    {% else %}<span class="psection-count">{{ section.count }} stor{{ 'y' if section.count == 1 else 'ies' }}{% if section.unread %} · {{ section.unread }} unread{% endif %}</span>{% endif %}
     <span class="grow"></span>
     <div class="psection-actions">
       <button type="button" class="btn btn-sm btn-ghost" data-expand="#{{ sec_id }}" aria-label="Expand or collapse every story in {{ section.title }}">{{ m.icon('layers', 14) }} <span class="btn-label">Expand all</span></button>
       {% if section.unread %}
-      <form hx-post="/insights/paper/{{ edition.id }}/read" hx-target="#{{ sec_id }}" hx-swap="outerHTML" method="post" action="/insights/paper/{{ edition.id }}/read">{{ m.csrf_field(csrf_token) }}<input type="hidden" name="section" value="{{ section.key }}"><button class="btn btn-sm btn-ghost" type="submit" title="Mark every story here read; they leave today's paper">{{ m.icon('check-circle', 14) }} <span class="btn-label">Mark section read</span></button></form>
+      <form hx-post="/insights/paper/{{ edition.id }}/read" hx-target="#{{ sec_id }}" hx-swap="outerHTML" method="post" action="/insights/paper/{{ edition.id }}/read">{{ m.csrf_field(csrf_token) }}<input type="hidden" name="section" value="{{ section.key }}"><button class="btn btn-sm btn-ghost" type="submit" title="Mark every story here read; they leave today's paper">{{ m.icon('check-circle', 14) }} <span class="btn-label">{{ 'Mark front page read' if front else 'Mark section read' }}</span></button></form>
       {% endif %}
-      {% if section.kind != 'other' %}
+      {% if section.kind not in ('other', 'front') %}
       <form method="post" action="/insights/paper/hide-section" hx-boost="false">{{ m.csrf_field(csrf_token) }}<input type="hidden" name="key" value="{{ section.key }}"><button class="btn btn-sm btn-ghost" type="submit" title="Stop showing this section in the paper; turn it back on in Customize">{{ m.icon('close', 14) }} <span class="btn-label">Turn off section</span></button></form>
       {% endif %}
     </div>

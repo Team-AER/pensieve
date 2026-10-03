@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import delete, select
 
@@ -140,13 +140,18 @@ async def seed_paper(session, user):
 
 async def test_paper_compiles_on_open_and_renders_sections(client, session, user):
     w = await seed_paper(session, user)
+    user.settings = {
+        "paper": {"front_page": 0, "min_section": 1}
+    }  # three stories would all make the front page
+    await session.commit()
     headers = await login(client, user)
     r = await client.get("/insights")
     assert r.status_code == 200 and "The paper" in r.text
     assert "3 stories from 4 items" in r.text
     assert r.text.index('id="sec-ai"') < r.text.index('id="sec-apple"')
     assert "Big launch everywhere" in r.text and "2 sources" in r.text
-    assert "Launch bullet" in r.text and "Because you follow launches." in r.text
+    # the why's last word shares a nowrap span with the rewrite icon
+    assert "Launch bullet" in r.text and "Because you follow" in r.text and "launches." in r.text
     assert "Big launch again" in r.text and "Lone AI post" in r.text and "no summary yet" in r.text
     assert 'id="paper-settings"' in r.text and 'name="section" value="ai"' in r.text
     edition = await session.scalar(
@@ -182,6 +187,8 @@ async def test_paper_compiles_on_open_and_renders_sections(client, session, user
 
 async def test_paper_drops_stories_read_in_reader(client, session, user):
     w = await seed_paper(session, user)
+    user.settings = {"paper": {"front_page": 0, "min_section": 1}}
+    await session.commit()
     headers = await login(client, user)
     r = await client.get("/insights")
     assert 'id="sec-apple"' in r.text and "3 stories" in r.text
@@ -193,6 +200,126 @@ async def test_paper_drops_stories_read_in_reader(client, session, user):
     await client.post(f"/items/{w['s1'].id}/read", headers=headers | HX)
     r = await client.get("/insights")
     assert "Big launch everywhere" in r.text
+
+
+async def test_paper_read_marks_every_copy_of_the_article(client, session, user):
+    w = await seed_paper(session, user)
+    old = datetime.now(UTC) - timedelta(days=3)
+    c = await seed_feed(session, user, "Gamma")  # the same link and the same text in another feed
+    # in the story's cluster but too old for the paper
+    older = await seed_item(session, w["a"], "Big launch, first word", published_at=old)
+    session.add(models.ClusterItem(cluster_id=w["cluster"].id, item_id=older.id))
+    relink = await seed_item(session, c, "Launch link", published_at=old, url=w["s2"].url)
+    rehash = await seed_item(session, c, "Big launch", published_at=old)
+    rehash.hash = w["s1"].hash
+    # a series groups different episodes: reading one reads no other
+    episode = await seed_item(session, w["a"], "Launch recap #2", published_at=old)
+    series = models.Cluster(
+        user_id=user.id, window_start=old, window_end=old, canonical_item_id=episode.id, kind="series"
+    )
+    saved = models.Feed(
+        user_id=user.id, url=models.SAVED_FEED_URL, title="Saved", kind=models.FEED_KIND_SAVED
+    )
+    session.add_all([series, saved])
+    await session.flush()
+    session.add_all(
+        [
+            models.ClusterItem(cluster_id=series.id, item_id=episode.id),
+            models.ClusterItem(cluster_id=series.id, item_id=w["s1"].id),
+        ]
+    )
+    await session.commit()
+    # saved on purpose: stays in My list
+    kept = await seed_item(session, saved, "Saved launch", url=w["s1"].url)
+    read = {it.title: it.id for it in (w["s1"], w["s2"], older, relink, rehash)}
+    unread = {it.title: it.id for it in (episode, kept, w["single"], w["phone"])}
+    headers = await login(client, user)
+    r = await client.get("/insights")
+    edition = await session.scalar(
+        select(models.Insight).where(models.Insight.user_id == user.id, models.Insight.kind == "paper")
+    )
+    r = await client.post(
+        f"/insights/paper/{edition.id}/read", data={"key": f"c:{w['cluster'].id}"}, headers=headers | HX
+    )
+    assert r.status_code == 200 and "Big launch everywhere" not in r.text
+    for title, iid in read.items():
+        state = await session.get(models.ItemState, (user.id, iid))
+        assert state is not None and state.is_read, title
+    for title, iid in unread.items():
+        state = await session.get(models.ItemState, (user.id, iid))
+        assert state is None or not state.is_read, title
+
+
+async def test_paper_read_link_reads_every_copy_when_the_article_opens(client, session, user):
+    """Opening a story from the paper is reading it: the article's mark-read-on-open reads its other copies too,
+    so the story leaves today's paper like Mark read. Opening it in Reader reads only the item opened."""
+    w = await seed_paper(session, user)
+    headers = await login(client, user)
+    r = await client.get("/insights")
+    edition = await session.scalar(
+        select(models.Insight).where(models.Insight.user_id == user.id, models.Insight.kind == "paper")
+    )
+    assert f'data-edition="{edition.id}"' in r.text  # reader.js refetches it after Back
+    s1, s2 = w["s1"].id, w["s2"].id
+    assert f'href="/items/{s1}?from=paper"' in r.text and f'href="/items/{s2}?from=paper"' in r.text
+    r = await client.get(f"/items/{s1}?from=paper", headers={**HX, "HX-Boosted": "true"})
+    assert f'hx-post="/items/{s1}/open?copies=1"' in r.text
+    r = await client.get(f"/items/{s1}", headers=HX)
+    assert f'hx-post="/items/{s1}/open"' in r.text
+    r = await client.post(f"/items/{s1}/open?copies=1", headers=headers | HX)
+    assert r.status_code == 200 and "item-state" in r.headers.get("HX-Trigger", "")
+    for iid in (s1, s2):
+        state = await session.get(models.ItemState, (user.id, iid))
+        assert state is not None and state.is_read
+    single = await session.get(models.ItemState, (user.id, w["single"].id))
+    assert single is None or not single.is_read
+    r = await client.get("/insights")
+    assert "Big launch everywhere" not in r.text and "Lone AI post" in r.text
+
+
+async def test_paper_front_page_daily_limits_and_sources(client, session, user):
+    w = await seed_paper(session, user)
+    extra = [await seed_item(session, w["a"], f"Alpha extra {n}") for n in range(3)]
+    session.add_all(
+        [models.ItemAI(user_id=user.id, item_id=i.id, tags=["ai"], confidences={"ai": 0.5}) for i in extra]
+    )
+    user.settings = {"paper": {"front_page": 2}}
+    await session.commit()
+    headers = await login(client, user)
+    r = await client.get("/insights")
+    assert r.status_code == 200
+    # the front page comes first (chip and section) and shows the summary's first bullet as a dek
+    assert r.text.index('href="#sec-front-page"') < r.text.index('href="#sec-ai"')
+    assert r.text.index('id="sec-front-page"') < r.text.index('id="sec-ai"')
+    assert "Your best 2 from every section" in r.text and 'class="pstory-dek">Launch bullet<' in r.text
+    front = r.text.split('id="sec-front-page"')[1].split("<section")[0]
+    assert "Mark front page read" in front and "Turn off section" not in front
+    # Customize lists sources busiest first with their volume and an "A day" box
+    sources = r.text.split('class="source-rows"')[1]
+    assert sources.index("Alpha") < sources.index("Beta") and "5 a week" in sources
+    assert f'name="feed_limit:{w["a"].id}"' in sources and 'name="front_page"' in r.text
+    edition = await session.scalar(
+        select(models.Insight).where(models.Insight.user_id == user.id, models.Insight.kind == "paper")
+    )
+    r = await client.post(
+        f"/insights/paper/{edition.id}/read", data={"section": "front-page"}, headers=headers | HX
+    )
+    assert r.status_code == 200 and 'id="sec-front-page"' not in r.text
+    # a daily limit of 1 on Alpha: one Alpha single stays, the rest are held back and named in the masthead
+    r = await client.post(
+        "/insights/paper/settings",
+        data={"group_by": "tag", "window_hours": "24", "per_section": "4", "min_sources": "1", "front_page": "0",
+              "show_summaries": "1", "auto_sections": "1", f"feed_limit:{w['a'].id}": "1",
+              f"feed_limit:{w['b'].id}": ""},
+        headers=headers,
+    )  # fmt: skip
+    assert r.status_code == 303
+    await session.refresh(user)
+    cfg = user.settings["paper"]
+    assert cfg["front_page"] == 0 and cfg["feed_limits"] == {str(w["a"].id): 1}
+    r = await client.get("/insights")
+    # Alpha has four singles: its best one stays (a read one first), three are held back and named in the masthead
+    assert "Daily limits held back 3 stories" in r.text and "Alpha 3" in r.text
 
 
 async def test_paper_settings_reorder_hide_and_mute(client, session, user):
@@ -337,7 +464,11 @@ async def test_paper_summary_prefs_rewrite_and_missing(client, session, user, mo
     w = await seed_paper(session, user)
     headers = await login(client, user)
     r = await client.get("/insights")
-    assert "2 without a summary" in r.text and "write them now" in r.text and "Not quite" in r.text
+    assert (
+        "2 without a summary" in r.text
+        and "write them now" in r.text
+        and 'data-confirm-title="Rewrite this summary?"' in r.text
+    )
     edition = await session.scalar(
         select(models.Insight).where(models.Insight.user_id == user.id, models.Insight.kind == "paper")
     )
@@ -361,7 +492,7 @@ async def test_paper_summary_prefs_rewrite_and_missing(client, session, user, mo
     assert (
         'value="5" selected' in r.text and 'value="general" selected' in r.text and "homelab stuff" in r.text
     )
-    # "Not quite" on the story's why: a correction and a rewrite job carrying the note
+    # Rewrite on the story's why: a correction and a rewrite job carrying the dialog's note
     key = f"c:{w['cluster'].id}"
     r = await client.post(
         f"/insights/paper/{edition.id}/rewrite",
@@ -396,7 +527,7 @@ async def test_paper_summary_prefs_rewrite_and_missing(client, session, user, mo
     r = await client.get(
         f"/insights/paper/{edition.id}/summary", params={"key": key, "n": 2}, headers=headers | HX
     )
-    assert "New bullet" in r.text and "Better why." in r.text and "Rewriting" not in r.text
+    assert "New bullet" in r.text and "Better" in r.text and "why." in r.text and "Rewriting" not in r.text
     await session.refresh(edition)
     story = next(s for sec in edition.body["sections"] for s in sec["stories"] if s["key"] == key)
     assert story["summary"].startswith("- New bullet") and "rewrite_of" not in story
@@ -442,6 +573,10 @@ async def test_paper_summary_prefs_rewrite_and_missing(client, session, user, mo
     }
     r = await client.get(f"/insights/{edition.id}?summaries=2", headers=headers)
     assert "Queued summaries for 2 stories" in r.text
+    r = await client.get(f"/insights/{edition.id}?summaries=0", headers=headers)
+    assert "Every story already has a summary." in r.text
+    r = await client.get(f"/insights/{edition.id}?summaries=failed", headers=headers)
+    assert "Couldn&#39;t reach the AI queue" in r.text or "Couldn't reach the AI queue" in r.text
     # why "off" hides the why paragraph even when the stored summary carries one
     user.settings = dict(user.settings, summaries={"why": "off"})
     await session.commit()

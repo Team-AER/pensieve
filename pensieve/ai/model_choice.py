@@ -1,4 +1,4 @@
-"""Which gateway models (how much reasoning, how many at once) Pensieve uses, chosen from the UI.
+"""Which gateway models (how much reasoning, how many at once, how big a window) Pensieve uses, chosen from the UI.
 
 The environment (`PENSIEVE_LLM_*`) supplies defaults; the ``app_settings`` row ``llm`` overrides them
 install-wide. Overrides are applied onto the cached ``Settings`` singleton, so every caller that reads
@@ -24,6 +24,7 @@ log = logging.getLogger(__name__)
 
 KEY = "llm"
 TTL_S = 60.0
+NEVER = float("-inf")  # never loaded; not 0.0, which looks fresh for TTL_S after the host boots
 
 # override field -> Settings attribute it shadows
 FIELDS: dict[str, str] = {
@@ -35,15 +36,25 @@ FIELDS: dict[str, str] = {
     "fast_concurrency": "llm_fast_concurrency",  # requests in flight to the fast model, per process
     "long_concurrency": "llm_long_concurrency",  # requests in flight to the long model, per process
     "ai_jobs": "ai_max_jobs",  # AI jobs the worker runs at once
+    "output_tokens": "llm_max_output_tokens",  # output window every request gets at least, thinking included
+    "input_tokens_short": "llm_max_input_tokens_short",  # prompt budget for fast-model jobs
+    "input_tokens_long": "llm_max_input_tokens_long",  # prompt budget for long-model jobs
+    "fast_timeout": "llm_fast_timeout_min",  # minutes one fast-model request may take
+    "long_timeout": "llm_long_timeout_min",  # minutes one long-model request may take
+    "job_timeout": "ai_job_timeout_min",  # minutes one AI job may take, all its requests together
 }
 COUNTS = ("fast_concurrency", "long_concurrency", "ai_jobs")
 MAX_COUNT = 16
 """Ceiling for every count: the AI worker is built for this many jobs and lowers its limit to the setting."""
+TOKENS = ("output_tokens", "input_tokens_short", "input_tokens_long")
+MIN_TOKENS, MAX_TOKENS = 1_024, 262_144
+MINUTES = ("fast_timeout", "long_timeout", "job_timeout")
+MAX_MINUTES = 1_440
 # The LiteLLM proxy validates reasoning_effort against exactly these (plus "max"); ordered for the slider.
 REASONING_LADDER: list[str] = ["none", "minimal", "low", "medium", "high", "xhigh"]
 
 _env_defaults: dict[str, Any] = {}
-_cache: dict[str, Any] = {"loaded_at": 0.0, "values": {}}
+_cache: dict[str, Any] = {"loaded_at": NEVER, "values": {}}
 
 
 def env_defaults() -> dict[str, Any]:
@@ -104,7 +115,8 @@ async def apply_overrides(session: AsyncSession | None = None, *, force: bool = 
 def clean(form: dict[str, Any]) -> dict[str, str | int]:
     """Validate a form submission into an override dict. Empty = use the env default.
 
-    Reasoning values must be on the ladder; counts are whole numbers from 1 to ``MAX_COUNT``; model ids are
+    Reasoning values must be on the ladder; counts are whole numbers from 1 to ``MAX_COUNT``; token windows are
+    whole numbers from ``MIN_TOKENS`` to ``MAX_TOKENS``; timeouts are minutes from 1 to ``MAX_MINUTES``; model ids are
     free text (the catalog may lag the gateway) but are trimmed and capped. Unknown fields are ignored.
     """
     out: dict[str, str | int] = {}
@@ -115,6 +127,14 @@ def clean(form: dict[str, Any]) -> dict[str, str | int]:
         if field in COUNTS:
             if raw.isdigit():
                 out[field] = min(max(int(raw), 1), MAX_COUNT)
+            continue
+        if field in TOKENS:
+            if raw.isdigit():
+                out[field] = min(max(int(raw), MIN_TOKENS), MAX_TOKENS)
+            continue
+        if field in MINUTES:
+            if raw.isdigit():
+                out[field] = min(max(int(raw), 1), MAX_MINUTES)
             continue
         if field.endswith("_reasoning"):
             if raw.isdigit():
@@ -146,7 +166,7 @@ def reset_cache() -> None:
     if _env_defaults:
         _apply({})
     _env_defaults.clear()
-    _cache.update(loaded_at=0.0, values={})
+    _cache.update(loaded_at=NEVER, values={})
 
 
 __all__ = [
@@ -154,7 +174,12 @@ __all__ = [
     "FIELDS",
     "KEY",
     "MAX_COUNT",
+    "MAX_MINUTES",
+    "MAX_TOKENS",
+    "MINUTES",
+    "MIN_TOKENS",
     "REASONING_LADDER",
+    "TOKENS",
     "apply_overrides",
     "clean",
     "effective",

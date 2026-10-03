@@ -7,6 +7,7 @@
     <span class="pstory-dot" aria-hidden="true"></span>
     <span class="pstory-main">
       <span class="pstory-title">{{ story.title }}</span>
+      {% if section is defined and section and section.kind == 'front' and story.summary and config.show_summaries %}{% set dek = (story.summary|summary_blocks).bullets %}{% if dek %}<span class="pstory-dek">{{ dek[0] }}</span>{% endif %}{% endif %}
       <span class="pstory-meta">
         {% if story.sources > 1 %}<span class="sources" role="note">{{ story.sources }} sources</span>{% if story.copies > story.sources %}<span class="faint">· {{ story.copies }} copies</span>{% endif %}{% else %}<span class="faint">{{ story.feeds[0].title if story.feeds else '' }}</span>{% endif %}
         {% if story.tag and (section is not defined or section is none or section.kind != 'tag' or story.tag != section.key) %}<span class="chip chip-ai chip-sm">{{ story.tag }}</span>{% endif %}
@@ -22,13 +23,13 @@
     <ul class="pstory-sources" aria-label="Copies of this story">
       {% for mbr in story.members %}
       <li class="pstory-source{% if mbr.read %} read{% endif %}">
-        <a href="/items/{{ mbr.item_id }}" class="plain">{{ mbr.title }}</a>
+        <a href="/items/{{ mbr.item_id }}?from=paper" class="plain">{{ mbr.title }}</a>
         <span class="faint">{{ mbr.feed }} · {{ mbr.published_at|timeago }}</span>
       </li>
       {% endfor %}
     </ul>
     <div class="pstory-actions">
-      <a class="btn btn-sm" href="/items/{{ story.item_id }}">{{ m.icon('reader', 14) }} Read</a>
+      <a class="btn btn-sm" href="/items/{{ story.item_id }}?from=paper">{{ m.icon('reader', 14) }} Read</a>
       {% if not story.read %}
       <form hx-post="/insights/paper/{{ edition.id }}/read" hx-target="#{{ sid }}" hx-swap="outerHTML" method="post" action="/insights/paper/{{ edition.id }}/read">{{ m.csrf_field(csrf_token) }}<input type="hidden" name="key" value="{{ story.key }}"><button class="btn btn-sm" type="submit" title="Mark every copy read; it leaves today's paper">{{ m.icon('check-circle', 14) }} Mark read</button></form>
       {% endif %}
@@ -36,10 +37,10 @@
       <span class="grow"></span>
       <span class="pstory-tune" role="group" aria-label="Tune the paper">
         <form hx-post="/insights/paper/{{ edition.id }}/tune" hx-target="#{{ sid }}" hx-swap="outerHTML" method="post" action="/insights/paper/{{ edition.id }}/tune">{{ m.csrf_field(csrf_token) }}<input type="hidden" name="key" value="{{ story.key }}"><input type="hidden" name="direction" value="more"><button class="btn btn-sm btn-ghost{% if story.boost is defined and story.boost > 0 %} on{% endif %}" type="submit" title="Rank stories like this higher: its tag{{ 's' if story.feeds|length > 1 }} and source{{ 's' if story.feeds|length > 1 }} gain weight">{{ m.icon('plus', 14) }} More like this</button></form>
-        <form hx-post="/insights/paper/{{ edition.id }}/tune" hx-target="#{{ sid }}" hx-swap="outerHTML" method="post" action="/insights/paper/{{ edition.id }}/tune">{{ m.csrf_field(csrf_token) }}<input type="hidden" name="key" value="{{ story.key }}"><input type="hidden" name="direction" value="less"><button class="btn btn-sm btn-ghost{% if story.boost is defined and story.boost < 0 %} on{% endif %}" type="submit" title="Rank stories like this lower; keep pressing and they fall into In brief">{{ m.icon('minus', 14) }} Less</button></form>
+        <form hx-post="/insights/paper/{{ edition.id }}/tune" hx-target="#{{ sid }}" hx-swap="outerHTML" method="post" action="/insights/paper/{{ edition.id }}/tune">{{ m.csrf_field(csrf_token) }}<input type="hidden" name="key" value="{{ story.key }}"><input type="hidden" name="direction" value="less"><button class="btn btn-sm btn-ghost{% if story.boost is defined and story.boost < 0 %} on{% endif %}" type="submit" title="Rank stories like this lower; keep pressing and they fall into In brief">{{ m.icon('minus', 14) }} Less like this</button></form>
         {% if tl %}<form hx-post="/insights/paper/{{ edition.id }}/tune" hx-target="#{{ sid }}" hx-swap="outerHTML" method="post" action="/insights/paper/{{ edition.id }}/tune">{{ m.csrf_field(csrf_token) }}<input type="hidden" name="key" value="{{ story.key }}"><input type="hidden" name="direction" value="reset"><button class="btn btn-sm btn-ghost" type="submit" title="{{ tl }}">Reset</button></form>{% endif %}
       </span>
     </div>
-    {% if tl %}<p class="pstory-tuned faint small">{{ m.icon('chart', 12) }} Tuned: {{ tl }} · applies when the paper is next compiled</p>{% endif %}
+    {% if tl %}<p class="pstory-tuned faint small">{{ m.icon('chart', 12) }} Tuned: {{ tl }} · applies when the paper next updates</p>{% endif %}
   </div>
 </details>

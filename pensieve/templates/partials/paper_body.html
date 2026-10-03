@@ -1,6 +1,6 @@
 {% import "_macros.html" as m %}
-{% if saved %}<div class="flash flash-ok" role="status">{{ m.icon('check', 14) }} Layout saved and the paper recompiled.</div>{% endif %}
-{% if summaries_queued %}<div class="flash flash-ai" role="status">{{ m.icon('sparkle', 14) }} {% if summaries_queued == '0' %}Nothing to write: every story already has a summary or the queue is unavailable.{% else %}Queued summaries for {{ summaries_queued }} stor{{ 'y' if summaries_queued == '1' else 'ies' }}; open a story to watch it land, or refresh in a minute.{% endif %}</div>{% endif %}
+{% if saved %}<div class="flash flash-ok" role="status">{{ m.icon('check', 14) }} Layout saved and the paper updated.</div>{% endif %}
+{% if summaries_queued %}<div class="flash flash-ai" role="status">{{ m.icon('sparkle', 14) }} {% if summaries_queued == '0' %}Every story already has a summary.{% elif summaries_queued == 'failed' %}Couldn't reach the AI queue. Try again in a minute.{% else %}Queued summaries for {{ summaries_queued }} stor{{ 'y' if summaries_queued == '1' else 'ies' }}; open a story to watch it land, or refresh in a minute.{% endif %}</div>{% endif %}
 {% if not paper_on %}
 <div class="insights-head">
   <div class="insight-header">
@@ -9,7 +9,7 @@
   </div>
   <div class="insight-actions">{% include "partials/paper_switch.html" %}</div>
 </div>
-<section class="card insight-card">{{ m.empty_state('Turn it on under Manage → AI and memory', 'The paper needs no model call; it lays out every story of the day in sections, expandable, from what the tagger and the story grouper already produced.', 'digest', ai=True) }}</section>
+<section class="card insight-card">{{ m.empty_state('Turn it on under Manage → AI and memory', 'The paper needs no model call; it lays out every story of the day in sections, expandable, from the tags and story groups Pensieve has already made.', 'digest', ai=True) }}</section>
 {% elif not edition %}
 <div class="insights-head">
   <div class="insight-header">
@@ -19,13 +19,14 @@
   <div class="insight-actions">{% include "partials/paper_switch.html" %}</div>
 </div>
 {% else %}
-<header class="insights-head paper-head">
+<header class="insights-head paper-head"{% if is_today %} data-edition="{{ edition.id }}"{% endif %}>
   <div class="insight-header">
     <div class="eyebrow eyebrow-ai">{{ m.icon('digest', 14) }} The paper{% if not is_today %} · earlier edition{% endif %}</div>
     <h1 class="insight-title">{{ edition.period|date_long }}</h1>
     <div class="paper-stand">
       {{ body.story_count }} stor{{ 'y' if body.story_count == 1 else 'ies' }} from {{ body.item_count }} item{{ 's' if body.item_count != 1 }} in the last {{ body.window.hours if body.window and body.window.hours else config.window_hours }} hours{% if body.unread_count is defined %} · {{ body.unread_count }} unread{% endif %}
-      · compiled {{ edition.generated_at|timeago }}
+      · updated {{ edition.generated_at|timeago }}
+      {% if held_back %}{% set held_n = held_back|sum(attribute='count') %}<br><button type="button" class="btn-link" data-open-dialog="#paper-settings" title="Daily limits keep only a busy source's best stories; change them under Customize → Sources">Daily limits held back {{ held_n }} stor{{ 'y' if held_n == 1 else 'ies' }}</button><span class="faint">: {% for h in held_back %}{{ h.title }} {{ h.count }}{{ ' · ' if not loop.last }}{% endfor %}. They stay unread in Reader.</span>{% endif %}
       {% if missing_summaries and summaries_on %} · <form class="inline" method="post" action="/insights/paper/{{ edition.id }}/summaries" hx-boost="false">{{ m.csrf_field(csrf_token) }}<button class="btn-link" type="submit" title="Queue the eager summaries again for every story that has none">{{ missing_summaries }} without a summary · write them now</button></form>{% endif %}
     </div>
     {% if body.lede %}<p class="insight-summary">{{ body.lede }}</p>{% endif %}
@@ -33,7 +34,7 @@
   <div class="insight-actions">
     {% include "partials/paper_switch.html" %}
     <button type="button" class="btn" data-open-dialog="#paper-settings">{{ m.icon('settings', 14) }} Customize</button>
-    {% if is_today %}<a class="btn btn-ghost" href="/insights?refresh=1" title="Recompile from what has arrived since">{{ m.icon('refresh', 14) }} Refresh</a>{% endif %}
+    {% if is_today %}<a class="btn btn-ghost" href="/insights?refresh=1" title="Update with what has arrived since">{{ m.icon('refresh', 14) }} Refresh</a>{% endif %}
     {% if history|length > 1 %}
     <details class="menu">
       <summary class="btn" aria-haspopup="menu">Earlier {{ m.icon('chevron-down', 14) }}</summary>

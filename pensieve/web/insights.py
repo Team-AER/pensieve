@@ -10,7 +10,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Form, HTTPException, Request
 from fastapi.responses import RedirectResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pensieve import queue
@@ -18,8 +18,8 @@ from pensieve.ai import insights as ai_insights
 from pensieve.ai import paper
 from pensieve.ai.common import ai_on
 from pensieve.ai.memory import record_correction
-from pensieve.models import AIJob, Feed, Folder, Insight, ItemAI, Tag, User
-from pensieve.web.queries import parse_uuid, set_read, user_owns_items
+from pensieve.models import AIJob, Feed, Folder, Insight, Item, ItemAI, Tag, User
+from pensieve.web.queries import parse_uuid, set_read, user_owns_items, with_copies
 from pensieve.web.templating import DB, CsrfUser, CurrentUser, hx_trigger, is_htmx, render
 
 log = logging.getLogger(__name__)
@@ -29,6 +29,7 @@ PAPER_STALE = timedelta(minutes=10)
 """An edition older than this is recompiled when opened; compiling is a few queries, never a model call."""
 SUMMARY_MAX_POLLS = 30  # x 2 s: give up after a minute and offer a retry instead of polling forever
 MISSING_CHUNK = 40
+VOLUME_DAYS = 7  # the Customize panel's "~20 a day" next to each source
 
 
 async def latest(session: AsyncSession, user: User, kind: str) -> Insight | None:
@@ -105,7 +106,7 @@ def _section_rows(
         seen.add(entry["key"])
     for key in [*present, *sorted(k.lower() for k in keys)]:
         key = key.lower()
-        if key in seen or key == paper.OTHER_KEY:
+        if key in seen or key in (paper.OTHER_KEY, paper.FRONT_KEY):
             continue
         seen.add(key)
         rows.append({"key": key, "on": True, "limit": None, "title": paper.section_title(key), "auto": True})
@@ -150,6 +151,36 @@ def _tuned_rows(config: dict[str, Any], feeds: list[Feed]) -> dict[str, list[dic
     return {"tags": tags, "feeds": feed_rows}
 
 
+def _volume_label(per_week: int) -> str:
+    """How much a feed publishes, for choosing its daily limit: "~20 a day", "3 a week", "quiet"."""
+    if per_week >= 2 * VOLUME_DAYS:
+        return f"~{round(per_week / VOLUME_DAYS)} a day"
+    if per_week:
+        return f"{per_week} a week"
+    return "quiet"
+
+
+async def _source_rows(session: AsyncSession, user: User, feeds: list[Feed]) -> list[dict[str, Any]]:
+    """Every feed for the Customize panel's Sources list, busiest first (where a daily limit matters)."""
+    since = datetime.now(UTC) - timedelta(days=VOLUME_DAYS)
+    counts = dict(
+        (
+            await session.execute(
+                select(Item.feed_id, func.count())
+                .where(Item.feed_id.in_([f.id for f in feeds]), Item.published_at >= since)
+                .group_by(Item.feed_id)
+            )
+        ).all()
+    ) if feeds else {}  # fmt: skip
+    rows = [
+        {"feed": f, "per_week": int(counts.get(f.id, 0)), "volume": _volume_label(int(counts.get(f.id, 0)))}
+        for f in feeds
+        if f.kind != "saved"
+    ]
+    rows.sort(key=lambda r: (-r["per_week"], (r["feed"].title or r["feed"].url).lower()))
+    return rows
+
+
 async def _paper_ctx(
     request: Request, session: AsyncSession, user: User, edition: Insight | None
 ) -> dict[str, Any]:
@@ -176,7 +207,9 @@ async def _paper_ctx(
         "config": config,
         "section_rows": _section_rows(config, vocab, folders, present),
         "feeds": feeds,
+        "sources": await _source_rows(session, user, feeds),
         "muted": set(config["muted_feeds"]),
+        "held_back": body.get("held_back") or [],
         "history": await _history(session, user, ["paper"]),
         "is_today": is_today,
         "paper_on": ai_on(user, "paper"),
@@ -495,6 +528,8 @@ async def write_missing_summaries(request: Request, insight_id: uuid.UUID, user:
             queued += len(chunk)
         except Exception as exc:  # noqa: BLE001
             log.warning("could not enqueue missing summaries: %s", exc)
+            if not queued:
+                return RedirectResponse(f"/insights/{edition.id}?summaries=failed", status_code=303)
             break
     return RedirectResponse(f"/insights/{edition.id}?summaries={queued}", status_code=303)
 
@@ -550,14 +585,21 @@ async def read_story(
         targets = [*hit_section["stories"], *hit_section.get("brief", [])]
     ids = [u for u in (parse_uuid(m["item_id"]) for s in targets for m in s["members"]) if u]
     owned = await user_owns_items(session, user.id, ids)
-    await set_read(session, user.id, owned, True)
+    # The story's copies outside the paper (an older one in the cluster, the same link in another feed) too:
+    # reading a story here reads the article everywhere.
+    read_ids = await with_copies(session, user.id, owned)
+    await set_read(session, user.id, read_ids, True)
+    in_paper = {m["item_id"] for sec in body.get("sections") or [] for s in [*sec["stories"], *sec.get("brief", [])]
+                for m in s["members"]}  # fmt: skip
     for story in targets:
         story["read"] = True
         for m in story["members"]:
             m["read"] = True
     for sec in body.get("sections") or []:
         sec["unread"] = sum(1 for s in [*sec["stories"], *sec.get("brief", [])] if not s["read"])
-    body["unread_count"] = max(0, int(body.get("unread_count") or 0) - len(owned))
+    body["unread_count"] = max(
+        0, int(body.get("unread_count") or 0) - sum(str(i) in in_paper for i in read_ids)
+    )
     edition.body = body
     await session.commit()
     return await _paper_update(
@@ -630,7 +672,7 @@ async def skip_read(request: Request, insight_id: uuid.UUID, user: CsrfUser, ses
     skip = (insight.body or {}).get("safe_to_skip") or {}
     ids = [u for u in (parse_uuid(x) for x in skip.get("item_ids") or []) if u]
     owned = await user_owns_items(session, user.id, ids)
-    await set_read(session, user.id, owned, True)
+    await set_read(session, user.id, await with_copies(session, user.id, owned), True)
     body = dict(insight.body or {})
     body["safe_to_skip"] = dict(skip, done=True, marked=len(owned))
     insight.body = body

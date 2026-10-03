@@ -20,21 +20,74 @@
 
   // ---- Panes (mobile: one at a time; mid: nav is a drawer) ----
   const paneY = { app: null, at: {} };
-  function setPane(name) {
+  // Phones: the incoming pane slides in from the side it sits on (folders | list | article); web.css keys the
+  // entrance off data-enter, which is cleared again so a later list refresh does not slide in too.
+  const PANE_ORDER = { nav: 0, list: 1, article: 2 };
+  let enterTimer = null;
+  function setPane(name, opts) {
     const a = app();
     if (!a) return;
     const was = a.dataset.pane;
-    if (isMobile() && was !== name) {
+    const phoneSwitch = isMobile() && was !== name;
+    if (phoneSwitch) {
       // One document scroll serves every pane on phones: keep each pane's place (a new article starts at the top).
       if (paneY.app !== a) { paneY.app = a; paneY.at = {}; }
       paneY.at[was] = window.scrollY;
+      a.dataset.enter = PANE_ORDER[name] > PANE_ORDER[was] ? 'right' : 'left';
+      clearTimeout(enterTimer);
+      enterTimer = setTimeout(() => { delete a.dataset.enter; }, 450);
+      // Push the pane's history entry while the list is still showing: the browser records the scroll of the entry
+      // being left and puts it back on Back, over ours. Pushed after the switch, hiding the list had already
+      // clamped the page to the top, so Back reopened the list at its first row.
+      if (!(opts && opts.fromHistory)) paneHistory(was, name);
     }
     a.dataset.pane = name;
     showBars(true);
     measureBars();
-    if (isMobile() && was !== name) scrollPageTo(name === 'article' ? 0 : paneY.at[name] || 0);
+    if (phoneSwitch) scrollPageTo(name === 'article' ? 0 : paneY.at[name] || 0);
     if (name === 'nav') { const first = $('#nav .nav-item'); if (first && !isMobile()) first.focus({ preventScroll: true }); }
   }
+
+  // ---- Phones: the system Back (Android's button or gesture, Safari's edge swipe) closes the article or the
+  // folders instead of leaving the page. Opening one from the list pushes a same-URL entry; leaving it any other way
+  // pops that entry again. htmx owns window.onpopstate for boosted pages and would reload the list from its history
+  // cache, so this listener (added before htmx sets its handler at DOMContentLoaded) stops the event whenever it is
+  // only a pane change on this page. ----
+  const DOC = Math.random().toString(36).slice(2);
+  let paneEntry = null, popping = false;
+  function paneHistory(was, name) {
+    if (was === 'list' && name !== 'list') {
+      try { history.pushState({ pensievePane: name, doc: DOC }, '', location.href); paneEntry = { url: location.href }; } catch (_) {}
+    } else if (name === 'list' && paneEntry) {
+      paneEntry = null; popping = true; history.back();
+    }
+  }
+  window.addEventListener('popstate', (e) => {
+    const st = e.state || {};
+    if (popping) { popping = false; e.stopImmediatePropagation(); return; }
+    if (st.pensievePane && st.doc === DOC) {
+      // Forward again onto an entry this page pushed.
+      e.stopImmediatePropagation();
+      paneEntry = { url: location.href };
+      setPane(st.pensievePane === 'article' && !currentArticle() ? 'list' : st.pensievePane, { fromHistory: true });
+      return;
+    }
+    if (paneEntry) {
+      const same = location.href === paneEntry.url;
+      paneEntry = null;
+      if (same) { e.stopImmediatePropagation(); leaveDrag(); setPane('list', { fromHistory: true }); }
+    }
+  });
+  // A boosted link followed from the article or the folders (the feed name in an article, a folder in the drawer):
+  // the entry htmx is about to leave now stands for the page itself, and its snapshot should reopen on the list.
+  document.body.addEventListener('htmx:beforeHistorySave', () => {
+    if (!paneEntry) return;
+    paneEntry = null;
+    try { history.replaceState({ htmx: true }, '', location.href); } catch (_) {}
+    const a = app(); if (a) a.dataset.pane = 'list';
+  });
+  // A reload keeps the old entry's state; this page did not push it.
+  if (history.state && history.state.pensievePane) { try { history.replaceState(null, '', location.href); } catch (_) {} }
   function closeDrawer() { const a = app(); if (a && a.dataset.pane === 'nav') setPane('list'); }
   mqWide.addEventListener('change', (e) => { if (e.matches) closeDrawer(); });
 
@@ -155,7 +208,7 @@
   document.body.addEventListener('htmx:beforeRequest', (e) => {
     progressStart();
     const src = e.detail && e.detail.elt;
-    if (src && src.getAttribute && /\/open$/.test(src.getAttribute('hx-post') || '')) autoOpenAt = Date.now();
+    if (src && src.getAttribute && /\/open(\?|$)/.test(src.getAttribute('hx-post') || '')) autoOpenAt = Date.now();
     const t = e.detail && e.detail.target;
     if (t && (t.id === 'list' || t.id === 'article' || t.id === 'nav')) t.setAttribute('aria-busy', 'true');
     const elt = e.detail && e.detail.elt;
@@ -167,8 +220,16 @@
     if (t && t.removeAttribute) t.removeAttribute('aria-busy');
     const elt = e.detail && e.detail.elt;
     if (elt && elt.removeAttribute) elt.removeAttribute('aria-busy');
+    // The article's mark-read-on-open fires once: a snapshot of the page (Back, Forward) must not read it again.
+    if (elt && elt.hidden && /\/open(\?|$)/.test(elt.getAttribute('hx-post') || '')) elt.remove();
   });
   document.body.addEventListener('htmx:sendAbort', () => progressEnd());
+  // htmx snapshots the page for Back while the navigation that leaves it is still in flight: the page came back with
+  // the clicked button spinning (and, busy, unclickable) and the progress bar stuck. Snapshot them idle.
+  document.body.addEventListener('htmx:beforeHistorySave', () => {
+    $$('.btn[aria-busy], #list[aria-busy], #article[aria-busy], #nav[aria-busy]').forEach((n) => n.removeAttribute('aria-busy'));
+    const p = progressEl(); if (p) p.classList.remove('on', 'done');
+  });
   // Skeleton rows while a list pane reloads (only for full list swaps, not paging).
   document.body.addEventListener('htmx:beforeRequest', (e) => {
     const t = e.detail && e.detail.target;
@@ -194,7 +255,10 @@
     x.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>';
     x.addEventListener('click', () => dismiss(el)); el.appendChild(x);
     stack.appendChild(el);
-    while (stack.children.length > 3) dismiss(stack.firstElementChild, true);
+    // Keep three: drop the oldest at once, fading ones included (dismiss() skips those, so counting children and
+    // dismissing the first one looped forever and froze the page once a fading toast was the oldest).
+    const live = [...stack.children];
+    live.slice(0, Math.max(0, live.length - 3)).forEach((t) => { t._gone = true; clearTimeout(t._timer); t.remove(); });
     if (window.htmx && opts.node) window.htmx.process(el);
     const ttl = opts.ttl || (opts.node || opts.action ? 8000 : 3500);
     el._timer = setTimeout(() => dismiss(el), ttl);
@@ -265,8 +329,15 @@
     const question = e.detail.question || src.getAttribute('hx-confirm');
     if (!question) return;
     e.preventDefault();
-    confirmDialog({ title: src.dataset.confirmTitle, body: question, label: src.dataset.confirmLabel, danger: src.hasAttribute('data-confirm-danger') })
-      .then((ok) => { if (ok) e.detail.issueRequest(true); });
+    // data-confirm-prompt adds an optional text field; its value goes out as the form's hidden "note".
+    const prompt = src.dataset.confirmPrompt;
+    confirmDialog({ title: src.dataset.confirmTitle, body: question, label: src.dataset.confirmLabel, danger: src.hasAttribute('data-confirm-danger'),
+      input: prompt === undefined ? undefined : '', placeholder: prompt })
+      .then((ok) => {
+        if (ok === false || ok === undefined || ok === null) return;
+        if (prompt !== undefined) { const note = src.querySelector('input[name="note"]'); if (note) note.value = typeof ok === 'string' ? ok : ''; }
+        e.detail.issueRequest(true);
+      });
   });
 
   // ---- Menus: aria-expanded, arrow keys, Escape restores focus ----
@@ -330,6 +401,7 @@
   }
   function open(row) {
     if (!row) return;
+    if (isMobile() && app() && app().dataset.pane === 'list') expectArticle('right');
     if (window.htmx) window.htmx.trigger(row, 'open');
     if (isMobile()) setPane('article');
   }
@@ -340,8 +412,55 @@
     let idx = cur ? all.indexOf(cur) + delta : (delta > 0 ? 0 : all.length - 1);
     idx = Math.max(0, Math.min(all.length - 1, idx));
     select(all[idx], { open: openIt, focus: true });
-    if (idx >= all.length - 3) { const s = $('#list-body .sentinel'); if (s && window.htmx) window.htmx.trigger(s, 'revealed'); }
+    if (idx >= all.length - 3) loadMore($('#list-body .sentinel'));
   }
+
+  // ---- Endless lists: the "Loading more…" sentinel (hx-trigger "more, click") asks for the next page once it comes
+  // within a screen of view. The observer's root is whatever scrolls the list: the list pane on wider screens, the
+  // page on phones (null root). A failed page leaves the sentinel in place with "Try again" instead of a spinner
+  // that never ends. ----
+  const moreObservers = new Map();
+  function loadMore(s) {
+    if (!s || !s.isConnected || s.dataset.loading || !window.htmx) return;
+    s.dataset.loading = '1'; s.classList.remove('failed');
+    window.htmx.trigger(s, 'more');
+  }
+  function scrollRoot(el) {
+    for (let n = el.parentElement; n && n !== document.body; n = n.parentElement) {
+      const oy = getComputedStyle(n).overflowY;
+      if (oy === 'auto' || oy === 'scroll') return n;
+    }
+    return null;
+  }
+  function watchSentinels(root) {
+    if (!window.IntersectionObserver) return;
+    $$('.sentinel', root || document).forEach((s) => {
+      if (s.dataset.watched) return;
+      s.dataset.watched = '1';
+      const box = scrollRoot(s);
+      let io = moreObservers.get(box);
+      if (!io) {
+        // One shot per sentinel: success replaces it, and a failure waits for "Try again" rather than looping.
+        io = new IntersectionObserver((entries) => entries.forEach((en) => { if (en.isIntersecting) { io.unobserve(en.target); loadMore(en.target); } }), { root: box, rootMargin: '0px 0px 100% 0px' });
+        moreObservers.set(box, io);
+      }
+      io.observe(s);
+    });
+  }
+  // A pane that scrolls on one layout and not on another (rotation, window resize): re-pick the roots.
+  mqMobile.addEventListener('change', () => {
+    moreObservers.forEach((io) => io.disconnect()); moreObservers.clear();
+    $$('.sentinel[data-watched]').forEach((s) => { delete s.dataset.watched; });
+    watchSentinels();
+  });
+  document.body.addEventListener('htmx:load', (e) => watchSentinels(e.detail && e.detail.elt && e.detail.elt.parentElement));
+  document.body.addEventListener('htmx:afterRequest', (e) => {
+    const s = e.detail && e.detail.elt;
+    if (!s || !s.classList || !s.classList.contains('sentinel') || e.detail.successful) return;
+    // Still on the page (the swap never happened): offer a retry; a click on it is the sentinel's own trigger.
+    delete s.dataset.loading; s.classList.add('failed');
+    const t = s.querySelector('.sentinel-text'); if (t) t.textContent = ' Couldn\'t load more.';
+  });
   function currentArticle() { return $('#article article.article'); }
   function articleButton(action) { return $('#article-toolbar [data-action="' + action + '"]') || (currentArticle() ? currentArticle().querySelector('[data-action="' + action + '"]') : null); }
   function selectionMatchesArticle() { const a = currentArticle(); const s = selected(); return a && s && a.dataset.id === s.dataset.id; }
@@ -349,20 +468,32 @@
   function postState(path) {
     return fetch(path, { method: 'POST', credentials: 'same-origin', headers: { 'X-CSRF-Token': csrfToken(), 'HX-Request': 'true' } });
   }
-  // s / m act on the open article when it matches the selection (or nothing is selected); otherwise on the row.
-  function toggleRowState(action) {
-    const row = selected();
+  // Read / star toggle for a row (the selection by default). The row flips at once and flips back if the save fails;
+  // an open article showing the same item gets the refreshed toolbar the endpoint returns. opts.undo adds Undo.
+  function toggleRowState(action, row, opts) {
+    row = row || selected();
     if (!row) return false;
-    const id = row.dataset.id;
-    if (action === 'star') {
-      const on = row.classList.contains('starred');
-      postState('/items/' + id + '/' + (on ? 'unstar' : 'star')).then((r) => { if (r.ok) { row.classList.toggle('starred', !on); toast(on ? 'Unstarred' : 'Starred'); if (window.htmx) window.htmx.trigger(document.body, 'counts-changed'); } });
-    } else {
-      const on = row.classList.contains('read');
-      postState('/items/' + id + '/' + (on ? 'unread' : 'read')).then((r) => { if (r.ok) { row.classList.toggle('read', !on); toast(on ? 'Marked unread' : 'Marked read'); if (window.htmx) window.htmx.trigger(document.body, 'counts-changed'); } });
-    }
+    const id = row.dataset.id, cls = action === 'star' ? 'starred' : 'read';
+    const on = row.classList.contains(cls);
+    const verb = action === 'star' ? (on ? 'unstar' : 'star') : (on ? 'unread' : 'read');
+    const done = action === 'star' ? (on ? 'Unstarred' : 'Starred') : (on ? 'Marked unread' : 'Marked read');
+    row.classList.toggle(cls, !on);
+    postState('/items/' + id + '/' + verb).then((r) => {
+      if (!r.ok) throw new Error(String(r.status));
+      if (window.htmx) window.htmx.trigger(document.body, 'counts-changed');
+      const art = currentArticle();
+      if (!art || art.dataset.id !== id) return;
+      art.dataset[action === 'star' ? 'starred' : 'read'] = on ? '0' : '1';
+      return r.text().then((html) => {
+        const bar = document.getElementById('toolbar-' + id); // empty when the offline queue took the request
+        if (bar && html.trim()) { bar.innerHTML = html; if (window.htmx) window.htmx.process(bar); }
+      });
+    }).catch(() => { row.classList.toggle(cls, on); toast("That didn't save", { kind: 'error' }); });
+    toast(done, opts && opts.undo ? { action: { label: 'Undo', run: () => toggleRowState(action, row) } } : undefined);
+    announce(done);
     return true;
   }
+  // s / m act on the open article when it matches the selection (or nothing is selected); otherwise on the row.
   function stateKey(action) {
     const useArticle = currentArticle() && (selectionMatchesArticle() || !selected());
     if (useArticle) { const b = articleButton(action); if (b) { b.click(); return; } }
@@ -412,17 +543,25 @@
     if (typeof d.starred === 'boolean') { toast(d.starred ? 'Starred' : 'Unstarred'); announce(d.starred ? 'Starred' : 'Unstarred'); }
     else if (typeof d.read === 'boolean' && !(d.read && Date.now() - autoOpenAt < 2000)) { toast(d.read ? 'Marked read' : 'Marked unread'); announce(d.read ? 'Marked read' : 'Marked unread'); }
   });
-  document.body.addEventListener('list-changed', () => toast('Unmerged from its story group'));
+  document.body.addEventListener('list-changed', () => toast('Split from its story'));
   // Feedback for actions whose responses carry no HX-Trigger: summarize, tags, notes, reader mode.
   document.body.addEventListener('htmx:afterRequest', (e) => {
     const elt = e.detail && e.detail.elt; const xhr = e.detail && e.detail.xhr; if (!elt || !xhr) return;
     const path = (e.detail.pathInfo && e.detail.pathInfo.requestPath) || '';
-    if (xhr.status >= 400) { toast(xhr.status === 403 ? 'Session expired, reload the page' : 'That didn\'t work (' + xhr.status + ')', { kind: 'error' }); return; }
+    if (xhr.status >= 400) { toast(xhr.status === 403 ? 'Your session expired. Reload to sign in again.' : 'That didn\'t work (' + xhr.status + ')', { kind: 'error' }); return; }
     if (/\/summarize$/.test(path)) toast('Summary requested', { kind: 'ai' });
     else if (/\/rewrite$/.test(path)) toast('Rewrite requested; your note is kept as a correction', { kind: 'ai' });
     else if (/\/tag$/.test(path)) { const op = elt.querySelector && elt.querySelector('[name="op"]'); toast(op && op.value === 'remove' ? 'Tag removed' : 'Tag added'); }
     else if (/\/note$/.test(path)) { const del = elt.querySelector && elt.querySelector('[name="delete"]'); toast(del ? 'Note deleted' : 'Note saved'); }
-    else if (/\/reader-mode$/.test(path)) { const off = elt.querySelector && elt.querySelector('[name="off"]'); toast(off ? 'Showing the feed version' : 'Reader view'); }
+    else if (/\/reader-mode$/.test(path)) {
+      // Read what was sent, not elt: the swap replaces the body the request came from, so htmx reports the target,
+      // whose new content always holds a "Show feed version" form. The article's own on-load request (auto) gets
+      // no toast: it is not something the reader asked for.
+      const sent = e.detail.requestConfig && e.detail.requestConfig.parameters;
+      const param = (k) => (sent && typeof sent.get === 'function' ? sent.get(k) : sent && sent[k]);
+      if (param('auto')) return;
+      toast(param('off') ? 'Showing the feed version' : 'Reader view');
+    }
     else if (/\/skip-read$/.test(path)) toast('Marked those as read');
     else if (/\/move$/.test(path) && /\/manage\/feeds\//.test(path)) toast('Feed moved');
   });
@@ -444,7 +583,7 @@
     const xhr = e.detail && e.detail.xhr;
     if (xhr && (xhr.status === 401 || xhr.status === 403)) window.location.reload();
   });
-  document.body.addEventListener('htmx:sendError', () => toast('You seem to be offline; changes are queued', { kind: 'error' }));
+  document.body.addEventListener('htmx:sendError', () => toast("You're offline. You can keep reading; changes will sync when you're back.", { kind: 'error' }));
 
   // ---- Mobile article footer: previous / mark read + next / note ----
   document.addEventListener('click', (e) => {
@@ -452,7 +591,7 @@
     e.preventDefault();
     const what = b.dataset.articleNav;
     if (what === 'prev') move(-1, true);
-    else if (what === 'note') { const n = articleButton('note'); if (n) n.click(); }
+    else if (what === 'note' || what === 'star' || what === 'share') { const n = articleButton(what); if (n) n.click(); }
     else if (what === 'read-next') {
       const art = currentArticle();
       if (art && art.dataset.read !== '1') { const r = articleButton('read'); if (r) r.click(); }
@@ -461,6 +600,31 @@
       move(1, true);
     }
   });
+
+  // The footer's star follows the open article (starred from the footer, the s key, a row swipe or another device),
+  // and share shows only for items with a link. A star made here pops; one already there on opening does not.
+  let footSeen = { id: null, on: false }, footPane = null;
+  const footObserver = window.MutationObserver ? new MutationObserver(() => syncFoot()) : null;
+  function syncFoot() {
+    const star = $('.article-foot [data-article-nav="star"]'); if (!star) return;
+    const pane = $('#article');
+    if (footObserver && pane && pane !== footPane) { // a boosted page brings a new pane
+      footObserver.disconnect(); footPane = pane;
+      footObserver.observe(pane, { subtree: true, attributes: true, attributeFilter: ['data-starred'] });
+    }
+    const art = currentArticle();
+    const id = art ? art.dataset.id : null, on = !!art && art.dataset.starred === '1';
+    star.hidden = !articleButton('star');
+    star.setAttribute('aria-pressed', on ? 'true' : 'false');
+    star.setAttribute('aria-label', on ? 'Starred, tap to unstar' : 'Star');
+    if (on && id === footSeen.id && !footSeen.on) { star.classList.remove('pop'); void star.offsetWidth; star.classList.add('pop'); }
+    footSeen = { id, on };
+    const sh = $('.article-foot [data-article-nav="share"]'); if (sh) sh.hidden = !articleButton('share');
+  }
+  document.addEventListener('animationend', (e) => { if (e.target.closest && e.target.closest('.foot-star')) e.target.closest('.foot-star').classList.remove('pop'); });
+  document.body.addEventListener('htmx:afterSettle', syncFoot);
+  document.body.addEventListener('item-state', () => setTimeout(syncFoot));
+  syncFoot();
 
   // ---- Phones: every screen's top and bottom bars slide away while reading down, and return on the way back up ----
   // On phones the document scrolls (web.css), so the browser's own toolbar shrinks along with ours. The bars also
@@ -625,6 +789,35 @@
     });
     paperOpen = null;
   });
+  // Swapping the whole paper in replaces every node, which defeats the browser's scroll anchoring: whatever sat below
+  // a story read or removed jumped up by that story's height (a whole expanded story). Keep the reader's place by
+  // hand: the first story or section still shown from the one acted on onwards lands where that one stood on screen.
+  // Registered after the reopen above, so the reopened stories count in the layout.
+  let paperPlace = null;
+  document.body.addEventListener('htmx:beforeSwap', (e) => {
+    const t = e.detail && e.detail.target, cfg = e.detail && e.detail.requestConfig;
+    const elt = cfg && cfg.elt;
+    paperPlace = null;
+    if (!t || t.id !== 'insight' || !elt || !elt.closest) return;
+    const start = elt.closest('.pstory[id]') || elt.closest('.psection[id]');
+    if (!start) return;
+    const after = $$('.pstory[id], .psection[id]', t).filter((n) => n === start || (start.compareDocumentPosition(n) & Node.DOCUMENT_POSITION_FOLLOWING));
+    paperPlace = { ids: after.map((n) => n.id), top: start.getBoundingClientRect().top };
+  });
+  function keepPaperPlace() {
+    if (!paperPlace) return;
+    const n = paperPlace.ids.map((id) => document.getElementById(id)).find((el) => el && el.getClientRects().length);
+    if (!n) return;
+    const dy = n.getBoundingClientRect().top - paperPlace.top;
+    if (Math.abs(dy) < 1) return;
+    const box = scrollRoot(n);
+    if (box) box.scrollTop += dy; else window.scrollBy(0, dy);
+  }
+  document.body.addEventListener('htmx:afterSwap', (e) => { if (e.detail && e.detail.target && e.detail.target.id === 'insight') keepPaperPlace(); });
+  document.body.addEventListener('htmx:afterSettle', (e) => {
+    if (!e.detail || !e.detail.target || e.detail.target.id !== 'insight') return;
+    keepPaperPlace(); paperPlace = null;
+  });
   // A chip jump must land the section heading below the pinned chips, however many rows they wrap to.
   let navObserver = null;
   function watchPaperNav() {
@@ -639,6 +832,49 @@
   document.body.addEventListener('story-removed', () => toast('Removed from today\'s paper; still unread in Reader'));
   document.body.addEventListener('paper-read', () => toast('Marked read'));
   document.body.addEventListener('paper-section-read', () => toast('Section marked read'));
+  // Back onto a reader page restores htmx's snapshot of it, taken before whatever was read since (in the paper, in
+  // another tab): bring the rows' read and star marks and the counts up to date in place. Refetching the list
+  // instead would drop the pages loaded below and the reader's place in them.
+  // htmx snapshots the page's markup and the window's scroll, not an element's own: keep the list pane's and the
+  // page body's (the paper scrolls inside main on wide screens) in the markup.
+  const OWN_SCROLL = ['#list-body', '#main'];
+  document.body.addEventListener('htmx:beforeHistorySave', () => {
+    OWN_SCROLL.forEach((sel) => { const el = $(sel); if (el && el.scrollTop) el.dataset.scrollTop = String(Math.round(el.scrollTop)); });
+  });
+  document.body.addEventListener('htmx:historyRestore', () => {
+    OWN_SCROLL.forEach((sel) => {
+      const el = $(sel);
+      if (el && el.dataset.scrollTop) { el.scrollTop = Number(el.dataset.scrollTop); delete el.dataset.scrollTop; }
+    });
+    const shown = $$('#list-body .item[data-id]');
+    if (!shown.length) return;
+    if (window.htmx) window.htmx.trigger(document.body, 'counts-changed');
+    fetch('/reader/states?ids=' + shown.slice(0, 500).map((r) => r.dataset.id).join(','), { credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((st) => {
+        if (!st) return;
+        const read = new Set(st.read), starred = new Set(st.starred);
+        shown.forEach((r) => { r.classList.toggle('read', read.has(r.dataset.id)); r.classList.toggle('starred', starred.has(r.dataset.id)); });
+      })
+      .catch(() => {});
+  });
+  // Today's paper leaves out what has been read anywhere, but its snapshot predates the story just opened from it:
+  // fetch the same edition again (no recompile) so stories read since leave, the next one taking the opened one's
+  // place on screen (paperPlace). A Back that missed htmx's cache already came from the server.
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest && e.target.closest('.pstory[id] a[href^="/items/"]');
+    const ins = a && $('#insight');
+    if (ins) ins.dataset.opened = a.closest('.pstory[id]').id;
+  });
+  document.body.addEventListener('htmx:historyRestore', (e) => {
+    const ins = $('#insight'), head = ins && $('[data-edition]', ins);
+    if (!head || !window.htmx || (e.detail && e.detail.cacheMiss)) return;
+    const opened = ins.dataset.opened; delete ins.dataset.opened;
+    setTimeout(() => { // after htmx puts the window's scroll back (phones)
+      const anchor = (opened && document.getElementById(opened)) || $$('.pstory[id], .psection[id]', ins).find((n) => n.getBoundingClientRect().bottom > 0);
+      window.htmx.ajax('GET', '/insights/' + head.dataset.edition, { source: anchor || ins, target: '#insight', swap: 'innerHTML' });
+    }, 0);
+  });
   document.body.addEventListener('paper-tuned-more', () => toast('More like this: its tag and sources gained weight'));
   document.body.addEventListener('paper-tuned-less', () => toast('Less of this: its tag and sources lost weight'));
   document.body.addEventListener('paper-tuned-reset', () => toast('Tuning reset for this story'));
@@ -717,19 +953,286 @@
   // Click selection (htmx opens the article on click).
   document.addEventListener('click', (e) => {
     const row = e.target.closest('#list-body .item');
-    if (row && !e.target.closest('.sources, .cluster-list')) { select(row); if (isMobile()) setPane('article'); }
+    if (row && !e.target.closest('.sources, .cluster-list')) {
+      select(row);
+      if (isMobile()) { if (app() && app().dataset.pane === 'list') expectArticle('right'); setPane('article'); }
+    }
   });
 
-  // ---- Swipe back on mobile (article -> list) ----
-  let touchX = null, touchY = null;
-  document.addEventListener('touchstart', (e) => { if (!isMobile()) return; const t = e.touches[0]; touchX = t.clientX; touchY = t.clientY; }, { passive: true });
-  document.addEventListener('touchend', (e) => {
-    if (touchX === null || !isMobile()) return;
-    const t = e.changedTouches[0];
-    const dx = t.clientX - touchX, dy = Math.abs(t.clientY - touchY);
-    if (touchX < 40 && dx > 80 && dy < 60 && app() && app().dataset.pane === 'article') setPane('list');
-    touchX = touchY = null;
+  // ---- Touch gestures (phones) ----
+  // Rows: drag right to mark read or unread, left to star or unstar (Mail's layout); the action arms past a threshold,
+  // fires on release and offers Undo. Article: drag sideways for the next or previous item, or from the left edge
+  // back to the list. List: from the left edge, the folders; folders: drag left to close. web.css sets touch-action:
+  // pan-y on these surfaces, so vertical scrolling and pinch zoom stay the browser's: a pan it claims arrives here as
+  // pointercancel. Nothing runs while the page is pinch-zoomed (horizontal panning then belongs to the zoom).
+  const EDGE = 28, SLOP = 10;
+  const NO_DRAG = 'input, textarea, select, [contenteditable="true"], details.menu, dialog, .ctxmenu, .ctx-backdrop, .sources, .cluster-expansion, .tags-row, .chip-row';
+  const ICONS = {
+    read: '<path d="M5 12.5l4.5 4.5L19 7"/>',
+    unread: '<circle cx="12" cy="12" r="5" fill="currentColor" stroke="none"/>',
+    star: '<path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1.1 5.9L12 16.9l-5.3 2.8 1.1-5.9L3.5 9.7l5.9-.8z" fill="currentColor"/>',
+    unstar: '<path d="M12 3.5l2.6 5.4 5.9.8-4.3 4.1 1.1 5.9L12 16.9l-5.3 2.8 1.1-5.9L3.5 9.7l5.9-.8z"/>',
+    back: '<path d="M15 5l-7 7 7 7"/>',
+    forward: '<path d="M9 5l7 7-7 7"/>',
+    list: '<path d="M4 6h16M4 12h16M4 18h16"/>',
+  };
+  const svg = (name, size) => '<svg width="' + size + '" height="' + size + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + ICONS[name] + '</svg>';
+  const zoomed = () => !!(window.visualViewport && window.visualViewport.scale > 1.01);
+  let drag = null, swallowClickUntil = 0, pendingEnter = null, enterFallback = null;
+
+  function scrollsSideways(el, stop) {
+    for (let n = el; n && n !== stop; n = n.parentElement) {
+      if (n.scrollWidth > n.clientWidth + 1) { const ox = getComputedStyle(n).overflowX; if (ox === 'auto' || ox === 'scroll') return true; }
+    }
+    return false;
+  }
+  function haptic() { if (navigator.vibrate) { try { navigator.vibrate(8); } catch (_) {} } }
+  function rowTitle(row) { const t = row && row.querySelector('.item-title'); return t ? t.textContent.trim() : ''; }
+  function neighbour(delta) {
+    const all = rows(), cur = selected();
+    if (!cur || !selectionMatchesArticle()) return null;
+    return all[all.indexOf(cur) + delta] || null;
+  }
+
+  // The coloured strip under a row that is being dragged: read or unread on the left, star or unstar on the right.
+  function rowUnder(row) {
+    let u = $('#swipe-under');
+    if (!u) { u = document.createElement('div'); u.id = 'swipe-under'; u.className = 'swipe-under'; u.setAttribute('aria-hidden', 'true'); }
+    const read = row.classList.contains('read'), starred = row.classList.contains('starred');
+    u.innerHTML = '<span class="swipe-act swipe-act-read">' + svg(read ? 'unread' : 'read', 22) + '<span>' + (read ? 'Unread' : 'Read') + '</span></span>'
+      + '<span class="swipe-act swipe-act-star"><span>' + (starred ? 'Unstar' : 'Star') + '</span>' + svg(starred ? 'unstar' : 'star', 22) + '</span>';
+    const body = row.parentElement;
+    if (u.parentElement !== body) body.appendChild(u);
+    const top = row.getBoundingClientRect().top - body.getBoundingClientRect().top;
+    u.style.top = top + 'px'; u.style.height = row.offsetHeight + 'px';
+    delete u.dataset.side; delete u.dataset.armed;
+    return u;
+  }
+  // The pill that says where a page drag goes ("Next" and its title, "List", "Folders").
+  function peek(side, label, title, icon) {
+    let p = $('#swipe-peek');
+    if (!p) { p = document.createElement('div'); p.id = 'swipe-peek'; p.className = 'swipe-peek'; p.setAttribute('aria-hidden', 'true'); document.body.appendChild(p); }
+    p.dataset.side = side; delete p.dataset.armed;
+    p.innerHTML = (side === 'left' ? svg(icon, 18) : '') + '<span class="swipe-peek-text"><small>' + label + '</small>' + (title ? '<b></b>' : '') + '</span>' + (side === 'right' ? svg(icon, 18) : '');
+    if (title) p.querySelector('b').textContent = title;
+    p.style.setProperty('--p', '0');
+    return p;
+  }
+  function dropPeek() { const p = $('#swipe-peek'); if (p) p.remove(); }
+
+  // What a drag that just picked its direction will do; null when that way leads nowhere.
+  function plan(d, dx) {
+    const w = window.innerWidth;
+    if (d.kind === 'row') {
+      d.under = rowUnder(d.el); d.threshold = Math.min(112, w * 0.3);
+      d.el.classList.add('swiping');
+      return true;
+    }
+    if (d.kind === 'back') { if (dx < 0) return false; d.max = w; d.threshold = w * 0.3; d.peek = peek('left', 'Back to', 'the list', 'back'); return true; }
+    if (d.kind === 'folders') { if (dx < 0) return false; d.max = w * 0.5; d.threshold = w * 0.22; d.peek = peek('left', 'Open', 'Folders', 'list'); return true; }
+    if (d.kind === 'close-nav') { if (dx > 0) return false; d.max = w; d.threshold = w * 0.3; d.peek = peek('right', 'Back to', 'the list', 'forward'); return true; }
+    if (d.kind === 'page') {
+      d.threshold = Math.min(140, w * 0.3);
+      d.next = neighbour(1); d.prev = neighbour(-1);
+      const more = $('#list-body .sentinel');
+      if (!d.next) loadMore(more); // ready for the next drag
+      d.atEnd = !d.next && !more && selectionMatchesArticle();
+      return true;
+    }
+    return false;
+  }
+  function rubber(x, limit) { const a = Math.abs(x); return Math.sign(x) * (a <= limit ? a : limit + (a - limit) * 0.25); }
+  function setArmed(d, on) {
+    if (d.armed === on) return;
+    d.armed = on; if (on) haptic();
+    const target = d.kind === 'row' ? d.under : d.peek;
+    if (target) { if (on) target.dataset.armed = ''; else delete target.dataset.armed; }
+  }
+  function track(d, dx) {
+    d.dx = dx;
+    d.el.style.transition = 'none'; // a settle still running from the last drag must not smooth this one
+    const w = window.innerWidth;
+    if (d.kind === 'row') {
+      const x = rubber(dx, w * 0.6);
+      d.el.style.transform = 'translateX(' + x + 'px)';
+      d.under.dataset.side = dx > 0 ? 'read' : 'star';
+      d.under.style.setProperty('--p', String(Math.min(1, Math.abs(dx) / d.threshold)));
+      setArmed(d, Math.abs(dx) >= d.threshold);
+      return;
+    }
+    if (d.kind === 'page') {
+      // Which way now: swap the pill when the finger crosses back over the start.
+      const dir = dx < 0 ? 1 : -1;
+      if (dir !== d.dir) {
+        d.dir = dir; d.armed = false;
+        const to = dir > 0 ? d.next : d.prev;
+        if (to) d.peek = peek(dir > 0 ? 'right' : 'left', dir > 0 ? 'Next' : 'Previous', rowTitle(to), dir > 0 ? 'forward' : 'back');
+        else if (dir > 0 && d.atEnd) d.peek = peek('right', 'That was the last item', 'Back to the list', 'list');
+        else { d.peek = null; dropPeek(); }
+      }
+      const open = dir > 0 ? (d.next || d.atEnd) : d.prev;
+      const x = open ? dx : rubber(dx, 0) * 0.6;
+      d.el.style.transform = 'translateX(' + x + 'px)';
+      d.el.style.opacity = String(1 - Math.min(0.5, Math.abs(x) / w * 0.6));
+      if (d.peek) d.peek.style.setProperty('--p', String(Math.min(1, Math.abs(dx) / d.threshold)));
+      setArmed(d, !!open && Math.abs(dx) >= d.threshold);
+      return;
+    }
+    // back / folders / close-nav: the pane follows the finger one way only.
+    const x = d.kind === 'close-nav' ? Math.min(0, dx) : Math.max(0, Math.min(d.max, dx));
+    d.el.style.transform = 'translateX(' + x + 'px)';
+    d.el.style.opacity = String(1 - Math.min(0.4, Math.abs(x) / w * 0.5));
+    d.peek.style.setProperty('--p', String(Math.min(1, Math.abs(x) / d.threshold)));
+    setArmed(d, Math.abs(x) >= d.threshold);
+  }
+  function settle(el, then) {
+    el.style.transition = 'transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.28s';
+    el.style.transform = ''; el.style.opacity = '';
+    let done = false;
+    const end = () => { if (done) return; done = true; el.style.transition = ''; if (then) then(); };
+    el.addEventListener('transitionend', end, { once: true });
+    setTimeout(end, 340);
+  }
+  function slideOut(el, toRight, then) {
+    el.style.transition = 'transform 0.18s cubic-bezier(0.4, 0, 1, 1), opacity 0.18s';
+    el.style.transform = 'translateX(' + (toRight ? '' : '-') + '100%)'; el.style.opacity = '0';
+    setTimeout(then, 170);
+  }
+  function resetEl(el) { if (el) { el.style.transition = ''; el.style.transform = ''; el.style.opacity = ''; } }
+  // Phones: an article opened from the list stays hidden until it arrives, then slides in (never the last one first).
+  function expectArticle(from) {
+    const el = $('#article'); if (!el) return;
+    pendingEnter = from; el.style.transition = 'none'; el.style.transform = ''; el.style.opacity = '0';
+    clearTimeout(enterFallback);
+    enterFallback = setTimeout(() => { if (pendingEnter) { pendingEnter = null; settle(el); } }, 2500);
+  }
+  // Cancel a drag in progress (the system Back arrived mid-gesture, a menu opened) and put everything back.
+  function leaveDrag() {
+    const d = drag; drag = null;
+    if (!d || !d.live) return;
+    dropPeek();
+    if (d.kind === 'row') { d.el.classList.remove('swiping'); resetEl(d.el); if (d.under) d.under.remove(); } else resetEl(d.el);
+  }
+  function finish(d, commit) {
+    dropPeek();
+    swallowClickUntil = Date.now() + 400;
+    if (d.kind === 'row') {
+      const action = commit ? (d.dx > 0 ? 'read' : 'star') : null;
+      if (action) toggleRowState(action, d.el, { undo: true });
+      settle(d.el, () => {
+        const next = drag && drag.kind === 'row' && drag.live ? drag : null; // a new drag started meanwhile
+        if (!next || next.el !== d.el) d.el.classList.remove('swiping');
+        if (!next && d.under) d.under.remove(); // otherwise the strip already sits under the new row
+      });
+      return;
+    }
+    if (!commit) { settle(d.el); return; }
+    if (d.kind === 'page') {
+      const dir = d.dx < 0 ? 1 : -1;
+      if (dir > 0 && !d.next) { slideOut(d.el, false, () => { toast('That was the last item'); setPane('list'); resetEl(d.el); }); return; }
+      pendingEnter = dir > 0 ? 'right' : 'left';
+      slideOut(d.el, dir < 0, () => {
+        move(dir, true);
+        // Nothing came back (offline, an error): bring the article back rather than leave a blank page.
+        clearTimeout(enterFallback);
+        enterFallback = setTimeout(() => { if (pendingEnter) { pendingEnter = null; settle(d.el); } }, 5000);
+      });
+      return;
+    }
+    if (d.kind === 'back') { slideOut(d.el, true, () => { setPane('list'); resetEl(d.el); }); return; }
+    if (d.kind === 'folders') { setPane('nav'); resetEl(d.el); return; }
+    if (d.kind === 'close-nav') slideOut(d.el, false, () => { setPane('list'); resetEl(d.el); });
+  }
+
+  document.addEventListener('pointerdown', (e) => {
+    if (e.pointerType === 'mouse' || !e.isPrimary || !isMobile() || zoomed()) return;
+    if (drag) leaveDrag();
+    const a = app(), t = e.target;
+    if (!a || !t || !t.closest || t.closest(NO_DRAG) || $('.ctx-backdrop') || $('dialog[open]') || $('details.menu[open]')) return;
+    const pane = a.dataset.pane, x = e.clientX;
+    let kind = null, el = null;
+    if (pane === 'article' && t.closest('#article-pane') && !t.closest('.article-foot')) {
+      el = $('#article');
+      if (x < EDGE) kind = 'back';
+      else if (t.closest('#article') && currentArticle() && !scrollsSideways(t, el)) kind = 'page';
+    } else if (pane === 'list' && t.closest('#list')) {
+      const row = t.closest('#list-body .item');
+      if (x < EDGE && $('#nav')) { kind = 'folders'; el = $('#list-body'); }
+      else if (row) { kind = 'row'; el = row; }
+    } else if (pane === 'nav' && t.closest('#nav')) { kind = 'close-nav'; el = $('#nav'); }
+    if (!kind || !el) return;
+    drag = { kind, el, id: e.pointerId, x0: x, y0: e.clientY, dx: 0, live: false, armed: false, v: 0, lastX: x, lastT: e.timeStamp };
   }, { passive: true });
+
+  document.addEventListener('pointermove', (e) => {
+    const d = drag;
+    if (!d || e.pointerId !== d.id) return;
+    const dx = e.clientX - d.x0, dy = e.clientY - d.y0;
+    if (!d.live) {
+      if (Math.abs(dx) < SLOP && Math.abs(dy) < SLOP) return;
+      // Mostly vertical: a scroll, which the browser already has. Mostly sideways: ours from here on.
+      if (Math.abs(dy) > Math.abs(dx) * 0.8 || !plan(d, dx)) { drag = null; return; }
+      d.live = true; d.x0 += Math.sign(dx) * SLOP;
+    }
+    if ($('.ctx-backdrop')) { leaveDrag(); return; } // the long-press menu opened after all
+    const dt = e.timeStamp - d.lastT;
+    if (dt > 0) { d.v = 0.7 * ((e.clientX - d.lastX) / dt) + 0.3 * d.v; d.lastX = e.clientX; d.lastT = e.timeStamp; }
+    track(d, e.clientX - d.x0);
+  }, { passive: true });
+
+  document.addEventListener('pointerup', (e) => {
+    const d = drag;
+    if (!d || e.pointerId !== d.id) return;
+    drag = null;
+    if (!d.live) return;
+    // A quick flick counts even short of the threshold, as long as it goes the way the drag went.
+    const fling = Math.abs(d.v) > 0.55 && Math.abs(d.dx) > 40 && Math.sign(d.v) === Math.sign(d.dx);
+    let commit = d.armed;
+    if (!commit && fling) {
+      if (d.kind === 'row') commit = true;
+      else if (d.kind === 'page') commit = d.dx < 0 ? !!(d.next || d.atEnd) : !!d.prev;
+      else commit = true;
+    }
+    finish(d, commit);
+  }, { passive: true });
+  document.addEventListener('pointercancel', (e) => {
+    const d = drag;
+    if (!d || e.pointerId !== d.id) return;
+    drag = null;
+    if (d.live) finish(d, false);
+  }, { passive: true });
+  // A drag never ends in a tap: swallow the click some browsers still send, so the row does not open.
+  document.addEventListener('click', (e) => {
+    if (Date.now() < swallowClickUntil) { e.preventDefault(); e.stopPropagation(); swallowClickUntil = 0; }
+  }, true);
+  // The next or previous article arrives: slide it in from the side the old one left by.
+  document.body.addEventListener('htmx:afterSwap', (e) => {
+    const t = e.detail && e.detail.target;
+    if (!t || t.id !== 'article') return;
+    clearTimeout(enterFallback);
+    if (!pendingEnter) return;
+    const from = pendingEnter; pendingEnter = null;
+    resetEl(t);
+    t.classList.remove('enter-left', 'enter-right'); void t.offsetWidth;
+    t.classList.add('enter-' + from);
+    t.addEventListener('animationend', () => t.classList.remove('enter-' + from), { once: true });
+  });
+  document.body.addEventListener('htmx:responseError', () => { if (pendingEnter) { pendingEnter = null; const el = $('#article'); if (el) settle(el); } });
+  // Pinch zoom hands horizontal panning back to the browser (web.css drops touch-action while html.zoomed).
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', () => document.documentElement.classList.toggle('zoomed', zoomed()));
+
+  // One-time hints, so the gestures are discoverable without a manual.
+  function tipOnce(key, text) {
+    try { if (localStorage.getItem('pensieve.tip.' + key)) return; localStorage.setItem('pensieve.tip.' + key, '1'); } catch (_) { return; }
+    setTimeout(() => toast(text, { ttl: 7000 }), 700);
+  }
+  function gestureTips() {
+    if (!isMobile() || !app()) return;
+    const pane = app().dataset.pane;
+    if (pane === 'list' && rows().length) tipOnce('rows', 'Tip: swipe a story right to mark it read, left to star it. Hold it for more.');
+    else if (pane === 'article' && currentArticle() && rows().length > 1) tipOnce('article', 'Tip: swipe sideways for the next or previous story, or from the left edge back to the list.');
+  }
+  document.body.addEventListener('htmx:afterSettle', (e) => { if (e.target && (e.target.id === 'article' || e.target.id === 'list')) gestureTips(); });
 
   // ---- Drag-to-reorder lists (folders) and drag feeds between folders in the nav tree ----
   let dragging = null, draggingFeed = null;
@@ -772,7 +1275,7 @@
 
   // ---- Offline queue replay ----
   window.addEventListener('online', () => { toast('Back online'); if (navigator.serviceWorker && navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage({ type: 'replay' }); });
-  window.addEventListener('offline', () => toast('You are offline; reading works, changes queue', { kind: 'error', ttl: 5000 }));
+  window.addEventListener('offline', () => toast("You're offline. You can keep reading; changes will sync when you're back.", { kind: 'error', ttl: 5000 }));
 
   // ---- Initial state ----
   function init() {
@@ -783,6 +1286,8 @@
     const art = currentArticle();
     if (art) { const row = document.getElementById('item-' + art.dataset.id); if (row) select(row); }
     updatePos();
+    watchSentinels();
+    gestureTips();
     // Manage section chips scroll horizontally on phones: bring the active one into view.
     const mnav = $('.manage-nav'); const active = mnav && mnav.querySelector('.nav-item.active');
     if (mnav && active && mnav.scrollWidth > mnav.clientWidth) mnav.scrollLeft = Math.max(0, active.offsetLeft - (mnav.clientWidth - active.offsetWidth) / 2);
@@ -808,8 +1313,8 @@
   const refreshList = () => { if (window.htmx) window.htmx.trigger(document.body, 'refresh-list'); };
   const copy = (text) => {
     const done = () => toast('Link copied');
-    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, () => toast('Could not copy the link'));
-    else { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); done(); } catch (_) { toast('Could not copy the link'); } ta.remove(); }
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done, () => toast("Couldn't copy the link"));
+    else { const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select(); try { document.execCommand('copy'); done(); } catch (_) { toast("Couldn't copy the link"); } ta.remove(); }
   };
   const nameOf = (el) => { const n = el.querySelector('.ellipsis, .btn-label'); return (n ? n.textContent : el.textContent).trim(); };
 
@@ -882,7 +1387,7 @@
     const on = row.classList.contains(action === 'star' ? 'starred' : 'read');
     const path = '/items/' + id + '/' + (action === 'star' ? (on ? 'unstar' : 'star') : (on ? 'unread' : 'read'));
     post(path).then((r) => {
-      if (!r.ok) { toast('That did not save'); return; }
+      if (!r.ok) { toast("That didn't save"); return; }
       row.classList.toggle(action === 'star' ? 'starred' : 'read', !on);
       toast(action === 'star' ? (on ? 'Unstarred' : 'Starred') : (on ? 'Marked unread' : 'Marked read'));
       countsChanged();
@@ -928,18 +1433,18 @@
       { head: name },
       { label: 'Open', run: () => { a.click(); } },
       { label: 'Mark all as read', run: () => markView('/reader/feed/' + id + '/mark-read', name) },
-      { label: 'Refresh now', run: () => post('/manage/feeds/' + id + '/refresh').then((r) => toast(r.ok ? 'Fetching ' + name : 'Could not queue a refresh')) },
+      { label: 'Refresh now', run: () => post('/manage/feeds/' + id + '/refresh').then((r) => toast(r.ok ? 'Fetching ' + name : "Couldn't queue a refresh")) },
       '-',
       { label: 'Rename…', run: () => ask({ title: 'Rename feed', body: 'Shown in the sidebar and lists.', input: name, label: 'Rename' }).then((v) => { if (typeof v === 'string' && v && v !== name) post('/manage/feeds/' + id + '/rename', { title: v }).then((r) => { if (r.ok) { toast('Renamed to ' + v); countsChanged(); } }); }) },
       { label: 'Move to folder…', run: () => {
-        const choices = folderChoices().map((c) => ({ label: c.label, run: () => post('/manage/feeds/' + id + '/move', { folder_id: c.id }).then((r) => { if (r.ok) { toast('Moved to ' + c.label); countsChanged(); } else toast('Could not move the feed'); }) }));
+        const choices = folderChoices().map((c) => ({ label: c.label, run: () => post('/manage/feeds/' + id + '/move', { folder_id: c.id }).then((r) => { if (r.ok) { toast('Moved to ' + c.label); countsChanged(); } else toast("Couldn't move the feed"); }) }));
         if (!choices.length) { toast('No folders yet. Create one under Manage → Folders.'); return; }
         const rect = a.getBoundingClientRect(); build([{ head: 'Move ' + name + ' to' }].concat(choices), rect.right, rect.top);
       } },
-      { label: 'Pause fetching', run: () => post('/manage/feeds/' + id + '/pause').then((r) => toast(r.ok ? 'Paused ' + name : 'Could not pause')) },
-      { label: 'Resume fetching', run: () => post('/manage/feeds/' + id + '/resume').then((r) => toast(r.ok ? 'Resumed ' + name : 'Could not resume')) },
+      { label: 'Pause fetching', run: () => post('/manage/feeds/' + id + '/pause').then((r) => toast(r.ok ? 'Paused ' + name : "Couldn't pause")) },
+      { label: 'Resume fetching', run: () => post('/manage/feeds/' + id + '/resume').then((r) => toast(r.ok ? 'Resumed ' + name : "Couldn't resume")) },
       '-',
-      { label: 'Unsubscribe…', danger: true, run: () => ask({ title: 'Unsubscribe from ' + name + '?', body: 'Its items are removed from your library too, including starred ones.', label: 'Unsubscribe', danger: true }).then((ok) => { if (ok === true) post('/manage/feeds/' + id + '/unsubscribe').then((r) => { if (r.ok) { toast('Unsubscribed from ' + name); countsChanged(); if (here) location.href = '/reader/unread'; } else toast('Could not unsubscribe'); }); }) },
+      { label: 'Unsubscribe…', danger: true, run: () => ask({ title: 'Unsubscribe from ' + name + '?', body: 'Its items are removed from your library too, including starred ones.', label: 'Unsubscribe', danger: true }).then((ok) => { if (ok === true) post('/manage/feeds/' + id + '/unsubscribe').then((r) => { if (r.ok) { toast('Unsubscribed from ' + name); countsChanged(); if (here) location.href = '/reader/unread'; } else toast("Couldn't unsubscribe"); }); }) },
     ];
   }
   function folderItems(a) {
@@ -951,7 +1456,7 @@
       { label: 'Mark all as read', run: () => markView('/reader/folder/' + id + '/mark-read', name) },
       '-',
       { label: 'Rename…', run: () => ask({ title: 'Rename folder', input: name, label: 'Rename' }).then((v) => { if (typeof v === 'string' && v && v !== name) post('/manage/folders/' + id + '/rename', { name: v }).then((r) => { if (r.ok) { toast('Renamed to ' + v); countsChanged(); } }); }) },
-      { label: 'Delete folder…', danger: true, run: () => ask({ title: 'Delete ' + name + '?', body: 'Its feeds stay subscribed and move to Inbox.', label: 'Delete folder', danger: true }).then((ok) => { if (ok === true) post('/manage/folders/' + id + '/delete').then((r) => { if (r.ok) { toast('Deleted ' + name); countsChanged(); if (here) location.href = '/reader/unread'; } else toast('Could not delete the folder'); }); }) },
+      { label: 'Delete folder…', danger: true, run: () => ask({ title: 'Delete ' + name + '?', body: 'Its feeds stay subscribed and move to Inbox.', label: 'Delete folder', danger: true }).then((ok) => { if (ok === true) post('/manage/folders/' + id + '/delete').then((r) => { if (r.ok) { toast('Deleted ' + name); countsChanged(); if (here) location.href = '/reader/unread'; } else toast("Couldn't delete the folder"); }); }) },
     ];
   }
   function articleItems() {

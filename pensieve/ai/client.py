@@ -21,7 +21,12 @@ log = logging.getLogger(__name__)
 
 SESSION_ID = "pensieve"
 EMBED_BATCH = 32
+JSON_ATTEMPTS = 2  # one retry on malformed output, same model
+EMBED_MAX_INPUT_TOKENS = 8_000  # bge-m3 serves an 8192-token window, independent of the chat input windows
 CHARS_PER_TOKEN = 4
+# "Never read" for a monotonic timestamp. Not 0.0: time.monotonic() counts from boot, so for the first TTL after a
+# host (or CI runner) boots, now - 0.0 looked fresh and the catalog was never read.
+NEVER = float("-inf")
 
 
 class LLMError(Exception):
@@ -60,6 +65,12 @@ probe; ``reset_embedding_probe()`` clears it (tests, or after a gateway config c
 def reset_embedding_probe() -> None:
     _EMBED_PROBE["available"] = None
     _EMBED_PROBE["checked_at"] = 0.0
+
+
+def reset_catalog_cache() -> None:
+    """Tests: forget the catalog's per-model output floors and when it was read."""
+    _OUTPUT_FLOORS.clear()
+    _CATALOG_READ["at"] = NEVER
 
 
 def approx_tokens(text: str) -> int:
@@ -167,6 +178,11 @@ def _extract_json(content: str) -> Any:
 
 _EFFORTS: dict[str, list[str]] = {}
 """Per-model ``reasoning_efforts`` the catalog advertises (process-wide, refreshed by every ``health()``)."""
+_OUTPUT_FLOORS: dict[str, int] = {}
+"""Per-model ``max_output_tokens`` the catalog advertises: every chat request asks for at least this much, since a
+reasoning model spends output tokens before its answer (Gemma 32K, Qwen 64K on the gateway)."""
+_CATALOG_READ = {"at": NEVER}
+CATALOG_TTL_S = 600
 _EFFORT_WARNED: set[tuple[str, str]] = set()
 _EFFORT_LADDER = ["none", "minimal", "low", "medium", "high", "xhigh", "max"]
 _EFFORT_ALIASES = {"off": "none"}  # a route may spell "off" in its catalog; LiteLLM validates "none"
@@ -229,7 +245,7 @@ class LLMClient:
     @property
     def http(self) -> httpx.AsyncClient:
         if self._http is None:
-            self._http = httpx.AsyncClient(timeout=httpx.Timeout(self.settings.llm_timeout_s))
+            self._http = httpx.AsyncClient(timeout=httpx.Timeout(self.timeout_for(None)))
         return self._http
 
     async def aclose(self) -> None:
@@ -283,7 +299,7 @@ class LLMClient:
         body: dict[str, Any] = {
             "model": model,
             "messages": messages,
-            "max_tokens": max_tokens,
+            "max_tokens": max(max_tokens, self.settings.llm_max_output_tokens),
             "temperature": 0.2,
         }
         effort = self.reasoning_value(model, reasoning)
@@ -291,6 +307,17 @@ class LLMClient:
             body["reasoning_effort"] = effort
         body.update(extra)
         return body
+
+    def timeout_for(self, model: str | None) -> float:
+        """Seconds one request may take (Gateway card); a model serving both roles gets the longer limit."""
+        s = self.settings
+        if model == s.llm_long_model == s.llm_fast_model:
+            minutes = max(s.llm_fast_timeout_min, s.llm_long_timeout_min)
+        elif model == s.llm_long_model:
+            minutes = s.llm_long_timeout_min
+        else:
+            minutes = s.llm_fast_timeout_min
+        return minutes * 60.0
 
     def _slot(self, model: str | None) -> asyncio.Semaphore:
         """Process-wide in-flight limit per model, so the worker's jobs do not queue behind one GPU and all time out.
@@ -305,7 +332,7 @@ class LLMClient:
         elif model == s.llm_fast_model:
             key, limit = "fast", s.llm_fast_concurrency
         else:
-            key, limit = "other", s.llm_fast_concurrency  # embeddings and fallbacks
+            key, limit = "other", s.llm_fast_concurrency  # embeddings and any other model
         sem = _SLOTS.get(f"{key}:{limit}")
         if sem is None:
             sem = _SLOTS[f"{key}:{limit}"] = asyncio.Semaphore(max(1, limit))
@@ -315,10 +342,24 @@ class LLMClient:
         from pensieve.ai.model_choice import apply_overrides
 
         await apply_overrides()  # admin-chosen models/effort, refreshed at most once a minute per process
+        if path == "/chat/completions":
+            if time.monotonic() - _CATALOG_READ["at"] > CATALOG_TTL_S:
+                await self.health()
+            body["max_tokens"] = max(body.get("max_tokens") or 0, _OUTPUT_FLOORS.get(body.get("model"), 0))
         url = f"{self.settings.llm_base_url.rstrip('/')}{path}"
         try:
             async with self._slot(body.get("model")):
-                resp = await self.http.post(url, json=body, headers=self._headers(workflow))
+                resp = await self.http.post(
+                    url,
+                    json=body,
+                    headers=self._headers(workflow),
+                    timeout=self.timeout_for(body.get("model")),
+                )
+        except httpx.TimeoutException as exc:
+            limit = self.timeout_for(body.get("model")) / 60
+            raise LLMError(
+                f"{body.get('model')} gave no answer within {limit:g} min; raise its timeout on the Gateway card"
+            ) from exc
         except httpx.HTTPError as exc:
             raise LLMError(f"gateway request failed: {exc!r}") from exc
         if resp.status_code >= 400:
@@ -336,13 +377,16 @@ class LLMClient:
             content = choice["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
             raise LLMError("gateway response has no choices[0].message.content") from exc
-        if not isinstance(content, str):
-            raise LLMError("gateway returned non-text content")
         if choice.get("finish_reason") == "length":
+            # Reasoning can spend the whole window before any answer, which arrives as content null.
             raise LLMTruncated(
-                f"{workflow}: output truncated at max_tokens={body.get('max_tokens')} on {body.get('model')}",
-                content,
+                f"{workflow}: {body.get('model')} hit max_tokens={body.get('max_tokens')}"
+                f"{' while still reasoning' if content is None else ''} (effort {body.get('reasoning_effort') or 'off'});"
+                " raise the output window or lower reasoning on the Gateway card",
+                content or "",
             )
+        if not isinstance(content, str):
+            raise LLMError(f"{workflow}: {body.get('model')} returned no text content")
         return content
 
     # -- public -------------------------------------------------------------------------------------------
@@ -360,12 +404,12 @@ class LLMClient:
         reasoning: str | None = None,
         validate_with: dict | None = None,
     ) -> dict:
-        """Structured output. Retries once on malformed output, then once on the long model, then raises.
+        """Structured output on ``model`` alone. Retries once on malformed output, then raises; never switches models.
 
         ``reasoning`` is the per-call thinking level (``None`` = off, the right default for extraction work);
         ``validate_with`` optionally replaces ``schema`` for local validation so callers can validate loosely
-        here and strictly per entry themselves. A truncated answer (``finish_reason == "length"``) is retried
-        with ``max_tokens`` doubled, capped at ``settings.llm_max_output_tokens``.
+        here and strictly per entry themselves. A truncated answer raises ``LLMTruncated`` at once: the output
+        window is the admin's setting, so a retry at the same size would only fail again.
         """
         system, user = self._fit(model, system, user)
         messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
@@ -373,13 +417,9 @@ class LLMClient:
             "type": "json_schema",
             "json_schema": {"name": name, "schema": schema, "strict": True},
         }
-        attempts = [model, model]
-        if model != self.settings.llm_long_model:
-            attempts.append(self.settings.llm_long_model)
-        cap = max(self.settings.llm_max_output_tokens, max_tokens)
+        body = self._body(model, messages, max_tokens, reasoning, response_format=response_format)
         last: Exception | None = None
-        for attempt_model in attempts:
-            body = self._body(attempt_model, messages, max_tokens, reasoning, response_format=response_format)
+        for _ in range(JSON_ATTEMPTS):
             try:
                 content = await self._completion(body, workflow)
                 parsed = _extract_json(content)
@@ -387,21 +427,12 @@ class LLMClient:
                     raise LLMError("model returned non-object JSON")
                 validate_schema(parsed, validate_with or schema)
                 return parsed
-            except LLMTruncated as exc:
-                last = exc
-                grown = min(max_tokens * 2, cap)
-                log.warning(
-                    "chat_json(%s) truncated on %s at max_tokens=%s; retrying with %s",
-                    workflow,
-                    attempt_model,
-                    max_tokens,
-                    grown,
-                )
-                max_tokens = grown
+            except LLMTruncated:
+                raise
             except (LLMError, ValueError) as exc:
                 last = exc
-                log.warning("chat_json(%s) attempt on %s failed: %s", workflow, attempt_model, exc)
-        raise LLMError(f"chat_json({workflow}) failed after {len(attempts)} attempts: {last}")
+                log.warning("chat_json(%s) attempt on %s failed: %s", workflow, model, exc)
+        raise LLMError(f"chat_json({workflow}) failed on {model} after {JSON_ATTEMPTS} attempts: {last}")
 
     async def chat_text(
         self,
@@ -413,7 +444,7 @@ class LLMClient:
         workflow: str,
         reasoning: str | None = None,
     ) -> str:
-        """Free text. A truncated answer is returned as-is (with a warning) rather than discarded."""
+        """Free text. A truncated answer is returned as-is (with a warning); one with no text at all raises."""
         system, user = self._fit(model, system, user)
         messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
         try:
@@ -421,6 +452,8 @@ class LLMClient:
                 await self._completion(self._body(model, messages, max_tokens, reasoning), workflow)
             ).strip()
         except LLMTruncated as exc:
+            if not exc.content.strip():
+                raise
             log.warning("chat_text(%s): %s", workflow, exc)
             return exc.content.strip()
 
@@ -432,7 +465,7 @@ class LLMClient:
             return None
         out: list[list[float]] = []
         url = f"{self.settings.llm_base_url.rstrip('/')}/embeddings"
-        budget = self.settings.llm_max_input_tokens_short
+        budget = EMBED_MAX_INPUT_TOKENS
         for start in range(0, len(texts), EMBED_BATCH):
             batch = [truncate_to_tokens(t, budget) or " " for t in texts[start : start + EMBED_BATCH]]
             body = {"model": self.settings.llm_embedding_model, "input": batch}
@@ -478,6 +511,8 @@ class LLMClient:
             efforts = _catalog_efforts(payload)
             if efforts:
                 _EFFORTS.update(efforts)
+            _OUTPUT_FLOORS.update(_catalog_outputs(payload))
+            _CATALOG_READ["at"] = time.monotonic()
             return {"ok": True, "models": _catalog_models(payload), "latency_ms": latency, "efforts": efforts}
         except Exception as exc:  # noqa: BLE001 - health must never raise
             log.warning("gateway health check failed: %r", exc)
@@ -488,6 +523,19 @@ def _catalog_rows(payload: Any) -> list:
     if isinstance(payload, dict):
         return payload.get("data") or payload.get("models") or payload.get("model_list") or []
     return payload if isinstance(payload, list) else []
+
+
+def _catalog_outputs(payload: Any) -> dict[str, int]:
+    """{model id: max_output_tokens} for catalog rows that advertise one."""
+    out: dict[str, int] = {}
+    for row in _catalog_rows(payload):
+        if not isinstance(row, dict):
+            continue
+        name = row.get("id") or row.get("model_name") or row.get("name")
+        value = row.get("max_output_tokens")
+        if name and isinstance(value, int) and value > 0:
+            out[str(name)] = value
+    return out
 
 
 def _catalog_efforts(payload: Any) -> dict[str, list[str]]:

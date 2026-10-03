@@ -94,7 +94,8 @@
       {% if row.feed.kind == 'saved' %}<span class="item-source ellipsis">{{ icon('bookmark', 12) }} {{ row.item.url|host }}</span>{% else %}<span class="item-source ellipsis">{{ row.feed.title or row.feed.url }}</span>{% endif %}
       <span aria-hidden="true">·</span>
       <time datetime="{{ row.item.published_at.isoformat() }}">{{ row.item.published_at|timeago }}</time>
-      {% if row.is_starred %}<span class="item-star" title="Starred">{{ icon('star-filled', 12) }}<span class="sr-only">Starred</span></span>{% endif %}
+      {# Always rendered: CSS shows it for .item.starred, so a star from a swipe or the s key appears at once. #}
+      <span class="item-star" title="Starred">{{ icon('star-filled', 12) }}<span class="sr-only">Starred</span></span>
     </div>
     <div class="item-title">{% if q %}{{ (row.item.title or '(untitled)')|highlight(q) }}{% else %}{{ row.item.title or '(untitled)' }}{% endif %}</div>
     <div class="item-snippet">{% if q %}{{ (row.item.content_text|snippet(140))|highlight(q) }}{% else %}{{ row.item.content_text|snippet(140) }}{% endif %}</div>

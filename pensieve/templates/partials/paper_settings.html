@@ -9,8 +9,10 @@
           <select class="input input-sm" id="ps-group" name="group_by">{% for v, label in [('tag', 'AI tag'), ('folder', 'Folder')] %}<option value="{{ v }}"{% if config.group_by == v %} selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
         <div class="field"><label for="ps-window">Covers</label>
           <select class="input input-sm" id="ps-window" name="window_hours">{% for h in [24, 48, 72] %}<option value="{{ h }}"{% if config.window_hours == h %} selected{% endif %}>Last {{ h }} hours</option>{% endfor %}</select></div>
-        <div class="field"><label for="ps-per">Stories per section</label><input class="input input-sm" id="ps-per" type="number" name="per_section" min="1" max="50" value="{{ config.per_section }}"></div>
-        <div class="field"><label for="ps-min">Needs sources</label><input class="input input-sm" id="ps-min" type="number" name="min_sources" min="1" max="10" value="{{ config.min_sources }}"><span class="field-hint">Stories with fewer go to “In brief”.</span></div>
+        <div class="field"><label for="ps-front">Front page</label><input class="input input-sm" id="ps-front" type="number" name="front_page" min="0" max="30" value="{{ config.front_page }}"><span class="field-hint">Your best stories, on top. 0 turns it off.</span></div>
+        <div class="field"><label for="ps-per">Stories per section</label><input class="input input-sm" id="ps-per" type="number" name="per_section" min="1" max="50" value="{{ config.per_section }}"><span class="field-hint">The rest wait behind “Show more”.</span></div>
+        <div class="field"><label for="ps-small">Smallest section</label><input class="input input-sm" id="ps-small" type="number" name="min_section" min="1" max="10" value="{{ config.min_section }}"><span class="field-hint">Tags with fewer stories join “Everything else”.</span></div>
+        <div class="field"><label for="ps-min">Minimum sources</label><input class="input input-sm" id="ps-min" type="number" name="min_sources" min="1" max="10" value="{{ config.min_sources }}"><span class="field-hint">Stories with fewer go to “In brief”.</span></div>
       </div>
       <div class="paper-settings-checks">
         <label class="check"><input type="checkbox" class="checkbox" name="show_summaries" value="1"{% if config.show_summaries %} checked{% endif %}><span>Show summaries</span></label>
@@ -42,11 +44,11 @@
         </div>
         <div class="field"><label for="ps-focus">What the why should weigh</label>
           <textarea class="input textarea input-sm" id="ps-focus" name="focus" rows="2" maxlength="400" placeholder="e.g. I run a homelab and care about self-hosting and Apple platforms; skip funding news and vendor marketing.">{{ summary_prefs.focus }}</textarea>
-          <span class="field-hint">Read by the model together with your reader profile (Manage → AI and memory).</span></div>
+          <span class="field-hint">Used along with your interests (Manage → AI and memory).</span></div>
       </div>
       <div class="field">
         <span class="field-label">Tuning</span>
-        <span class="field-hint">“More like this” and “Less” on a story move these. Weights count like extra or missing sources when ranking (+1 lifts a single-source story above a two-source one); a section the reader asked for more of comes first among the automatic ones.</span>
+        <span class="field-hint">“More like this” and “Less like this” on a story move these. Stories you boost rank higher; ones you lower drop into In brief.</span>
         {% if tuned.tags or tuned.feeds %}
         <div class="tune-rows">
           {% for row in tuned.tags %}<label class="tune-row"><span class="chip chip-ai chip-sm">{{ row.title }}</span><input class="input input-sm tune-weight" type="number" step="0.5" min="-3" max="3" name="tune_tag:{{ row.key }}" value="{{ row.weight }}" aria-label="Weight for {{ row.title }}"></label>{% endfor %}
@@ -54,17 +56,24 @@
         </div>
         <label class="check"><input type="checkbox" class="checkbox" name="reset_tuning" value="1"><span>Reset every weight to zero</span></label>
         {% else %}
-        <p class="muted small">Nothing tuned yet. Open a story and press “More like this” or “Less”.</p>
+        <p class="muted small">Nothing tuned yet. Open a story and press “More like this” or “Less like this”.</p>
         {% endif %}
       </div>
       <div class="field">
-        <span class="field-label">Muted sources</span>
-        <span class="field-hint">Muted feeds never appear in the paper.</span>
-        <div class="muted-feeds">
-          {% for f in feeds %}<label class="check"><input type="checkbox" class="checkbox" name="muted_feed" value="{{ f.id }}"{% if f.id|string in muted %} checked{% endif %}><span>{{ f.title or f.url }}</span></label>{% endfor %}
+        <span class="field-label">Sources</span>
+        <span class="field-hint">Give a busy source a daily limit: the paper keeps only its best stories for you and always shows them; the rest stay unread in Reader. Stories several sources cover are never held back. Muted sources never appear.</span>
+        <div class="source-rows">
+          <div class="source-row source-row-head" aria-hidden="true"><span>Source</span><span>A day</span><span>Mute</span></div>
+          {% for row in sources %}{% set fid = row.feed.id|string %}{% set name = row.feed.title or row.feed.url %}
+          <div class="source-row">
+            <span class="source-name"><span class="source-title">{{ name }}</span> <span class="faint">{{ row.volume }}</span></span>
+            <input class="input input-sm source-limit" type="number" name="feed_limit:{{ fid }}" min="0" max="50" placeholder="All" value="{{ config.feed_limits.get(fid, '') }}" aria-label="Stories a day from {{ name }}">
+            <label class="check source-mute"><input type="checkbox" class="checkbox" name="muted_feed" value="{{ fid }}"{% if fid in muted %} checked{% endif %} aria-label="Mute {{ name }}"></label>
+          </div>
+          {% endfor %}
         </div>
       </div>
     </div>
-    <div class="dialog-foot"><button type="button" class="btn" data-dialog-dismiss>Cancel</button><button class="btn btn-primary" type="submit">Save and recompile</button></div>
+    <div class="dialog-foot"><button type="button" class="btn" data-dialog-dismiss>Cancel</button><button class="btn btn-primary" type="submit">Save</button></div>
   </form>
 </dialog>

@@ -202,7 +202,28 @@ async def test_related_history_failures_are_swallowed(client, session, user, mon
     fake_module(monkeypatch, "pensieve.ai.service", related_history=related_history)
     await login(client, user)
     r = await client.get(f"/items/{item.id}", headers=HX)
-    assert r.status_code == 200 and "From your memory" not in r.text
+    assert r.status_code == 200 and "Related in your reading" not in r.text
+
+
+async def test_related_panel_shows_titles_and_notes(client, session, user, monkeypatch):
+    from pensieve.ai.memory import RelatedItem
+
+    feed = await seed_feed(session, user, "Feed")
+    item = await seed_item(session, feed, "Today")
+    older = await seed_item(session, feed, "Older piece")
+    note = models.Note(user_id=user.id, item_id=older.id, body="Worth revisiting for the migration")
+    session.add(note)
+    await session.commit()
+
+    async def related_history(session_, user_, item_, limit=5):
+        return [RelatedItem(item=older, note=note, similarity=0.9)]
+
+    fake_module(monkeypatch, "pensieve.ai.service", related_history=related_history)
+    await login(client, user)
+    r = await client.get(f"/items/{item.id}", headers=HX)
+    assert r.status_code == 200 and "Related in your reading" in r.text
+    assert "Older piece" in r.text and f'hx-get="/items/{older.id}"' in r.text
+    assert "Your note: Worth revisiting for the migration" in r.text
 
 
 async def test_boosted_deep_link_renders_the_whole_reader(client, session, user):
@@ -216,6 +237,16 @@ async def test_boosted_deep_link_renders_the_whole_reader(client, session, user)
     assert r.status_code == 200 and "Deep link" in r.text
     assert "<html" in r.text and 'id="article-toolbar"' in r.text and "pane-nav" in r.text
     assert "Mark read" in r.text  # the toolbar is present, with the read toggle
+    # ...and not out of band: the boosted swap would look for #article-toolbar on the page being left (the paper,
+    # the digest), find none and drop the toolbar, and the mark-read-on-open aimed at it with it.
+    assert 'id="article-toolbar" hx-swap-oob' not in r.text
+    assert f'hx-post="/items/{item.id}/open"' in r.text
+    # The pane swap still sends it out of band, into the reader's head.
+    r = await client.get(f"/items/{item.id}", headers=HX)
+    assert 'id="article-toolbar" hx-swap-oob="innerHTML"' in r.text
+    # A Back that missed htmx's history cache asks the server for the page: the whole page, not the partial.
+    r = await client.get(f"/items/{item.id}", headers={**HX, "HX-History-Restore-Request": "true"})
+    assert "<html" in r.text and "pane-nav" in r.text
 
 
 async def test_thin_items_open_reader_view_automatically(client, session, user, monkeypatch):

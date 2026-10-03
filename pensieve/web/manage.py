@@ -12,9 +12,10 @@ from typing import Annotated, Any
 import httpx
 from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import RedirectResponse, Response
-from sqlalchemy import delete, func, select
+from sqlalchemy import case, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from pensieve.ai import ledger
 from pensieve.ai import retry as ai_retry
 from pensieve.auth import (
     generate_api_token,
@@ -845,6 +846,9 @@ async def ai_page(request: Request, user: CurrentUser, session: DB):
     profile = await session.scalar(
         select(Profile).where(Profile.user_id == user.id).order_by(Profile.version.desc()).limit(1)
     )
+    from pensieve.ai import model_choice
+
+    await model_choice.apply_overrides(session)  # the hint names the Gateway card's job limit
     # A failed job whose work a later run already did is settled first, so the count is what is still missing.
     if await ai_retry.reconcile(session, user.id):
         await session.commit()
@@ -858,6 +862,27 @@ async def ai_page(request: Request, user: CurrentUser, session: DB):
             continue
         key = "failed" if status_ == "partial" else status_
         stats[key] = stats.get(key, 0) + int(n)
+    # Waiting work comes from the durable ledger, so a deep backlog shows in full, with the articles it covers.
+    pending = (
+        await session.execute(
+            select(
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (
+                                AIJob.kind.in_(ledger.ITEM_LIST_KINDS)
+                                & (func.jsonb_typeof(AIJob.args[1]) == "array"),
+                                func.jsonb_array_length(AIJob.args[1]),
+                            )
+                        )
+                    ),
+                    0,
+                ),
+                func.min(AIJob.created_at),
+            ).where(AIJob.user_id == user.id, AIJob.status == "queued")
+        )
+    ).one()
+    stats["pending_articles"], stats["pending_since"] = int(pending[0]), pending[1]
     recent_failed = list(
         await session.scalars(
             select(AIJob).where(ai_retry.failed_filter(user.id)).order_by(AIJob.created_at.desc()).limit(8)
@@ -927,6 +952,9 @@ async def gateway_status(request: Request, user: CurrentUser):
         "long_idx": model_choice.ladder_index(model_choice.effective()["long_reasoning"]),
         "can_edit": user.role == UserRole.admin,
         "max_count": model_choice.MAX_COUNT,
+        "min_tokens": model_choice.MIN_TOKENS,
+        "max_tokens": model_choice.MAX_TOKENS,
+        "max_minutes": model_choice.MAX_MINUTES,
     }
     # The pickers list every model the gateway knows plus whatever is chosen or configured, so a model the
     # catalog is lagging on (or one typed by hand) is never silently dropped from the form.
@@ -940,7 +968,7 @@ async def gateway_status(request: Request, user: CurrentUser):
 
 @router.post("/ai/models")
 async def save_models(request: Request, user: CsrfUser, session: DB):
-    """Admin-only: choose the gateway models, reasoning efforts and concurrency the whole install uses."""
+    """Admin-only: choose the gateway models, reasoning efforts, concurrency, token windows and timeouts for the install."""
     if user.role != UserRole.admin:
         raise HTTPException(status_code=403, detail="Only an admin can change the gateway models")
     from pensieve.ai import model_choice
@@ -1387,6 +1415,22 @@ async def _target_user(session: AsyncSession, user_id: uuid.UUID) -> User:
     if target is None:
         raise HTTPException(status_code=404)
     return target
+
+
+@router.post("/users/{user_id}/name")
+async def rename_user(
+    request: Request,
+    user_id: uuid.UUID,
+    user: CsrfUser,
+    session: DB,
+    display_name: Annotated[str, Form()] = "",
+):
+    """Fix how a household member is named (the invite's optional name, or the email's local part)."""
+    require_admin(user)
+    target = await _target_user(session, user_id)
+    target.display_name = display_name.strip()[:120] or target.email.split("@")[0]
+    await session.commit()
+    return back("/manage/users", "user_saved")
 
 
 @router.post("/users/{user_id}/role")

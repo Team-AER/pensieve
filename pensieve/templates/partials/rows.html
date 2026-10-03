@@ -15,7 +15,10 @@
 {% endif %}
 {% endfor %}
 {% if has_more %}
-<div class="sentinel" hx-get="{{ list_url }}?{{ opts.query }}&after={{ next_cursor }}" hx-trigger="revealed" hx-swap="outerHTML" hx-target="this" hx-indicator="this">
-  <span class="faint htmx-indicator"><span class="spinner"></span></span><span class="faint"> Loading more…</span>
+{# reader.js fires "more" when this nears the view of whatever scrolls (the list pane, or the page on phones);
+   htmx's "revealed" only watches window scrolling, so it never fired inside the desktop list pane. #}
+<div class="sentinel" hx-get="{{ list_url }}?{{ opts.query }}&after={{ next_cursor }}" hx-trigger="more, click" hx-swap="outerHTML" hx-target="this" hx-indicator="this">
+  <span class="faint htmx-indicator"><span class="spinner"></span></span><span class="faint sentinel-text"> Loading more…</span>
+  <button type="button" class="btn btn-sm sentinel-retry">Try again</button>
 </div>
 {% endif %}

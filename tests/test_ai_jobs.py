@@ -42,13 +42,15 @@ async def seed(session, user, n=2):
 
 @pytest.fixture(autouse=True)
 def enqueued(monkeypatch):
-    """Record what a job hands to the queue when its ctx carries no arq redis (never touch a real Redis)."""
+    """Record what a job hands to the ledger when its ctx carries no arq redis (never touch a real Redis or DB row)."""
     calls = []
 
-    async def fake_enqueue(function, *args, _job_id=None, **kwargs):
-        calls.append((function, args, _job_id))
+    async def fake_enqueue(function, *args, job_id=None, redis=None):
+        if redis is not None:  # a test's own FakeRedis in ctx sees the job as the worker's pool would
+            return await redis.enqueue_job(function, *args, _job_id=job_id)
+        calls.append((function, args, job_id))
 
-    monkeypatch.setattr(jobs.queue, "enqueue", fake_enqueue)
+    monkeypatch.setattr(jobs.ledger, "enqueue", fake_enqueue)
     return calls
 
 
@@ -72,14 +74,15 @@ def test_function_registry_matches_queue_contract():
         queue.AI_SUMMARY_SWEEP,
     ]
     names = {c.coroutine.__name__: c for c in CRON_JOBS}
-    assert set(names) == {"ai_dispatch_daily", "ai_dispatch_weekly", "ai_summary_sweep"}
+    assert set(names) == {"ai_dispatch_daily", "ai_dispatch_weekly", "ai_summary_sweep", "ai_requeue_lost"}
+    assert names["ai_requeue_lost"].minute == set(range(2, 60, 5))
     assert names["ai_summary_sweep"].minute == {5, 35} and names["ai_summary_sweep"].hour is None
     assert names["ai_dispatch_weekly"].weekday == 6 and names["ai_dispatch_weekly"].hour == 8
     assert names["ai_dispatch_daily"].minute == {0, 15, 30, 45} and names["ai_dispatch_daily"].hour is None
     from pensieve.worker import AIWorkerSettings, WorkerSettings
 
     assert WorkerSettings.timezone == ZoneInfo(settings.timezone)
-    assert AIWorkerSettings.job_timeout == jobs.JOB_TIMEOUT_S
+    assert AIWorkerSettings.job_timeout == jobs.job_timeout_s() == settings.ai_job_timeout_min * 60
     assert AIWorkerSettings.queue_name == "pensieve:ai" and WorkerSettings.queue_name == "arq:queue"
 
 
@@ -144,6 +147,24 @@ async def test_process_new_items_retries_on_llm_error_then_finishes(session, use
     await jobs.ai_process_new_items({"job_try": jobs.MAX_TRIES}, str(feed.id), [str(i.id) for i in items])
     row = await ai_job(session, "process_items", feed.id)
     assert row.status == "partial" and row.attempts == jobs.MAX_TRIES and "tag failed" in row.last_error
+
+
+async def test_items_the_model_leaves_out_are_never_done(session, user, gateway):
+    feed, items = await seed(session, user, n=3)
+    # the model answers for an index that is not in the batch, so every item is left out on every try
+    stray = {"items": [{"index": 9, "tags": [{"name": "ai", "confidence": 0.9}], "content_type": "article"}]}
+    gateway.chat_by_workflow({"tag_items": stray, "cluster": {"same_story": False, "headline": ""}})
+    with pytest.raises(Retry):
+        await jobs.ai_process_new_items({"job_try": 1}, str(feed.id), [str(i.id) for i in items])
+    row = await ai_job(session, "process_items", feed.id)
+    assert row.status == "queued" and "left out or mangled" in row.last_error
+    await jobs.ai_process_new_items({"job_try": jobs.MAX_TRIES}, str(feed.id), [str(i.id) for i in items])
+    row = await ai_job(session, "process_items", feed.id)
+    # embeddings were written, tagging was not: partial, never done
+    assert (
+        row.status == "partial"
+        and "tag failed: tag_items: the model left out or mangled 3 of 3" in row.last_error
+    )
 
 
 async def test_process_new_items_all_steps_failing_is_failed(session, user, gateway):
@@ -218,7 +239,7 @@ async def test_reaper_fails_stale_running_rows(session, user, gateway):
         kind="digest",
         user_id=user.id,
         status="running",
-        started_at=now() - timedelta(seconds=jobs.JOB_TIMEOUT_S + 5),
+        started_at=now() - timedelta(seconds=jobs.job_timeout_s() + 5),
     )
     fresh = models.AIJob(kind="digest", user_id=user.id, status="running", started_at=now())
     session.add_all([stale, fresh])
@@ -370,7 +391,8 @@ async def test_daily_paper_job(session, user, gateway):
     row = await ai_job(session, "paper", user.id)
     assert row.status == "done" and "2 stories" in row.last_error and gateway.chat_calls == []
     edition = await session.scalar(select(models.Insight).where(models.Insight.kind == "paper"))
-    assert edition is not None and [s["key"] for s in edition.body["sections"]] == ["ai", "other"]
+    # two unread stories both fit on the front page, so no section is left under it
+    assert edition is not None and [s["key"] for s in edition.body["sections"]] == ["front-page"]
 
 
 async def test_jobs_skip_when_ai_disabled(session, user, gateway):

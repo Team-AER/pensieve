@@ -23,9 +23,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pensieve import models, queue
-from pensieve.ai import categorize, cluster, embeddings, insights, memory, paper
+from pensieve.ai import categorize, cluster, embeddings, insights, ledger, memory, paper
 from pensieve.ai.client import LLMClient, LLMError
 from pensieve.ai.common import ai_on, user_feed_ids, utcnow
+from pensieve.ai.ledger import JOB_NS
 from pensieve.config import get_settings
 from pensieve.db import session_scope
 
@@ -34,14 +35,19 @@ log = logging.getLogger(__name__)
 HEALTH_DEFER = timedelta(minutes=10)
 ERROR_DEFER = timedelta(minutes=2)
 MAX_TRIES = 3
-JOB_TIMEOUT_S = 1800
-"""Must match ``WorkerSettings.job_timeout``; the reaper fails ``running`` mirror rows older than this."""
-JOB_NS = uuid.UUID("6f0c2a1e-6b0a-4b7e-9a51-1c1a9d3f0a11")
+
+
+def job_timeout_s() -> int:
+    """The AI worker's per-job limit (Gateway card); the reaper fails ``running`` mirror rows older than this."""
+    return get_settings().ai_job_timeout_min * 60
+
+
 DISPATCH_MINUTES = {0, 15, 30, 45}
 STATUS_DONE = "done"
 STATUS_PARTIAL = "partial"
 STATUS_FAILED = "failed"
 SWEEP_MINUTES = {5, 35}
+REQUEUE_MINUTES = set(range(2, 60, 5))  # ledger check, off the :00/:05 minutes the other crons use
 SWEEP_GRACE = timedelta(minutes=20)
 """The sweep leaves items younger than this alone: their eager summary job is most likely still queued."""
 SWEEP_MAX_ITEMS = 200
@@ -205,9 +211,10 @@ async def _guarded(
         await client.aclose()
 
 
-async def reap_stale_jobs(older_than_s: int = JOB_TIMEOUT_S) -> int:
+async def reap_stale_jobs(older_than_s: int | None = None) -> int:
     """Mark ``running`` mirror rows that started more than ``older_than_s`` ago as failed (worker died or arq
     timed the job out, neither of which reaches ``_guarded``). Returns the number of rows reaped."""
+    older_than_s = older_than_s or job_timeout_s()
     cutoff = utcnow() - timedelta(seconds=older_than_s)
     async with session_scope() as session:
         rows = (
@@ -546,10 +553,7 @@ def weekly_job_id(user_id: uuid.UUID | str, iso_week: str | None = None) -> str:
 
 async def _enqueue(ctx: dict, function: str, *args: object, job_id: str) -> None:
     redis = ctx.get("redis") if isinstance(ctx, dict) else None
-    if redis is not None:
-        job = await redis.enqueue_job(function, *args, _job_id=job_id)
-    else:
-        job = await queue.enqueue(function, *args, _job_id=job_id)
+    job = await ledger.enqueue(function, *args, job_id=job_id, redis=redis)
     if job is None and function == queue.AI_PROCESS_NEW_ITEMS:
         log.warning("%s %s already queued; duplicate dropped by arq", function, job_id)
 
@@ -626,6 +630,11 @@ async def ai_dispatch_weekly(ctx: dict) -> int:
     return n
 
 
+async def ai_requeue_lost(ctx: dict) -> int:
+    """Cron: send again every queued AI job arq lost (a Redis flush, an expired payload); the ledger row stays."""
+    return await ledger.requeue_lost(ctx["redis"])
+
+
 def _cron_jobs() -> list:
     """Wall-clock schedules in ``settings.timezone``: the worker sets ``WorkerSettings.timezone`` to the same
     zone, so no conversion (and no dependence on the clock at import time) is needed."""
@@ -633,6 +642,7 @@ def _cron_jobs() -> list:
         cron(ai_dispatch_daily, minute=DISPATCH_MINUTES, unique=True),
         cron(ai_dispatch_weekly, weekday=6, hour=8, minute=0, unique=True),
         cron(ai_summary_sweep, minute=SWEEP_MINUTES, unique=True),
+        cron(ai_requeue_lost, minute=REQUEUE_MINUTES, unique=True),
     ]
 
 

@@ -26,7 +26,7 @@
     <form method="post" action="/setup" class="auth-form" hx-boost="false">
       <div class="auth-intro">
         <h1>Create your account</h1>
-        <p class="muted">The first account administers this Pensieve.</p>
+        <p class="muted">The first account is the administrator for this server.</p>
       </div>
       {% if error %}<div class="flash flash-error" role="alert">{{ m.icon('warning', 14) }} {{ error }}</div>{% endif %}
       <div class="field"><label for="display_name">Name</label><input class="input" id="display_name" name="display_name" value="{{ display_name }}" autocomplete="name"></div>

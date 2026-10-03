@@ -3,7 +3,7 @@
 {% if safe_to_skip.done %}
 <p class="muted small row">{{ m.icon('check', 14) }} Marked {{ safe_to_skip.marked if safe_to_skip.marked is defined else safe_to_skip.count }} items as read.</p>
 {% elif safe_to_skip.count %}
-<p class="small">{{ safe_to_skip.count }} item{{ 's' if safe_to_skip.count != 1 }}{% if safe_to_skip.story_count %} across {{ safe_to_skip.story_count }} stories{% endif %} look like repeats or low-signal for you.</p>
+<p class="small">{{ safe_to_skip.count }} item{{ 's' if safe_to_skip.count != 1 }}{% if safe_to_skip.story_count %} across {{ safe_to_skip.story_count }} stories{% endif %} look like repeats or things you usually skip.</p>
 {% if safe_to_skip.reason %}<p class="muted small">{{ safe_to_skip.reason }}</p>{% endif %}
 <form hx-post="/insights/{{ insight.id }}/skip-read" hx-target="#safe-to-skip" hx-swap="innerHTML" method="post" action="/insights/{{ insight.id }}/skip-read" hx-indicator="#progress">
   {{ m.csrf_field(csrf_token) }}

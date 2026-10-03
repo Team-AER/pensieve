@@ -11,7 +11,7 @@ from pensieve.ai.client import (
     validate_schema,
 )
 from pensieve.config import get_settings
-from tests.test_ai_helpers import BASE, chat_response, gateway, truncated  # noqa: F401
+from tests.test_ai_helpers import BASE, CATALOG, chat_response, gateway, truncated  # noqa: F401
 
 settings = get_settings()
 SCHEMA = {
@@ -108,46 +108,101 @@ async def test_reasoning_off_is_spelled_per_model(gateway):
     await client.aclose()
 
 
-async def test_truncated_json_is_retried_with_more_tokens(gateway):
-    gateway.chat(truncated('{"answer": "cut off'), {"answer": "ok", "score": 0.5})
+async def test_every_request_gets_at_least_the_output_window(gateway):
+    gateway.chat({"answer": "ok", "score": 0.5})
     client = LLMClient()
-    out = await client.chat_json(settings.llm_fast_model, "s", "u", SCHEMA, workflow="x", max_tokens=100)
-    assert out["answer"] == "ok"
-    assert [c["max_tokens"] for c in gateway.chat_calls] == [100, 200]
-    assert [c["model"] for c in gateway.chat_calls] == [settings.llm_fast_model] * 2
+    window = settings.llm_max_output_tokens
+    await client.chat_json(settings.llm_fast_model, "s", "u", SCHEMA, workflow="x", max_tokens=100)
+    await client.chat_text(settings.llm_fast_model, "s", "u", workflow="x", max_tokens=window * 2)
+    assert [c["max_tokens"] for c in gateway.chat_calls] == [window, window * 2]
     await client.aclose()
 
 
-async def test_truncation_growth_is_capped_and_text_keeps_partial(gateway):
-    gateway.chat(truncated("{bad"), truncated("{bad"), truncated("{bad"))
+async def test_chat_requests_ask_for_at_least_the_catalog_output(gateway):
+    """A reasoning model spends output before its answer, so the gateway's published output is the floor."""
+    gateway.router.get(CATALOG).mock(
+        return_value=httpx.Response(
+            200, json={"data": [{"id": settings.llm_fast_model, "max_output_tokens": 65_536}]}
+        )
+    )
+    gateway.chat("ok")
     client = LLMClient()
-    cap = settings.llm_max_output_tokens
-    with pytest.raises(LLMError):
-        await client.chat_json(settings.llm_fast_model, "s", "u", SCHEMA, workflow="x", max_tokens=cap - 10)
-    assert [c["max_tokens"] for c in gateway.chat_calls] == [cap - 10, cap, cap]
+    await client.chat_text(settings.llm_fast_model, "s", "u", workflow="x")
+    await client.chat_text("model-the-catalog-does-not-list", "s", "u", workflow="x")
+    assert [c["max_tokens"] for c in gateway.chat_calls] == [65_536, settings.llm_max_output_tokens]
+    assert len([c for c in gateway.router.calls if c.request.url == CATALOG]) == 1  # read once, then cached
+    await client.aclose()
+
+
+async def test_catalog_is_read_on_a_host_that_just_booted(gateway, monkeypatch):
+    """time.monotonic() counts from boot. On a fresh CI runner it was under the catalog TTL, so "never read"
+    (0.0) looked fresh, the catalog was skipped and requests went out without the model's output floor."""
+    from types import SimpleNamespace
+
+    from pensieve.ai import client as client_mod
+
+    clock = iter(5.0 + n / 100 for n in range(1000))  # five seconds after boot
+    monkeypatch.setattr(client_mod, "time", SimpleNamespace(monotonic=lambda: next(clock)))
+    gateway.router.get(CATALOG).mock(
+        return_value=httpx.Response(
+            200, json={"data": [{"id": settings.llm_fast_model, "max_output_tokens": 65_536}]}
+        )
+    )
+    gateway.chat("ok")
+    client = LLMClient()
+    await client.chat_text(settings.llm_fast_model, "s", "u", workflow="x")
+    assert [c["max_tokens"] for c in gateway.chat_calls] == [65_536]
+    await client.aclose()
+
+
+async def test_truncation_surfaces_at_once(gateway):
+    gateway.chat(truncated('{"answer": "cut off'))
+    client = LLMClient()
+    with pytest.raises(LLMTruncated, match="raise the output window"):
+        await client.chat_json(settings.llm_fast_model, "s", "u", SCHEMA, workflow="x")
+    assert len(gateway.chat_calls) == 1
     gateway.chat(truncated("partial prose"))
     assert await client.chat_text(settings.llm_fast_model, "s", "u", workflow="x") == "partial prose"
-    with pytest.raises(LLMTruncated):
-        await client._completion({"model": "m", "max_tokens": 1, "messages": []}, "x")
     await client.aclose()
 
 
-async def test_chat_json_retries_then_falls_back_to_long_model(gateway):
+async def test_reasoning_that_fills_the_window_is_reported_not_non_text(gateway):
+    body = chat_response("x", finish_reason="length")
+    body["choices"][0]["message"]["content"] = None
+    gateway.chat(httpx.Response(200, json=body))
+    client = LLMClient()
+    with pytest.raises(LLMTruncated, match="while still reasoning"):
+        await client.chat_json(settings.llm_fast_model, "s", "u", SCHEMA, workflow="x")
+    with pytest.raises(LLMTruncated):
+        await client.chat_text(settings.llm_fast_model, "s", "u", workflow="x")
+    await client.aclose()
+
+
+def test_request_timeout_follows_the_models_role(monkeypatch):
+    client = LLMClient()
+    monkeypatch.setattr(settings, "llm_fast_model", "fast-m")
+    monkeypatch.setattr(settings, "llm_long_model", "long-m")
+    assert client.timeout_for("fast-m") == settings.llm_fast_timeout_min * 60 == 600
+    assert client.timeout_for("long-m") == settings.llm_long_timeout_min * 60 == 1800
+    assert client.timeout_for("bge-m3") == 600
+    monkeypatch.setattr(settings, "llm_long_model", "fast-m")
+    assert client.timeout_for("fast-m") == 1800
+
+
+async def test_timeout_names_the_model_and_the_setting(gateway):
+    gateway.router.post(f"{BASE}/chat/completions").mock(side_effect=httpx.ReadTimeout(""))
+    client = LLMClient()
+    with pytest.raises(LLMError, match="no answer within 10 min; raise its timeout"):
+        await client.chat_text(settings.llm_fast_model, "s", "u", workflow="x")
+    await client.aclose()
+
+
+async def test_chat_json_retries_once_on_the_same_model_then_raises(gateway):
     gateway.chat("not json at all", {"answer": "missing score"}, {"answer": "ok", "score": 0.5})
     client = LLMClient()
-    out = await client.chat_json(settings.llm_fast_model, "s", "u", SCHEMA, workflow="x")
-    assert out["answer"] == "ok"
-    models_used = [c["model"] for c in gateway.chat_calls]
-    assert models_used == [settings.llm_fast_model, settings.llm_fast_model, settings.llm_long_model]
-    await client.aclose()
-
-
-async def test_chat_json_raises_after_all_attempts(gateway):
-    gateway.chat("{bad", "{bad", "{bad")
-    client = LLMClient()
-    with pytest.raises(LLMError):
+    with pytest.raises(LLMError, match=settings.llm_fast_model):
         await client.chat_json(settings.llm_fast_model, "s", "u", SCHEMA, workflow="x")
-    assert len(gateway.chat_calls) == 3
+    assert [c["model"] for c in gateway.chat_calls] == [settings.llm_fast_model] * 2
     await client.aclose()
 
 

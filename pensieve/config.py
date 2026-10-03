@@ -52,9 +52,13 @@ class Settings(BaseSettings):
     )
     llm_embedding_model: str = "bge-m3"
     llm_embedding_dims: int = 1024  # fixed by the pgvector column; changing it needs a migration
-    llm_timeout_s: float = 240.0  # per request; a 27B on Ollama needs well over a minute for a 5-item batch
-    llm_max_input_tokens_short: int = 8_000
-    llm_max_input_tokens_long: int = 32_000
+    llm_fast_timeout_min: int = 10  # per request to the fast model; Gateway card overrides
+    llm_long_timeout_min: int = 30  # per request to the long model; Gateway card overrides
+    ai_job_timeout_min: int = (
+        120  # a whole AI job, several requests; the reaper fails running rows older than this
+    )
+    llm_max_input_tokens_short: int = 16_384  # input window for fast-model prompts; Gateway card overrides
+    llm_max_input_tokens_long: int = 32_768  # input window for long-model prompts; Gateway card overrides
 
     # AI behaviour
     ai_enabled: bool = True
@@ -77,7 +81,7 @@ class Settings(BaseSettings):
     llm_fast_concurrency: int = 2
     llm_long_concurrency: int = 2
     ai_max_jobs: int = 2
-    llm_max_output_tokens: int = 8192  # ceiling when a truncated (finish_reason=length) JSON call is retried
+    llm_max_output_tokens: int = 16_384  # output window every request gets at least (thinking included)
     llm_embeddings_reprobe_min: int = 30  # after a 400/404 on /embeddings, do not retry for this many minutes
     llm_digest_reasoning: str = (
         "low"  # reasoning_effort for the digest / weekly review / profile (long model)

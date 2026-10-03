@@ -201,6 +201,52 @@ async def top_tags(session: AsyncSession, user_id: uuid.UUID, days: int = TOP_TA
     return {name: round(n / peak, 4) for name, n in top}
 
 
+class Affinity:
+    """*affinity* (module docstring) for one batch of items: the reader's history is loaded once by
+    ``load_affinity``, then each item is scored without touching the database. The digest and the paper share it."""
+
+    def __init__(
+        self,
+        vectors: dict[uuid.UUID, list[float]],
+        center: list[float] | None,
+        open_rates: dict[uuid.UUID, float | None],
+        liked_tags: dict[str, float],
+        profile: str,
+    ) -> None:
+        self.vectors = vectors
+        self.center = center
+        self.open_rates = open_rates
+        self.liked_tags = liked_tags
+        self.profile = profile
+        self._profile_lc = profile.lower()
+        self.has_history = bool(liked_tags) or any(r is not None for r in open_rates.values())
+
+    def __call__(self, item_id: uuid.UUID, feed_id: uuid.UUID, tags: list[str]) -> float:
+        vec = self.vectors.get(item_id)
+        if vec is not None and self.center is not None:
+            base = cosine(vec, self.center)
+        elif self.has_history:
+            # no embeddings: how often the reader opens this source, blended with tag overlap against history
+            rate = self.open_rates.get(feed_id)
+            rate_score = DEFAULT_AFFINITY if rate is None else rate
+            tag_score = max((self.liked_tags.get(t, 0.0) for t in tags), default=0.0)
+            base = 0.5 * rate_score + 0.5 * tag_score
+        else:
+            base = DEFAULT_AFFINITY
+        if self._profile_lc and any(t.lower() in self._profile_lc for t in tags):
+            base = min(1.0, base + PROFILE_TAG_BOOST)
+        return round(base, 4)
+
+
+async def load_affinity(session: AsyncSession, user_id: uuid.UUID, item_ids: list[uuid.UUID]) -> Affinity:
+    vectors = await get_vectors(session, item_ids)
+    center = await profile_centroid(session, user_id)
+    profile = await profile_text(session, user_id)
+    open_rates = await feed_open_rates(session, user_id)
+    liked_tags = await top_tags(session, user_id) if (center is None or len(vectors) < len(item_ids)) else {}
+    return Affinity(vectors, center, open_rates, liked_tags, profile)
+
+
 async def tag_trends(session: AsyncSession, user_id: uuid.UUID, weeks: int = TREND_WEEKS) -> list[dict]:
     """Weekly counts of AI tags over the last ``weeks`` weeks (oldest first) and last-vs-previous delta."""
     now = utcnow()
@@ -280,13 +326,9 @@ async def daily_digest(
         for f in (await session.scalars(select(models.Feed).where(models.Feed.user_id == user.id))).all()
     }
     ai_rows = await _ai_rows(session, user.id, [i.id for i in items])
-    vectors = await get_vectors(session, [i.id for i in items])
-    center = await profile_centroid(session, user.id)
-    profile = await profile_text(session, user.id)
-    profile_lc = profile.lower()
-    open_rates = await feed_open_rates(session, user.id)
-    liked_tags = await top_tags(session, user.id) if (center is None or len(vectors) < len(items)) else {}
-    has_history = bool(liked_tags) or any(r is not None for r in open_rates.values())
+    scorer = await load_affinity(session, user.id, [i.id for i in items])
+    profile = scorer.profile
+    open_rates = scorer.open_rates
 
     # cluster membership for the window's items
     membership: dict[uuid.UUID, models.Cluster] = {}
@@ -303,21 +345,7 @@ async def daily_digest(
         membership = {item_id: cluster for item_id, cluster in rows}
 
     def affinity(item: ItemRef) -> float:
-        vec = vectors.get(item.id)
-        tags = ai_rows[item.id].tags if item.id in ai_rows else []
-        if vec is not None and center is not None:
-            base = cosine(vec, center)
-        elif has_history:
-            # no embeddings: how often the reader opens this source, blended with tag overlap against history
-            rate = open_rates.get(item.feed_id)
-            rate_score = DEFAULT_AFFINITY if rate is None else rate
-            tag_score = max((liked_tags.get(t, 0.0) for t in tags), default=0.0)
-            base = 0.5 * rate_score + 0.5 * tag_score
-        else:
-            base = DEFAULT_AFFINITY
-        if profile_lc and any(t.lower() in profile_lc for t in tags):
-            base = min(1.0, base + PROFILE_TAG_BOOST)
-        return round(base, 4)
+        return scorer(item.id, item.feed_id, ai_rows[item.id].tags if item.id in ai_rows else [])
 
     # group into entries: one per cluster (canonical or newest member) + standalone items
     entries: list[dict] = []
@@ -629,11 +657,37 @@ def summary_prefs_from_form(form, current: dict) -> dict:
     return summary_prefs(models.User(settings={"summaries": out}))
 
 
+#: Words a finished sentence does not end on: a bullet or why ending on one (or on a comma, colon or dash) was cut
+#: off mid-sentence by the model ("The report highlights the emergence of").
+_DANGLING_WORDS = (
+    "a an the of to in on at for from with by as and or but nor than that which who whose its their his her our "
+    "your this these those is are was were be been being into onto about over under between across via per "
+    "including such like"
+)
+_DANGLING = frozenset(_DANGLING_WORDS.split())
+
+
+def cut_off(text: str) -> bool:
+    """True when ``text`` stops mid-sentence. Fragments under three words are not judged."""
+    t = (text or "").strip()
+    if len(t.split()) < 3:
+        return False
+    if t[-1] in ",:;-–—(/&":
+        return True
+    if t[-1] in ".!?…\"'”’)]":
+        return False
+    return t.split()[-1].lower() in _DANGLING
+
+
 def _summary_entry_ok(entry: object, bullets: int = 3) -> bool:
     try:
         validate_schema(entry, prompts.item_summary_entry_schema(bullets))
     except LLMError as exc:
         log.warning("summarize_items: skipping malformed entry: %s", exc)
+        return False
+    cut = [str(b) for b in entry["bullets"] if cut_off(str(b))]  # type: ignore[index]
+    if cut or cut_off(str(entry.get("why_it_matters") or "")):  # type: ignore[union-attr]
+        log.warning("summarize_items: entry %s stops mid-sentence, asking again", entry.get("index"))  # type: ignore[union-attr]
         return False
     return True
 
@@ -860,23 +914,31 @@ async def summarize_item(
     settings = get_settings()
     profile = await profile_text(session, user.id)
     prefs = summary_prefs(user)
-    result = await client.chat_json(
-        settings.llm_fast_model,
-        prompts.item_summary_system(prefs["bullets"], prefs["why"]),
-        prompts.item_summary_user(
-            profile,
-            item.title,
-            item.full_text[:SUMMARY_TEXT_CHARS],
-            focus=prefs["focus"],
-            hint=" ".join(hint.split())[:SUMMARY_FOCUS_CHARS],
-        ),
-        prompts.item_summary_schema(prefs["bullets"]),
-        max_tokens=SUMMARY_TOKENS_PER_ITEM * 2 + SUMMARY_TOKENS_HEADROOM,
-        workflow="summarize_item",
-        name="item_summary",
-    )
-    why = "" if prefs["why"] == "off" else str(result["why_it_matters"])
-    markdown = render_summary([str(b) for b in result["bullets"]], why)
+    for attempt in range(2):
+        result = await client.chat_json(
+            settings.llm_fast_model,
+            prompts.item_summary_system(prefs["bullets"], prefs["why"]),
+            prompts.item_summary_user(
+                profile,
+                item.title,
+                item.full_text[:SUMMARY_TEXT_CHARS],
+                focus=prefs["focus"],
+                hint=" ".join(hint.split())[:SUMMARY_FOCUS_CHARS],
+            ),
+            prompts.item_summary_schema(prefs["bullets"]),
+            max_tokens=SUMMARY_TOKENS_PER_ITEM * 2 + SUMMARY_TOKENS_HEADROOM,
+            workflow="summarize_item",
+            name="item_summary",
+        )
+        bullets = [str(b) for b in result["bullets"]]
+        why = "" if prefs["why"] == "off" else str(result["why_it_matters"])
+        if not any(cut_off(b) for b in bullets) and not cut_off(why):
+            break
+        log.warning("summarize_item %s: the model stopped mid-sentence (attempt %d)", item.id, attempt + 1)
+    # Still cut after the retry: keep the finished bullets rather than print half a sentence.
+    bullets = [b for b in bullets if not cut_off(b)] or bullets
+    why = "" if cut_off(why) else why
+    markdown = render_summary(bullets, why)
     row = await session.scalar(
         select(models.ItemAI).where(models.ItemAI.user_id == user.id, models.ItemAI.item_id == item.id)
     )

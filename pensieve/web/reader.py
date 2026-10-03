@@ -473,6 +473,26 @@ async def nav_partial(
     return render(request, "partials/nav.html", {"nav": nav, "view": v}, user=user)
 
 
+@router.get("/reader/states")
+async def row_states(user: CurrentUser, session: DB, ids: str = ""):
+    """Read and starred flags of the rows a page shows (at most 500), for pages restored from history: htmx puts back
+    a snapshot taken before whatever was read since, and refetching the list would lose the reader's place in it."""
+    wanted = [u for u in (parse_uuid(x) for x in ids.split(",")[:500]) if u]
+    if not wanted:
+        return {"read": [], "starred": []}
+    rows = (
+        await session.execute(
+            select(ItemState.item_id, ItemState.is_read, ItemState.is_starred).where(
+                ItemState.user_id == user.id, ItemState.item_id.in_(wanted)
+            )
+        )
+    ).all()
+    return {
+        "read": [str(i) for i, read, _ in rows if read],
+        "starred": [str(i) for i, _, starred in rows if starred],
+    }
+
+
 @router.get("/reader/{kind}")
 async def reader_simple(
     request: Request,

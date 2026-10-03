@@ -32,7 +32,7 @@
 </form>
 <div class="card table-wrap">
 <table class="table table--stack">
-  <thead><tr><th>Feed</th><th>Folder</th><th>Health</th><th class="num">You open</th><th class="num">Poll</th><th><span class="sr-only">Actions</span></th></tr></thead>
+  <thead><tr><th>Feed</th><th>Folder</th><th>Health</th><th class="num">Read rate</th><th class="num">Poll</th><th><span class="sr-only">Actions</span></th></tr></thead>
   <tbody>
   {% for r in rows %}
   <tr id="feed-{{ r.feed.id }}">
@@ -65,7 +65,7 @@
         </div>
       </div>
     </td>
-    <td class="num" data-th="You open">{% if r.open_rate is not none %}{{ (r.open_rate * 100)|round|int }}%{% else %}<span class="faint">new</span>{% endif %}</td>
+    <td class="num" data-th="Read rate">{% if r.open_rate is not none %}{{ (r.open_rate * 100)|round|int }}%{% else %}<span class="faint">new</span>{% endif %}</td>
     <td class="num" data-th="Poll">
       <form method="post" action="/manage/feeds/{{ r.feed.id }}/interval" class="row feed-interval">{{ m.csrf_field(csrf_token) }}
         <label class="sr-only" for="interval-{{ r.feed.id }}">Poll interval in minutes</label>

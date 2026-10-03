@@ -1,4 +1,5 @@
-"""Admin-chosen gateway models, reasoning effort and concurrency (pensieve.ai.model_choice)."""
+# ruff: noqa: F811 -- the `gateway` fixture is imported, then named as a test parameter
+"""Admin-chosen gateway models, reasoning effort, concurrency and token windows (pensieve.ai.model_choice)."""
 
 import pytest
 from sqlalchemy import select
@@ -7,6 +8,7 @@ from pensieve import models
 from pensieve.ai import model_choice
 from pensieve.ai.client import LLMClient
 from pensieve.config import get_settings
+from tests.test_ai_helpers import gateway  # noqa: F401
 
 
 @pytest.fixture(autouse=True)
@@ -102,6 +104,32 @@ def test_counts_are_clamped_whole_numbers():
     assert model_choice.clean({"ai_jobs": "two", "fast_concurrency": "-1"}) == {}
 
 
+def test_token_windows_are_clamped_whole_numbers():
+    out = model_choice.clean(
+        {"output_tokens": "512", "input_tokens_short": "999999", "input_tokens_long": "40000"}
+    )
+    assert out == {
+        "output_tokens": model_choice.MIN_TOKENS,
+        "input_tokens_short": model_choice.MAX_TOKENS,
+        "input_tokens_long": 40_000,
+    }
+    assert model_choice.clean({"output_tokens": "16k"}) == {}
+
+
+def test_timeouts_are_clamped_minutes():
+    out = model_choice.clean({"fast_timeout": "10", "long_timeout": "0", "job_timeout": "99999"})
+    assert out == {"fast_timeout": 10, "long_timeout": 1, "job_timeout": model_choice.MAX_MINUTES}
+
+
+async def test_saved_output_window_reaches_requests(session, gateway):
+    await model_choice.save(session, {"output_tokens": 20_000})
+    gateway.chat("ok")
+    client = LLMClient()
+    await client.chat_text(get_settings().llm_fast_model, "s", "u", workflow="x")
+    assert gateway.chat_calls[0]["max_tokens"] == 20_000
+    await client.aclose()
+
+
 async def test_saved_counts_resize_slots_and_the_ai_worker(session, monkeypatch):
     from arq.worker import Worker
 
@@ -113,7 +141,9 @@ async def test_saved_counts_resize_slots_and_the_ai_worker(session, monkeypatch)
     client = LLMClient()
     assert client._slot("fast-m")._value == 2 and client._slot("long-m")._value == 2  # defaults
 
-    await model_choice.save(session, {"fast_concurrency": 5, "long_concurrency": 1, "ai_jobs": 3})
+    await model_choice.save(
+        session, {"fast_concurrency": 5, "long_concurrency": 1, "ai_jobs": 3, "job_timeout": 90}
+    )
     assert (s.llm_fast_concurrency, s.llm_long_concurrency, s.ai_max_jobs) == (5, 1, 3)
     assert client._slot("fast-m")._value == 5 and client._slot("long-m")._value == 1
 
@@ -125,7 +155,9 @@ async def test_saved_counts_resize_slots_and_the_ai_worker(session, monkeypatch)
     assert worker.max_jobs == model_choice.MAX_COUNT
     await worker._poll_iteration()
     assert worker.max_jobs == 3  # built for the ceiling, runs what the Gateway card says
+    assert worker.job_timeout_s == 90 * 60 and worker.in_progress_timeout_s > worker.job_timeout_s
 
     await model_choice.save(session, {})
     await worker._poll_iteration()
     assert worker.max_jobs == 2 and s.llm_fast_concurrency == 2  # cleared: back to the environment
+    assert worker.job_timeout_s == s.ai_job_timeout_min * 60
