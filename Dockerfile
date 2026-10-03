@@ -1,4 +1,4 @@
-FROM python:3.12-slim AS builder
+FROM python:3.14-slim AS builder
 
 COPY --from=ghcr.io/astral-sh/uv:0.12.16 /uv /uvx /bin/
 # Optional dependency groups: the capture worker image is built with EXTRAS=capture (Playwright client).
@@ -19,7 +19,7 @@ COPY pensieve ./pensieve
 RUN uv sync --frozen --no-dev --no-editable ${EXTRAS:+--extra $EXTRAS}
 
 
-FROM python:3.12-slim AS runtime
+FROM python:3.14-slim AS runtime
 
 LABEL org.opencontainers.image.source="https://github.com/Team-AER/pensieve" \
       org.opencontainers.image.description="A self-hosted RSS reader with an optional local-LLM layer" \
