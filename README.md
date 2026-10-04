@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="pensieve/static/icon.svg" width="80" height="80" alt="Pensieve icon">
+</p>
+
 # Pensieve
 
 [![CI](https://github.com/Team-AER/pensieve/actions/workflows/ci.yml/badge.svg)](https://github.com/Team-AER/pensieve/actions/workflows/ci.yml)
@@ -12,6 +16,20 @@ an OpenAI-compatible local gateway to add automatic categorization, story cluste
 items arrive, reader memory, a daily paper (every story of the day in sections, one row per story however
 many sources ran it, compiled without a model call) and analytics insights—or disable AI and use Pensieve as
 a straightforward feed reader.
+
+## The product experience
+
+The branded sign-in page introduces Pensieve with its own mark, orbital artwork and a split-panel layout.
+On a fresh install, it becomes a first-account setup screen. New accounts start at **Manage → Feeds** to
+subscribe to a site or import OPML; returning readers open their feed view. The product is an authenticated
+reader, with its welcome experience integrated into sign-in and setup.
+
+The [Pensieve landing page](https://aer.app/pensieve/) showcases its daily paper, reader memory,
+client sync and save-for-later archive. Its illustrated reader uses sample stories to demonstrate the
+three-pane layout; deploy your own instance using the steps below.
+
+Inside the app, **Reader**, **Search**, **Insights** and **Manage** connect everyday reading, saved pages,
+feed administration and optional AI. See the [product guide](docs/product-guide.md) for a walkthrough.
 
 ## Highlights
 
@@ -106,8 +124,16 @@ Save from anywhere: the **Save** button (or `b`), the bookmarklet and phone setu
 archive**, `POST /api/v1/save` with `Authorization: Bearer <token>`, or the extension in [`extension/`](extension).
 Without S3 credentials (for example when running outside Compose) saving still works but keeps only the text.
 
-Maintenance: `docker compose exec worker-capture python -m pensieve.archive check | gc | recapture <email> |
-archive-starred <email>`. Back up the `garage-meta` and `garage-data` volumes along with PostgreSQL.
+Use one archive maintenance command at a time (replace the example email):
+
+```bash
+docker compose exec worker-capture python -m pensieve.archive check
+docker compose exec worker-capture python -m pensieve.archive recapture reader@example.com
+docker compose exec worker-capture python -m pensieve.archive archive-starred reader@example.com
+```
+
+The `gc` subcommand deletes objects that no snapshot references. Back up the `garage-meta` and
+`garage-data` volumes along with PostgreSQL before maintenance.
 
 ### Updating
 
@@ -127,6 +153,9 @@ Pensieve requires Python 3.12+, [uv](https://docs.astral.sh/uv/), Docker, and Do
 cp .env.example .env
 # For local-only development, set PENSIEVE_POSTGRES_PASSWORD=pensieve,
 # PENSIEVE_BASE_URL=http://localhost:8000, and PENSIEVE_SESSION_COOKIE_SECURE=false.
+# Replace the secret and Garage/S3 placeholders using the generators above.
+# Leave PENSIEVE_DATABASE_URL at its example localhost value for this workflow.
+# Set PENSIEVE_AI_ENABLED=false unless a model gateway is configured.
 uv sync --all-extras
 make dev-db
 make migrate
@@ -147,22 +176,28 @@ database and Redis ports only on loopback through `docker-compose.dev.yaml`.
 
 ## Architecture
 
-```text
-browser / sync client / extension
-        │
-        ▼
- FastAPI + Jinja + HTMX ───── PostgreSQL + pgvector          Garage (S3): page copies,
-        │                            ▲                        screenshots, images
-        ▼                            │                              ▲
-      Redis ───── fetch worker / AI worker ───── model gateway      │
-        └──────── capture worker ───────────────────────────────────┘
-                        │ (isolated network)
-                        ▼
-                headless Chromium ───── the web
+```mermaid
+flowchart LR
+    Clients["Web / PWA / sync clients / extension"] --> Web["FastAPI + Jinja + HTMX"]
+    Web --> DB["PostgreSQL + pgvector"]
+    Web --> Redis["Redis / ARQ queues"]
+    Web --> Store["Garage / S3 archive"]
+    Redis --> Fetch["Feed worker"]
+    Redis --> AI["AI worker"]
+    Redis --> Capture["Capture worker"]
+    Fetch --> Feeds["RSS / Atom sites"]
+    Fetch --> DB
+    AI --> Gateway["Optional model gateway"]
+    AI --> DB
+    Capture --> Browser["Isolated Chromium"]
+    Browser --> Sites["Public web pages"]
+    Capture --> Store
+    Capture --> DB
 ```
 
 The app is server-rendered and intentionally avoids a Node build pipeline. Static assets, including HTMX,
-are vendored so the interface does not depend on a public CDN at runtime.
+are vendored so the interface does not depend on a public CDN at runtime. See
+[the architecture guide](docs/architecture.md) for service responsibilities and deployment boundaries.
 
 ## Security
 
@@ -173,6 +208,13 @@ issue for an undisclosed security problem.
 
 Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and review
 expectations, and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for community standards.
+
+## Project and acknowledgements
+
+Pensieve is maintained by [Team AER](https://github.com/Team-AER). Its reader experience is inspired by
+Google Reader and Reeder, and its save-for-later workflow by Pocket. It builds on FastAPI, HTMX,
+PostgreSQL/pgvector, Redis/ARQ, Garage and the other open-source dependencies listed in
+[pyproject.toml](pyproject.toml). Those projects retain their own licenses and attribution.
 
 ## License
 
