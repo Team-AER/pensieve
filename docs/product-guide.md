@@ -55,6 +55,12 @@ analytics insights. **Insights** also hosts the daily paper: sectioned stories w
 grouped into one row. The paper is compiled from stored results without a fresh model call; earlier
 categorization, grouping and summaries can require inference. Feedback and notes help personalize it.
 
+**Ask** (an article's toolbar, a paper story, or the `c` key) opens a chat about that article. Answers come
+from the article first; when it leaves something out and **Web** is on, the model plans a few searches, the
+bundled SearXNG sends them to public search engines, and the pages found are read and cited as numbered
+sources. Each article keeps its conversation; **New chat** clears it. Turn Web off to keep a question to the
+article, or turn chat off under **Manage → AI and memory**.
+
 Set `PENSIEVE_AI_ENABLED=false` to use the core reader without model processing. See
 [configuration](../README.md#configuration) for gateway, timezone and concurrency settings.
 

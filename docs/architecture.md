@@ -16,6 +16,7 @@ application with server-rendered Jinja templates and HTMX updates. It requires n
 | `browser` | Headless Chromium used by the capture worker |
 | `garage` | S3-compatible storage for captured HTML, images, screenshots and static copies |
 | `storage-init` | One-shot, idempotent Garage layout, key and bucket initialization |
+| `search` | SearXNG for article chat's web search; internal only, queried by `web` over its JSON API |
 
 Definitions live in [docker-compose.yaml](../docker-compose.yaml), with host development overrides in
 [docker-compose.dev.yaml](../docker-compose.dev.yaml). Worker settings live in
@@ -31,7 +32,8 @@ host ports in this file.
 
 The capture worker joins both the application and capture networks. Chromium joins the internal capture
 network and a separate egress network, keeping it away from database, Redis and Garage services. Browser
-requests pass the application's SSRF checks. Archived pages are served with a restrictive CSP that disables
+requests pass the application's SSRF checks. The `search` service has no published port; the pages its results
+point to are fetched by `web` through the same SSRF-guarded fetcher as feeds. Archived pages are served with a restrictive CSP that disables
 scripts and limits loads to archive assets.
 
 The development override publishes dependencies on loopback and adds the browser to the default network.
