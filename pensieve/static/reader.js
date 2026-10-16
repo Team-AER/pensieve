@@ -935,6 +935,7 @@
         break;
       }
       case 'u': { e.preventDefault(); const b = articleButton('unmerge'); if (b) b.click(); break; }
+      case 'c': { const b = articleButton('chat'); if (b) { e.preventDefault(); b.click(); } break; }
       case 'g': pendingG = true; pendingTimer = setTimeout(() => { pendingG = false; }, 800); break;
       case '/': { e.preventDefault(); const f = $('#global-search') || $('input[name="q"]'); if (f) { f.focus(); f.select(); } break; }
       case '?': e.preventDefault(); toggleShortcuts(true); break;
@@ -948,6 +949,126 @@
       }
       default: return;
     }
+  });
+
+  // ---- Ask about this article (partials/chat.html): questions are posted with fetch and the answer streams back as
+  // server-sent events (status / delta / done / error). The text streams in plain; "done" swaps in the server's
+  // rendering with citations and sources. A panel lives in #chat-slot-<item id> (the reader's article, a paper story).
+  function chatSlot(id) { return document.getElementById('chat-slot-' + id); }
+  function chatInput(panel) { return panel ? panel.querySelector('.chat-input') : null; }
+  function chatNode(tag, cls, text) { const el = document.createElement(tag); if (cls) el.className = cls; if (text != null) el.textContent = text; return el; }
+  function growChat(t) { t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight + 2, 200) + 'px'; }
+  function focusChat(panel) {
+    const t = chatInput(panel); if (!t) return;
+    (t.form || panel).scrollIntoView({ block: 'nearest', behavior: 'smooth' });  // a long thread: land on the composer
+    t.focus({ preventScroll: true });
+  }
+  function openChat(id) {
+    const slot = chatSlot(id); if (!slot) return;
+    const panel = slot.querySelector('.chat');
+    if (panel) { panel.classList.remove('collapsed'); focusChat(panel); return; }
+    if (!window.htmx) return;
+    window.htmx.ajax('GET', '/items/' + id + '/chat', { target: slot, swap: 'innerHTML' })
+      .then(() => focusChat(slot.querySelector('.chat')))
+      .catch(() => toast("Couldn't open the chat. Try again.", { kind: 'error' }));
+  }
+  function sseEvents(buffer, onEvent) {
+    let i;
+    while ((i = buffer.indexOf('\n\n')) !== -1) {
+      const block = buffer.slice(0, i); buffer = buffer.slice(i + 2);
+      let kind = 'message', data = '';
+      block.split('\n').forEach((line) => { if (line.startsWith('event:')) kind = line.slice(6).trim(); else if (line.startsWith('data:')) data += line.slice(5).trim(); });
+      if (!data) continue;
+      let parsed; try { parsed = JSON.parse(data); } catch (_) { continue; }
+      if (onEvent(kind, parsed) === false) return { buffer: '', stop: true };
+    }
+    return { buffer, stop: false };
+  }
+  function sendChat(form) {
+    if (!form || form.dataset.busy) return;
+    const panel = form.closest('.chat'), log = panel && panel.querySelector('.chat-log'), t = chatInput(panel);
+    if (!log || !t) return;
+    const question = t.value.trim();
+    if (!question) { t.focus(); return; }
+    const body = new URLSearchParams(new FormData(form));
+    form.dataset.busy = '1'; form.classList.add('busy');
+    const starters = panel.querySelector('.chat-starters'); if (starters) starters.remove();
+    const q = chatNode('li', 'chat-msg chat-q'); q.appendChild(chatNode('div', 'chat-bubble', question));
+    const a = chatNode('li', 'chat-msg chat-a');
+    const status = chatNode('p', 'chat-status'); status.appendChild(chatNode('span', 'live-dot'));
+    const statusText = chatNode('span', null, 'Thinking…'); status.appendChild(statusText);
+    const out = chatNode('div', 'chat-answer chat-stream');
+    a.append(status, out); log.append(q, a);
+    t.value = ''; growChat(t); t.placeholder = 'Ask a follow-up…';
+    q.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    let finished = false;
+    const fail = (message) => {
+      finished = true;
+      status.remove(); out.remove();
+      const p = chatNode('p', 'chat-error', message + ' ');
+      const retry = chatNode('button', 'btn btn-sm', 'Try again'); retry.type = 'button';
+      retry.addEventListener('click', () => { q.remove(); a.remove(); t.value = question; sendChat(form); });
+      p.appendChild(retry); a.appendChild(p);
+    };
+    fetch(form.action, { method: 'POST', body, credentials: 'same-origin', headers: { 'X-CSRF-Token': csrfToken(), 'Accept': 'text/event-stream' } })
+      .then(async (resp) => {
+        if (!resp.ok || !resp.body) throw new Error(resp.status === 403 ? 'Your session expired. Reload the page and ask again.' : 'Pensieve answered ' + resp.status + '.');
+        const reader = resp.body.getReader(), decoder = new TextDecoder();
+        let buffer = '';
+        while (!finished) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          const r = sseEvents(buffer + decoder.decode(chunk.value, { stream: true }), (kind, d) => {
+            if (kind === 'status') statusText.textContent = d.text + '…';
+            else if (kind === 'delta') { if (status.isConnected) status.remove(); out.textContent += d.text; }
+            else if (kind === 'done') {
+              finished = true;
+              const tpl = document.createElement('template'); tpl.innerHTML = (d.html || '').trim();
+              const li = tpl.content.firstElementChild;
+              if (li) { a.replaceWith(li); if (window.htmx) window.htmx.process(li); }
+              const clear = panel.querySelector('.chat-clear'); if (clear) clear.hidden = false;
+              return false;
+            } else if (kind === 'error') { fail(d.text || 'Something went wrong.'); return false; }
+            return true;
+          });
+          buffer = r.buffer;
+          if (r.stop) { reader.cancel().catch(() => {}); break; }
+        }
+        if (!finished) fail('The answer was cut off.');
+      })
+      .catch((err) => { if (!finished) fail(err && err.message && !/fetch|network|load/i.test(err.message) ? err.message : "Couldn't reach Pensieve."); })
+      .finally(() => { delete form.dataset.busy; form.classList.remove('busy'); });
+  }
+  document.addEventListener('click', (e) => {
+    const open = e.target.closest('[data-chat-open]');
+    if (open) { e.preventDefault(); const menu = open.closest('details.menu'); if (menu) menu.removeAttribute('open'); openChat(open.dataset.chatOpen); return; }
+    const expand = e.target.closest('[data-chat-expand]');
+    if (expand) { const panel = expand.closest('.chat'); if (panel) { panel.classList.remove('collapsed'); focusChat(panel); } return; }
+    const close = e.target.closest('[data-chat-close]');
+    if (close) { const slot = close.closest('.chat-slot'); if (slot) slot.innerHTML = ''; return; }
+    const starter = e.target.closest('[data-chat-ask]');
+    if (starter) { const panel = starter.closest('.chat'), t = chatInput(panel); if (t) { t.value = starter.dataset.chatAsk; sendChat(t.form); } }
+  });
+  document.addEventListener('submit', (e) => {
+    const form = e.target.closest && e.target.closest('form[data-chat-form]');
+    if (form) { e.preventDefault(); sendChat(form); }
+  });
+  document.addEventListener('input', (e) => { if (e.target.classList && e.target.classList.contains('chat-input')) growChat(e.target); });
+  document.addEventListener('keydown', (e) => {
+    const t = e.target;
+    if (!t.classList || !t.classList.contains('chat-input')) return;
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendChat(t.form); }
+  });
+  // The paper re-renders a story (tuning) or itself (read, removed): open chats come back with it.
+  let openChats = null;
+  document.body.addEventListener('htmx:beforeSwap', (e) => {
+    const t = e.detail && e.detail.target;
+    openChats = t && (t.id === 'insight' || t.classList.contains('pstory')) ? $$('.chat-slot', t).filter((s) => s.querySelector('.chat')).map((s) => s.id) : null;
+  });
+  document.body.addEventListener('htmx:afterSwap', () => {
+    if (!openChats || !window.htmx) { openChats = null; return; }
+    openChats.forEach((id) => { const s = document.getElementById(id); if (s && !s.querySelector('.chat')) window.htmx.ajax('GET', '/items/' + id.slice('chat-slot-'.length) + '/chat', { target: s, swap: 'innerHTML' }); });
+    openChats = null;
   });
 
   // Click selection (htmx opens the article on click).

@@ -310,3 +310,16 @@ async def test_base_url_from_settings(gateway):
     await client.chat_text(settings.llm_fast_model, "s", "u", workflow="x")
     assert str(gateway.chat_requests[0].url) == f"{BASE}/chat/completions"
     await client.aclose()
+
+
+def test_extract_json_skips_reasoning_leaked_into_the_content():
+    from pensieve.ai.client import _extract_json
+
+    leaked = 'Plan: answer as {"search": true, "queries": [...]}.</think>{"search": true, "queries": ["q"]}'
+    assert _extract_json(leaked) == {"search": True, "queries": ["q"]}
+    prose = 'Three angles. {"search": true, "queries": [...]} I will go with {"search": false, "queries": []}'
+    assert _extract_json(prose) == {"search": False, "queries": []}
+    assert _extract_json('<think>{"x": 1}</think>\n```json\n{"a": {"b": 1}}\n```') == {"a": {"b": 1}}
+    assert _extract_json('Sure: {"a": {"b": 1}, "c": [{"d": 2}]} done') == {"a": {"b": 1}, "c": [{"d": 2}]}
+    with pytest.raises(ValueError):  # json.JSONDecodeError
+        _extract_json("no json here")

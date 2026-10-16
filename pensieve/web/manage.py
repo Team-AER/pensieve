@@ -81,7 +81,16 @@ FLASH = {
     "suggestion_dismissed": "Suggestion dismissed.",
 }
 
-AI_TOGGLES = ("auto_file", "tag_items", "group_stories", "summarize_items", "memory", "digest", "paper")
+AI_TOGGLES = (
+    "auto_file",
+    "tag_items",
+    "group_stories",
+    "summarize_items",
+    "memory",
+    "digest",
+    "paper",
+    "chat",
+)
 
 SECTIONS = [
     ("feeds", "Feeds", "/manage/feeds"),

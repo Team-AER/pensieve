@@ -41,6 +41,7 @@
   </aside>
   {% endif %}
   <div id="summary-{{ item.id }}" class="summary-slot">{% if ai and ai.summary %}{% with pending=False, error=None %}{% include "partials/summary.html" %}{% endwith %}{% endif %}</div>
+  <div id="chat-slot-{{ item.id }}" class="chat-slot"{% if has_chat is defined and has_chat %} hx-get="/items/{{ item.id }}/chat?collapsed=1" hx-trigger="load" hx-swap="innerHTML"{% endif %}></div>
   <div id="body-{{ item.id }}">{% include "partials/body.html" %}</div>
   <section id="notes-{{ item.id }}" class="notes" aria-label="Notes">{% include "partials/notes.html" %}</section>
 </article>

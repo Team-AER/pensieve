@@ -9,7 +9,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
 
@@ -156,19 +158,43 @@ def validate_schema(value: Any, schema: dict, path: str = "$") -> None:
             raise LLMError(f"{path}: {value} > maximum {schema['maximum']}")
 
 
+_THINK_BLOCK = re.compile(r"<think>.*?</think>", re.DOTALL)
+
+
 def _extract_json(content: str) -> Any:
-    """Parse a JSON object out of model output, tolerating code fences and stray prose."""
-    text = content.strip()
+    """Parse a JSON object out of model output, tolerating code fences, stray prose and leaked reasoning.
+
+    Some routes put their reasoning in the content: a ``<think>`` block, or prose that ends in ``</think>`` or runs
+    straight into the answer, and it may quote the schema itself (``{"queries": [...]}``). Reasoning blocks are
+    dropped; when prose still surrounds the answer, the object that ends last wins (the outermost one, if nested),
+    since the answer follows the reasoning.
+    """
+    text = _THINK_BLOCK.sub("", content)
+    if "</think>" in text:
+        text = text.rsplit("</think>", 1)[1]
+    text = text.strip()
     if text.startswith("```"):
         text = text.strip("`")
         text = text.removeprefix("json")
     try:
         return json.loads(text)
-    except json.JSONDecodeError:
-        start, end = text.find("{"), text.rfind("}")
-        if start != -1 and end > start:
-            return json.loads(text[start : end + 1])
-        raise
+    except json.JSONDecodeError as exc:
+        error = exc
+    decoder = json.JSONDecoder()
+    best: tuple[int, Any] | None = None
+    pos = text.find("{")
+    while pos != -1:
+        try:
+            value, end = decoder.raw_decode(text, pos)
+        except json.JSONDecodeError:
+            pos = text.find("{", pos + 1)
+            continue
+        if best is None or end > best[0]:
+            best = (end, value)
+        pos = text.find("{", end)  # objects inside this one end before it does
+    if best is None:
+        raise error
+    return best[1]
 
 
 # ---------------------------------------------------------------------------
@@ -338,7 +364,7 @@ class LLMClient:
             sem = _SLOTS[f"{key}:{limit}"] = asyncio.Semaphore(max(1, limit))
         return sem
 
-    async def _post(self, path: str, body: dict, workflow: str) -> dict:
+    async def _prepare(self, path: str, body: dict) -> None:
         from pensieve.ai.model_choice import apply_overrides
 
         await apply_overrides()  # admin-chosen models/effort, refreshed at most once a minute per process
@@ -346,6 +372,9 @@ class LLMClient:
             if time.monotonic() - _CATALOG_READ["at"] > CATALOG_TTL_S:
                 await self.health()
             body["max_tokens"] = max(body.get("max_tokens") or 0, _OUTPUT_FLOORS.get(body.get("model"), 0))
+
+    async def _post(self, path: str, body: dict, workflow: str) -> dict:
+        await self._prepare(path, body)
         url = f"{self.settings.llm_base_url.rstrip('/')}{path}"
         try:
             async with self._slot(body.get("model")):
@@ -456,6 +485,88 @@ class LLMClient:
                 raise
             log.warning("chat_text(%s): %s", workflow, exc)
             return exc.content.strip()
+
+    async def chat_stream(
+        self,
+        model: str,
+        messages: list[dict],
+        *,
+        max_tokens: int = 1024,
+        workflow: str,
+        reasoning: str | None = None,
+        temperature: float = 0.2,
+    ) -> AsyncIterator[tuple[str, str]]:
+        """A whole conversation, streamed as ``("reasoning" | "content", text)`` deltas.
+
+        Same plumbing as the other calls (admin overrides, the catalog's output floor, the per-model slot and
+        timeout); the slot is held until the stream ends or the caller stops reading. A reply cut off at
+        ``max_tokens`` before any content raises ``LLMTruncated``; one cut off mid-answer just ends.
+        """
+        body = self._body(
+            model,
+            messages,
+            max_tokens,
+            reasoning,
+            stream=True,
+            stream_options={"include_usage": True},
+            temperature=temperature,
+        )
+        await self._prepare("/chat/completions", body)
+        url = f"{self.settings.llm_base_url.rstrip('/')}/chat/completions"
+        finish: str | None = None
+        answered = False
+        try:
+            async with (
+                self._slot(model),
+                self.http.stream(
+                    "POST", url, json=body, headers=self._headers(workflow), timeout=self.timeout_for(model)
+                ) as resp,
+            ):
+                if resp.status_code >= 400:
+                    text = (await resp.aread()).decode("utf-8", errors="replace")
+                    raise LLMError(f"gateway /chat/completions returned {resp.status_code}: {text[:300]}")
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if data == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data)
+                    except ValueError:
+                        continue
+                    if not isinstance(chunk, dict):
+                        continue
+                    if chunk.get("error"):
+                        raise LLMError(f"{workflow}: {model} failed mid-stream: {str(chunk['error'])[:300]}")
+                    self.usage.add(chunk.get("usage"))
+                    for choice in chunk.get("choices") or []:
+                        delta = choice.get("delta") or {}
+                        thought = delta.get("reasoning_content") or delta.get("reasoning")
+                        if isinstance(thought, str) and thought:
+                            yield "reasoning", thought
+                        text = delta.get("content")
+                        if isinstance(text, str) and text:
+                            answered = True
+                            yield "content", text
+                        finish = choice.get("finish_reason") or finish
+        except httpx.TimeoutException as exc:
+            limit = self.timeout_for(model) / 60
+            raise LLMError(
+                f"{model} gave no answer within {limit:g} min; raise its timeout on the Gateway card"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise LLMError(f"gateway request failed: {exc!r}") from exc
+        if finish == "length":
+            message = (
+                f"{workflow}: {model} hit max_tokens={body.get('max_tokens')}"
+                f"{'' if answered else ' while still reasoning'} (effort {body.get('reasoning_effort') or 'off'})"
+            )
+            if not answered:
+                raise LLMTruncated(
+                    message + "; raise the output window or lower reasoning on the Gateway card"
+                )
+            log.warning(message)
 
     async def embed(self, texts: list[str], workflow: str) -> list[list[float]] | None:
         """Embed in batches of 32. Returns None when the gateway does not route embeddings (404/400)."""

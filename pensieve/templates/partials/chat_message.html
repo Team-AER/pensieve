@@ -1,0 +1,24 @@
+{% import "_macros.html" as m %}
+{# One message of an article chat (web/chat.py chat_view): the reader's question, or an answer with its sources. #}
+{% if msg.role == 'user' %}
+<li class="chat-msg chat-q"><div class="chat-bubble">{{ msg.content }}</div></li>
+{% else %}
+<li class="chat-msg chat-a">
+  <div class="chat-answer">{{ msg.html }}</div>
+  {% if msg.cited %}
+  <ol class="chat-sources" aria-label="Sources">
+    {% for s in msg.cited %}<li><a href="{{ s.url }}" target="_blank" rel="noopener noreferrer" title="{{ s.title }}"><span class="chat-src-n">{{ s.n }}</span><span class="chat-src-title">{{ s.title }}</span><span class="chat-src-host">{{ s.host }}</span></a></li>{% endfor %}
+  </ol>
+  {% endif %}
+  {% if msg.searched %}
+  <details class="chat-searched">
+    <summary>{{ m.icon('globe', 12) }} Searched {% for q in msg.searched %}“{{ q }}”{{ ', ' if not loop.last }}{% endfor %}{% if msg.other %} · {{ msg.other|length }} more result{{ 's' if msg.other|length != 1 }}{% endif %}</summary>
+    {% if msg.other %}
+    <ol class="chat-sources chat-sources-more">
+      {% for s in msg.other %}<li><a href="{{ s.url }}" target="_blank" rel="noopener noreferrer" title="{{ s.title }}"><span class="chat-src-n">{{ s.n }}</span><span class="chat-src-title">{{ s.title }}</span><span class="chat-src-host">{{ s.host }}</span></a></li>{% endfor %}
+    </ol>
+    {% endif %}
+  </details>
+  {% endif %}
+</li>
+{% endif %}

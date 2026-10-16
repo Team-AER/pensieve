@@ -198,6 +198,129 @@ def highlight(text: str | None, query: str | None) -> Markup:
     return Markup(marked)
 
 
+_CITE_RE = re.compile(r"\[(\d{1,3}(?:\s*,\s*\d{1,3})*)\]")
+_MD_LINK_RE = re.compile(r"\[([^\]\n]+)\]\((https?://[^\s)]+)\)")
+_BARE_URL_RE = re.compile(r"(?<![\"'=\w])(https?://[^\s<]+[^\s<.,;:!?)\]'\"])")
+_STASH_RE = re.compile(r"\x00(\d+)\x00")
+_BULLET_RE = re.compile(r"^\s*[-*+•]\s+(.*)$")
+_NUMBERED_RE = re.compile(r"^\s*(\d{1,3})[.)]\s+(.*)$")
+_HEADING_RE = re.compile(r"^\s*#{1,6}\s+(.*)$")
+
+
+def chat_markdown(text: str | None, sources: dict[int, dict] | None = None) -> Markup:
+    """The small Markdown subset chat answers use, rendered safely: everything is escaped first.
+
+    Paragraphs, ``-``/``1.`` lists, headings (as bold lines), fenced code, ``**bold**``, ``*italic*``, ``code``,
+    http(s) links, and ``[n]`` citations, which link to source ``n`` when ``sources`` has it.
+    """
+    sources = sources or {}
+
+    def inline(raw: str) -> str:
+        stash: list[str] = []
+
+        def keep(html: str) -> str:
+            stash.append(html)
+            return f"\x00{len(stash) - 1}\x00"
+
+        out = str(escape(raw))
+        out = re.sub(r"`([^`\n]+)`", lambda m: keep(f"<code>{m.group(1)}</code>"), out)
+        out = _MD_LINK_RE.sub(
+            lambda m: keep(
+                f'<a href="{m.group(2)}" target="_blank" rel="noopener noreferrer">{m.group(1)}</a>'
+            ),
+            out,
+        )
+        out = _BARE_URL_RE.sub(
+            lambda m: keep(
+                f'<a href="{m.group(1)}" target="_blank" rel="noopener noreferrer">{m.group(1)}</a>'
+            ),
+            out,
+        )
+
+        def cite(m: re.Match) -> str:
+            links = []
+            for n in re.split(r"\s*,\s*", m.group(1)):
+                src = sources.get(int(n))
+                if not src:
+                    return m.group(0)
+                title = escape(f"{src.get('title', '')} · {src.get('host', '')}")
+                links.append(
+                    f'<a class="cite" href="{escape(src.get("url", ""))}" target="_blank" rel="noopener noreferrer"'
+                    f' title="{title}">{int(n)}</a>'
+                )
+            return keep("".join(links))
+
+        out = _CITE_RE.sub(cite, out)
+        out = re.sub(r"\*\*(?!\s)(.+?)(?<!\s)\*\*", r"<strong>\1</strong>", out)
+        out = re.sub(r"(?<![\w*])\*(?![\s*])(.+?)(?<![\s*])\*(?![\w*])", r"<em>\1</em>", out)
+        out = re.sub(r"(?<![\w_])_(?![\s_])(.+?)(?<![\s_])_(?![\w_])", r"<em>\1</em>", out)
+        while _STASH_RE.search(out):
+            out = _STASH_RE.sub(lambda m: stash[int(m.group(1))], out)
+        return out
+
+    html: list[str] = []
+    para: list[str] = []
+    code: list[str] | None = None
+    open_list: str | None = None
+
+    def flush() -> None:
+        if para:
+            html.append("<p>" + "<br>".join(inline(line) for line in para) + "</p>")
+            para.clear()
+
+    def close_list() -> None:
+        nonlocal open_list
+        if open_list:
+            html.append(f"</{open_list}>")
+            open_list = None
+
+    def item(kind: str, body: str, start: int | None = None) -> None:
+        nonlocal open_list
+        flush()
+        if open_list != kind:
+            close_list()
+            html.append(f'<ol start="{start}">' if kind == "ol" and start and start != 1 else f"<{kind}>")
+            open_list = kind
+        html.append(f"<li>{inline(body)}</li>")
+
+    for raw in (text or "").replace("\r\n", "\n").split("\n"):
+        if raw.strip().startswith("```"):
+            if code is None:
+                flush()
+                close_list()
+                code = []
+            else:
+                html.append("<pre><code>" + str(escape("\n".join(code))) + "</code></pre>")
+                code = None
+            continue
+        if code is not None:
+            code.append(raw)
+            continue
+        line = raw.rstrip()
+        if not line.strip():
+            flush()
+            close_list()
+            continue
+        if bullet := _BULLET_RE.match(line):
+            item("ul", bullet.group(1))
+        elif numbered := _NUMBERED_RE.match(line):
+            item("ol", numbered.group(2), int(numbered.group(1)))
+        elif heading := _HEADING_RE.match(line):
+            flush()
+            close_list()
+            html.append(f'<p class="chat-h"><strong>{inline(heading.group(1).strip("*"))}</strong></p>')
+        elif open_list and raw[:1] in (" ", "\t") and html[-1].endswith("</li>"):
+            html[-1] = html[-1][: -len("</li>")] + " " + inline(line.strip()) + "</li>"
+        else:
+            close_list()
+            para.append(line.strip())
+    if code is not None:
+        html.append("<pre><code>" + str(escape("\n".join(code))) + "</code></pre>")
+    flush()
+    close_list()
+    return Markup("".join(html))
+
+
 FONT_SIZES = ("s", "m", "l", "xl")
 MEASURES = ("narrow", "normal", "wide")
 FONT_FAMILIES = ("sans", "serif", "system")
@@ -302,6 +425,7 @@ def _build_env() -> Environment:
     env.filters["filesize"] = filesize
     env.filters["highlight"] = highlight
     env.filters["summary_blocks"] = summary_blocks
+    env.filters["chat_markdown"] = chat_markdown
     env.filters["tojson_attr"] = lambda v: json.dumps(v)
     env.globals["sparkline_points"] = sparkline_points
     env.globals["now"] = lambda: datetime.now(UTC)

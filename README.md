@@ -24,6 +24,9 @@ a straightforward feed reader.
   (searchable, and what the AI reads), a static offline copy with its images, a full-page screenshot and the
   original HTML, in an S3 object store (Garage). Starred feed items are archived the same way. Pocket,
   Instapaper and bookmark exports import in the background
+- **Ask about any article**: a chat under the article (reader or paper) grounded in its text. When the article
+  leaves something out, the model plans a few web searches through the bundled SearXNG, reads the pages it finds
+  and answers with numbered sources; follow-ups keep the thread and its sources. Web search is a per-question toggle.
 - Optional local-model workflows with configurable models and reasoning effort; summaries retry on their own (a half-hourly sweep re-queues what the eager job missed), and the paper learns from "more like this" / "less" and from your notes on a why-it-matters
 - PostgreSQL + pgvector storage, Redis/ARQ jobs, Alembic migrations, and Docker Compose deployment
 - SSRF protections, CSRF protection, Argon2 password hashing, rate limiting, and secure proxy headers
@@ -90,6 +93,8 @@ All application settings use the `PENSIEVE_` prefix. The most important values a
 | `PENSIEVE_GARAGE_CAPACITY_GB` | Size the Garage node advertises (default 200) |
 | `PENSIEVE_CAPTURE_CONCURRENCY` | Pages captured at once by `worker-capture` (default 2) |
 | `PENSIEVE_TIKA_URL` | Optional Apache Tika `/tika` endpoint for PDFs whose local text extraction is empty |
+| `PENSIEVE_SEARCH_URL` | SearXNG (JSON API) that article chat searches; Compose points it at the bundled `search` service, empty turns web search off |
+| `PENSIEVE_SEARXNG_SECRET` | Secret of the bundled SearXNG |
 
 See [.env.example](.env.example) and [`pensieve/config.py`](pensieve/config.py) for the full set of defaults.
 Keep `.env` private; it is excluded from Git and the Docker build context.

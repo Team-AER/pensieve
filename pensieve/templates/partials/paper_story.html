@@ -30,6 +30,7 @@
     </ul>
     <div class="pstory-actions">
       <a class="btn btn-sm" href="/items/{{ story.item_id }}?from=paper">{{ m.icon('reader', 14) }} Read</a>
+      {% if chat_on is defined and chat_on %}<button type="button" class="btn btn-sm" data-chat-open="{{ story.item_id }}" aria-controls="chat-slot-{{ story.item_id }}" title="Ask about this story; Pensieve answers from the article and the web">{{ m.icon('chat', 14) }} {{ 'Continue chat' if chatted is defined and story.item_id|string in chatted else 'Ask' }}</button>{% endif %}
       {% if not story.read %}
       <form hx-post="/insights/paper/{{ edition.id }}/read" hx-target="#{{ sid }}" hx-swap="outerHTML" method="post" action="/insights/paper/{{ edition.id }}/read">{{ m.csrf_field(csrf_token) }}<input type="hidden" name="key" value="{{ story.key }}"><button class="btn btn-sm" type="submit" title="Mark every copy read; it leaves today's paper">{{ m.icon('check-circle', 14) }} Mark read</button></form>
       {% endif %}
@@ -42,5 +43,6 @@
       </span>
     </div>
     {% if tl %}<p class="pstory-tuned faint small">{{ m.icon('chart', 12) }} Tuned: {{ tl }} · applies when the paper next updates</p>{% endif %}
+    {% if chat_on is defined and chat_on %}<div class="chat-slot" id="chat-slot-{{ story.item_id }}"></div>{% endif %}
   </div>
 </details>

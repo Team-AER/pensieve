@@ -1,0 +1,67 @@
+# SearXNG for Pensieve's article chat, mounted read-only at /etc/searxng/settings.yml (docker-compose.yaml `search`).
+# Internal only: no published port, reached by the web container at http://search:8080 over the JSON API.
+# SEARXNG_SECRET from the container environment overrides secret_key below.
+
+use_default_settings:
+  engines:
+    keep_only:
+      - bing
+      - bing news
+      - mojeek
+      - yahoo
+      - startpage
+      - duckduckgo
+      - brave
+      - wikipedia
+
+general:
+  debug: false
+  instance_name: "Pensieve search"
+  enable_metrics: false
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  default_lang: "auto"
+  formats:
+    - html
+    - json
+
+server:
+  port: 8080
+  bind_address: "0.0.0.0"
+  secret_key: "pensieve-internal-searxng"
+  base_url: false
+  limiter: false
+  public_instance: false
+  image_proxy: false
+  method: "GET"
+
+ui:
+  static_use_hash: true
+
+outgoing:
+  request_timeout: 4.0
+  max_request_timeout: 8.0
+  pool_connections: 20
+  pool_maxsize: 10
+
+# Engines answer differently from different networks: Google and Qwant refuse many home IPs outright (left out),
+# DuckDuckGo and Brave throttle at times. With several enabled a search still returns results when some are down.
+engines:
+  - name: bing
+    disabled: false
+  - name: bing news
+    disabled: false
+  - name: mojeek
+    disabled: false
+  - name: yahoo
+    disabled: false
+  - name: startpage
+    disabled: false
+  - name: duckduckgo
+    disabled: false
+  - name: brave
+    disabled: false
+  - name: wikipedia
+    disabled: false

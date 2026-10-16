@@ -111,6 +111,12 @@ class Settings(BaseSettings):
     capture_concurrency: int = 2
     tika_url: str = ""  # optional Apache Tika /tika endpoint for PDF text fallback
 
+    # Article chat (pensieve/ai/chat.py). Web search goes through a SearXNG instance's JSON API (compose service
+    # `search`); "" keeps chat to the article alone. The pages a search finds are fetched by the SSRF-guarded fetcher.
+    search_url: str = ""
+    search_timeout_s: float = 12.0  # one SearXNG query
+    search_page_timeout_s: float = 10.0  # one result page fetched and extracted
+
 
 @lru_cache
 def get_settings() -> Settings:

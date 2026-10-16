@@ -596,6 +596,21 @@ class Insight(Base):
     )
 
 
+class ItemChat(TimestampMixin, Base):
+    """A reader's conversation about one article (Ask in the reader and on the paper): one thread per item.
+
+    ``messages`` is the whole thread, oldest first: ``{"role": "user"|"assistant", "content", "at"}``; an
+    assistant turn also keeps ``sources`` (web results numbered across the thread, so an old ``[n]`` stays
+    right), ``searched`` (the queries it ran) and ``model``.
+    """
+
+    __tablename__ = "item_chats"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    item_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("items.id", ondelete="CASCADE"), primary_key=True)
+    messages: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+
+
 class AppSetting(Base):
     """Install-wide key/value settings edited from the UI (e.g. which gateway models to use).
 
@@ -663,6 +678,7 @@ __all__ = [
     "Insight",
     "Item",
     "ItemAI",
+    "ItemChat",
     "ItemState",
     "Note",
     "Profile",

@@ -19,6 +19,7 @@ from pensieve.ai import paper
 from pensieve.ai.common import ai_on
 from pensieve.ai.memory import record_correction
 from pensieve.models import AIJob, Feed, Folder, Insight, Item, ItemAI, Tag, User
+from pensieve.web.chat import chatted_items
 from pensieve.web.queries import parse_uuid, set_read, user_owns_items, with_copies
 from pensieve.web.templating import DB, CsrfUser, CurrentUser, hx_trigger, is_htmx, render
 
@@ -218,6 +219,8 @@ async def _paper_ctx(
         "tuned": _tuned_rows(config, feeds),
         "tune_lines": _tune_lines(config, body, {str(f.id): (f.title or f.url) for f in feeds}),
         "missing_summaries": _missing_summaries(body),
+        "chat_on": ai_on(user, "chat"),
+        "chatted": await chatted_items(session, user, [s.get("item_id") for s in _stories(body)]),
         "queued": request.query_params.get("queued") == "1",
         "saved": request.query_params.get("saved") == "1",
         "summaries_queued": request.query_params.get("summaries") or "",
@@ -333,6 +336,7 @@ def _story_ctx(
         "story": story,
         "summary_prefs": ai_insights.summary_prefs(user),
         "tune_line": paper.tune_summary(config, story, feeds),
+        "chat_on": ai_on(user, "chat"),
         "hx_open": True,  # the reader acted inside the expanded story: the swapped-in row must stay open
     }
 

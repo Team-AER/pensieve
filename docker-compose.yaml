@@ -8,6 +8,7 @@ name: pensieve
 #   worker, worker-ai   feed polling; AI tagging, grouping and summaries
 #   worker-capture      saved-page captures; drives `browser` over the Playwright protocol
 #   browser             headless Chromium on an egress-only network (cannot reach db, redis or garage)
+#   search              SearXNG for article chat's web search (internal; the web container asks it over JSON)
 
 x-app: &app
   image: pensieve:local
@@ -22,6 +23,7 @@ x-app: &app
     PENSIEVE_GARAGE_ADMIN_URL: http://garage:3903
     PENSIEVE_BROWSER_WS: ws://browser:3000/
     PENSIEVE_TIKA_URL: ${PENSIEVE_TIKA_URL:-}
+    PENSIEVE_SEARCH_URL: ${PENSIEVE_SEARCH_URL-http://search:8080}  # set it empty in .env to turn web search off
   restart: unless-stopped
   init: true
 
@@ -129,6 +131,18 @@ services:
     ipc: private
     shm_size: 1gb
     networks: [capture, egress]
+    restart: unless-stopped
+  search:
+    image: searxng/searxng:2026.9.30-a9d990033
+    environment:
+      SEARXNG_SECRET: ${PENSIEVE_SEARXNG_SECRET:-pensieve-internal-searxng}
+    volumes:
+      - ./deploy/searxng/settings.yml:/etc/searxng/settings.yml:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8080/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
 
 networks:

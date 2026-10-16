@@ -15,3 +15,6 @@ services:
     networks: [capture, egress, default]
     ports:
       - "127.0.0.1:3000:3000"
+  search:
+    ports:
+      - "127.0.0.1:8081:8080"

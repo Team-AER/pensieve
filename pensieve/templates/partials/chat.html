@@ -1,0 +1,30 @@
+{% import "_macros.html" as m %}
+{# Ask about this article: the thread so far and the composer. reader.js posts questions and streams the answers in. #}
+{% set asked = thread|selectattr('role', 'equalto', 'user')|list|length %}
+<section class="chat{% if collapsed and asked %} collapsed{% endif %}" id="chat-{{ item.id }}" data-item="{{ item.id }}" aria-label="Ask about this article">
+  <div class="chat-head">
+    <span class="eyebrow eyebrow-ai">{{ m.icon('chat', 14) }} Ask about this article</span>
+    {% if asked %}<button type="button" class="btn btn-sm btn-ghost chat-expand" data-chat-expand aria-controls="chat-{{ item.id }}">{{ asked }} question{{ 's' if asked != 1 }} · Show</button>{% endif %}
+    <span class="grow"></span>
+    <form class="chat-clear"{% if not thread %} hidden{% endif %} hx-post="/items/{{ item.id }}/chat/clear" hx-target="#chat-{{ item.id }}" hx-swap="outerHTML" method="post" action="/items/{{ item.id }}/chat/clear"
+      hx-confirm="This conversation is deleted; the article stays as it is." data-confirm-title="Start a new chat?" data-confirm-label="New chat">{{ m.csrf_field(csrf_token) }}<button class="btn btn-sm btn-ghost" type="submit" title="Clear this conversation and start over" aria-label="New chat">{{ m.icon('refresh', 14) }}<span class="btn-label">New chat</span></button></form>
+    <button type="button" class="btn btn-icon btn-sm btn-ghost" data-chat-close aria-label="Close the chat">{{ m.icon('close', 16) }}</button>
+  </div>
+  {% if not enabled %}
+  <p class="muted small chat-note">Chat is turned off. Turn it on in <a href="/manage/ai">Manage → AI and memory</a>.</p>
+  {% else %}
+  {# One line: an empty thread must leave the list :empty (whitespace would count). #}
+  <ol class="chat-log" aria-live="polite">{% for msg in thread %}{% include "partials/chat_message.html" %}{% endfor %}{% if running %}<li class="chat-msg chat-a" hx-get="/items/{{ item.id }}/chat" hx-trigger="every 3s" hx-target="#chat-{{ item.id }}" hx-swap="outerHTML"><p class="chat-status"><span class="live-dot"></span> Still answering your last question…</p></li>{% endif %}</ol>
+  {% if not thread and not running %}
+  <div class="chat-starters" role="group" aria-label="Suggested questions">
+    {% for q in starters %}<button type="button" class="chip chat-starter" data-chat-ask="{{ q }}">{{ q }}</button>{% endfor %}
+  </div>
+  {% endif %}
+  <form class="chat-form" action="/items/{{ item.id }}/chat" method="post" data-chat-form>
+    <label class="sr-only" for="chat-q-{{ item.id }}">Your question about this article</label>
+    <textarea class="input chat-input" id="chat-q-{{ item.id }}" name="question" rows="1" maxlength="2000" placeholder="{{ 'Ask a follow-up…' if thread else 'Ask anything about this article…' }}" enterkeyhint="send"></textarea>
+    {% if search_on %}<label class="chat-web" title="Let Pensieve search the web when the article doesn't have the answer. Your question goes to search engines as a few short queries; the article and this chat stay here."><input type="checkbox" name="web" value="1"{% if web_default %} checked{% endif %}>{{ m.icon('globe', 14) }}<span>Web</span></label>{% endif %}
+    <button class="btn btn-sm btn-ai chat-send" type="submit" aria-label="Ask">{{ m.icon('send', 15) }}</button>
+  </form>
+  {% endif %}
+</section>

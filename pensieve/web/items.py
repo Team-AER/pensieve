@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased
 
 from pensieve import queue
+from pensieve.ai.common import ai_on
 from pensieve.models import (
     FEED_KIND_SAVED,
     AIJob,
@@ -22,6 +23,7 @@ from pensieve.models import (
     Feed,
     Item,
     ItemAI,
+    ItemChat,
     ItemState,
     Note,
     Snapshot,
@@ -92,6 +94,8 @@ async def article_context(session: AsyncSession, user: User, item: Item, feed: F
     snapshot = await session.scalar(
         select(Snapshot).where(Snapshot.user_id == user.id, Snapshot.item_id == item.id)
     )
+    chat_on = ai_on(user, "chat")
+    has_chat = chat_on and await session.get(ItemChat, (user.id, item.id)) is not None
     is_saved = feed.kind == FEED_KIND_SAVED
     thin = is_thin(item) and not is_saved
     return {
@@ -113,6 +117,8 @@ async def article_context(session: AsyncSession, user: User, item: Item, feed: F
         "snapshot": snapshot,
         "is_saved": is_saved,
         "archive_mode": "article",
+        "chat_on": chat_on,
+        "has_chat": has_chat,
     }
 
 

@@ -28,6 +28,7 @@ os.environ.setdefault("PENSIEVE_REDIS_URL", "redis://localhost:6379/9")
 os.environ["PENSIEVE_S3_ACCESS_KEY"] = ""
 os.environ["PENSIEVE_S3_SECRET_KEY"] = ""
 os.environ["PENSIEVE_BROWSER_WS"] = ""
+os.environ["PENSIEVE_SEARCH_URL"] = ""  # article chat tests mock SearXNG; never the developer's instance
 
 from pensieve import models
 from pensieve.auth import hash_password
