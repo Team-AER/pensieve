@@ -369,6 +369,9 @@
     .topbar-search { max-width: 360px; }
   }
   @media (min-width: 1160px) {
+    /* The nav and article reserve 820px together. Let the list give up its last 100px on
+       smaller laptops instead of pushing the article and its actions beyond the viewport. */
+    .pane-list { flex-shrink: 1; min-width: 340px; }
     .pane-article { min-width: 560px; }
   }
 
@@ -670,11 +673,18 @@
     /* ---- Dialogs: fit the viewport, sit above the tab bar, full-width buttons ---- */
     .dialog { max-height: calc(100dvh - 32px); margin-top: auto; margin-bottom: 16px; display: flex; flex-direction: column; }
     .dialog:not([open]) { display: none; }
+    /* Form-wrapped dialogs need the same constrained flex column as the dialog itself,
+       so only their body scrolls when the keyboard or landscape leaves little height. */
+    .dialog > form { display: flex; flex-direction: column; min-height: 0; }
+    .dialog-head, .dialog-foot { flex: 0 0 auto; }
     .dialog-body { overflow-y: auto; flex: 1 1 auto; min-height: 0; }
     .dialog-head { padding: 16px 20px 0; }
     .dialog-body { padding: 10px 20px 16px; }
     .dialog-foot { padding: 0 20px 20px; }
     .dialog-foot .btn { flex: 1 1 0; min-height: 48px; }
+    #save-dialog .dialog-foot { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    #save-dialog .dialog-foot > a { grid-column: 1 / -1; white-space: normal; text-align: center; }
+    #save-dialog .dialog-foot > .grow { display: none; }
     .shortcuts-grid { gap: 10px 14px; }
 
     /* ---- Search ---- */
@@ -801,9 +811,12 @@
   .archive-placeholder { padding: 8px 0; }
   .chip-ok { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
   .flash-warn { background: var(--highlight); color: var(--warn); }
+  /* Inline code in a notice belongs to its sentence, rather than a separate flex column. */
+  p.flash { display: block; overflow-wrap: anywhere; }
+  p.flash > .ic { margin-right: 6px; }
   .switch-row { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
   .switch-row input { margin-top: 4px; width: 18px; height: 18px; accent-color: var(--accent); }
-  .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 18px; }
+  .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 18px; }
   .grid-2 h3 { margin: 0; font-size: var(--text-md); }
   .steps { margin: 0; padding-left: 1.3em; display: flex; flex-direction: column; gap: 6px; color: var(--ink-2); }
   .steps code, .card code { word-break: break-all; }
