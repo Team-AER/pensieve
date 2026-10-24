@@ -9,3 +9,20 @@ data/
 *.log
 .coverage
 htmlcov/
+
+# Generated design-review media stays in local evidence storage.
+/docs/design-review-*/**/*.avif
+/docs/design-review-*/**/*.gif
+/docs/design-review-*/**/*.heic
+/docs/design-review-*/**/*.jpeg
+/docs/design-review-*/**/*.jpg
+/docs/design-review-*/**/*.m4a
+/docs/design-review-*/**/*.mov
+/docs/design-review-*/**/*.mp3
+/docs/design-review-*/**/*.mp4
+/docs/design-review-*/**/*.ogg
+/docs/design-review-*/**/*.png
+/docs/design-review-*/**/*.svg
+/docs/design-review-*/**/*.wav
+/docs/design-review-*/**/*.webm
+/docs/design-review-*/**/*.webp

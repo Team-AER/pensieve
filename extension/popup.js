@@ -16,7 +16,11 @@ const $ = (id) => document.getElementById(id);
   $('options').addEventListener('click', (e) => { e.preventDefault(); chrome.runtime.openOptionsPage(); });
   $('form').addEventListener('submit', async (e) => {
     e.preventDefault();
+    if ($('save').disabled) return;
     $('save').disabled = true;
+    $('save').textContent = 'Saving…';
+    $('form').setAttribute('aria-busy', 'true');
+    $('status').className = '';
     $('status').textContent = 'Saving…';
     try {
       const html = $('send-page').checked ? await pageHtml(tab.id) : null;
@@ -29,11 +33,18 @@ const $ = (id) => document.getElementById(id);
       const open = document.createElement('a');
       open.href = data.open; open.target = '_blank'; open.textContent = 'Open in Pensieve';
       $('status').append(done, open);
-      setTimeout(() => window.close(), 2200);
+      $('save').textContent = '✓ Saved';
+      $('status').className = 'saved-result';
+      $('tags').readOnly = true;
+      $('note').readOnly = true;
+      $('send-page').disabled = true;
     } catch (err) {
       $('status').textContent = err.message;
       $('status').className = 'error';
       $('save').disabled = false;
+      $('save').textContent = 'Save';
+    } finally {
+      $('form').removeAttribute('aria-busy');
     }
   });
 })();
