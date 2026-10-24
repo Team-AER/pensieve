@@ -43,6 +43,7 @@ const $ = (id) => document.getElementById(id);
       check.append(stroke);
       $('save').prepend(check);
       $('status').className = 'saved-result';
+      $('capture-slip').classList.add('is-filed');
       $('tags').readOnly = true;
       $('note').readOnly = true;
       $('send-page').disabled = true;
