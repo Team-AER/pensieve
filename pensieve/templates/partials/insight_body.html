@@ -4,7 +4,7 @@
 <div class="insights-head">
   <div class="insight-header">
     <div class="eyebrow eyebrow-ai">{{ m.icon('sparkle', 14) }} {{ 'Weekly review' if kind == 'weekly' else 'Daily digest' }}</div>
-    <h1 class="insight-title">No {{ 'review' if kind == 'weekly' else 'digest' }} yet.</h1>
+    <h1 class="insight-title">{{ 'Weekly review' if kind == 'weekly' else 'Daily digest' }}</h1>
   </div>
   <div class="insight-actions">
     <div class="seg" role="group" aria-label="Kind">
@@ -22,7 +22,7 @@
     <button class="btn btn-ai" type="submit">{{ m.icon('sparkle') }} Generate {{ 'this week' if kind == 'weekly' else "today's digest" }}</button>
   </form>
   {% endset %}
-  {{ m.empty_state('Nothing written yet', 'Pensieve writes one every ' ~ ('Sunday' if kind == 'weekly' else 'morning') ~ ' from what arrived and what you read. You can ask for one now.', 'sparkle', ai=True, action=generate_action) }}
+  {{ m.empty_state('Nothing written yet', 'Pensieve writes one every ' ~ ('Sunday' if kind == 'weekly' else 'morning') ~ ' from what arrived and what you read.', 'sparkle', ai=True, action=generate_action) }}
 </section>
 {% else %}
 <header class="insights-head">
