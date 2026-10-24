@@ -1022,19 +1022,14 @@
 @layer layout {
   .paper-head { position: relative; padding-bottom: 24px; border-bottom: 1px solid var(--line-3); }
   .paper-head .insight-title { font-size: clamp(32px, 4vw, 54px); letter-spacing: -.035em; }
-  .paper-head::after { content: ""; position: absolute; bottom: -1px; left: 0; width: 120px; height: 3px; background: var(--accent); transform-origin: left; animation: paper-rule 650ms cubic-bezier(.2,.8,.2,1) both; }
+  .paper-head::after { content: ""; position: absolute; bottom: -1px; left: 0; width: 120px; height: 3px; background: var(--accent); transform-origin: left; }
   .psection-front .pstories { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); align-items: start; gap: 16px; }
   .psection-front .pstory:first-child { grid-row: span 2; border-radius: 4px 16px 16px 4px; border-left: 3px solid var(--accent); background: linear-gradient(135deg, var(--card), var(--raised)); }
   .psection-front .pstory:first-child > .pstory-head { padding: 24px 22px; }
   .psection-front .pstory:first-child .pstory-title { font-family: var(--font-display); font-size: clamp(25px, 2.2vw, 34px); line-height: 1.15; letter-spacing: -.025em; font-weight: 500; }
   .psection-front .pstory:first-child .pstory-dek { margin: 10px 0 8px; font-size: 16px; line-height: 1.55; -webkit-line-clamp: 3; }
   .psection-front .pstory:first-child .pstory-dot { margin-top: 12px; }
-  .paper .psection { animation: paper-section 600ms cubic-bezier(.2,.8,.2,1) both; }
-  .paper .psection:nth-child(2) { animation-delay: 70ms; }
-  .paper .psection:nth-child(3) { animation-delay: 140ms; }
   .paper-fold-ghost { z-index: 60; pointer-events: none; overflow: hidden; background: var(--card); color: var(--ink); border-radius: 0 0 12px 12px; }
-  @keyframes paper-rule { from { transform: scaleX(0); } to { transform: scaleX(1); } }
-  @keyframes paper-section { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: none; } }
   @media (max-width: 700px) {
     .psection-front .pstories { grid-template-columns: minmax(0, 1fr); gap: 12px; }
     .psection-front .pstory:first-child > .pstory-head { padding: 20px 16px; }
@@ -1042,5 +1037,4 @@
     .psection-front .pstory:first-child .pstory-body { padding-left: 24px; }
     .paper-head { padding-bottom: 18px; }
   }
-  @media (prefers-reduced-motion: reduce) { .paper-head::after, .paper .psection { animation: none; } }
 }

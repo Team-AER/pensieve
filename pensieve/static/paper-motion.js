@@ -5,9 +5,22 @@
   const media = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
   const running = new Map();
   function stopAll() { for (const stop of [...running.values()]) stop(); }
-  media?.addEventListener('change', (e) => { if (e.matches) stopAll(); });
+  // Arrivals are event-scoped, so restoring motion never replays completed work.
+  const arrivals = new Set();
+  function stopArrivals() { for (const animation of arrivals) animation.cancel(); arrivals.clear(); }
+  if (!media?.matches) {
+    document.querySelectorAll('.paper-head, .paper .psection').forEach((element, index) => {
+      if (typeof element.animate !== 'function') return;
+      try {
+        const animation = element.animate([{ opacity: 0, transform: 'translateY(24px)' }, { opacity: 1, transform: 'none' }], { duration: 600, delay: Math.min(index, 3) * 70, easing: 'cubic-bezier(.2,.8,.2,1)' });
+        arrivals.add(animation);
+        animation.finished.then(() => arrivals.delete(animation), () => arrivals.delete(animation));
+      } catch (_) { /* The fully visible paper remains the fallback. */ }
+    });
+  }
+  media?.addEventListener('change', (e) => { if (e.matches) { stopAll(); stopArrivals(); } });
   document.body.addEventListener('htmx:beforeSwap', stopAll);
-  window.addEventListener('pagehide', stopAll);
+  window.addEventListener('pagehide', () => { stopAll(); stopArrivals(); });
   document.addEventListener('click', (event) => {
     const head = event.target.closest('.pstory > .pstory-head');
     if (!head || event.target.closest('a, button, input, select, textarea')) return;
