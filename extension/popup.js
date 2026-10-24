@@ -1,6 +1,22 @@
 /* global chrome */
 const { settings, pageHtml, saveToPensieve } = self.PensieveExt;
 const $ = (id) => document.getElementById(id);
+// Success owns the state; finite, cancellable effects only carry it into place.
+function confirmedMotion(element, frames, duration) {
+  const media = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  if (media?.matches || typeof element.animate !== 'function') return;
+  let animation;
+  let settled = false;
+  const stop = () => { if (settled) return; settled = true; animation?.cancel(); media?.removeEventListener('change', changed); window.removeEventListener('pagehide', stop); };
+  const changed = (event) => { if (event.matches) stop(); };
+  try {
+    animation = element.animate(frames, { duration, easing: 'cubic-bezier(.2,.8,.2,1)' });
+    animation.finished.then(stop, stop);
+    media?.addEventListener('change', changed);
+    window.addEventListener('pagehide', stop);
+  } catch (_) { stop(); }
+}
+
 
 (async () => {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -43,6 +59,10 @@ const $ = (id) => document.getElementById(id);
       check.append(stroke);
       $('save').prepend(check);
       $('status').className = 'saved-result';
+      $('capture-slip').classList.add('is-filed');
+      confirmedMotion($('capture-slip'), [{ transform: 'translateY(-9px) rotate(-1deg)' }, { transform: 'translateY(3px) rotate(.3deg)', offset: .65 }, { transform: 'none' }], 520);
+      confirmedMotion($('status'), [{ opacity: 0, transform: 'translateY(14px)' }, { opacity: 1, transform: 'none' }], 460);
+      confirmedMotion(check, [{ strokeDashoffset: 24 }, { strokeDashoffset: 0 }], 160);
       $('tags').readOnly = true;
       $('note').readOnly = true;
       $('send-page').disabled = true;

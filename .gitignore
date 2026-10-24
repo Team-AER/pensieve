@@ -26,3 +26,8 @@ htmlcov/
 /docs/design-review-*/**/*.wav
 /docs/design-review-*/**/*.webm
 /docs/design-review-*/**/*.webp
+
+# Local design expression evidence stays outside source history.
+/docs/design-expression-20261024/*.png
+/docs/design-expression-20261024/*.webm
+/docs/design-expression-20261024/*.mp4
