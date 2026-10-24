@@ -1,5 +1,6 @@
 // Shared by the popup, the options page and the background worker.
 /* global chrome */
+(() => {
 const MAX_HTML = 8 * 1024 * 1024;
 
 async function settings() {
@@ -40,3 +41,4 @@ async function saveToPensieve({ url, title, tags, note, html }) {
 }
 
 if (typeof self !== 'undefined') { self.PensieveExt = { settings, pageHtml, saveToPensieve }; }
+})();
