@@ -74,12 +74,17 @@ async def test_insights_empty_state_enqueues_digest(client, session, user, monke
     monkeypatch.setattr(insights_mod.queue, "enqueue", enqueue)
     headers = await login(client, user)
     r = await client.get("/insights/digest")
-    assert r.status_code == 200 and "No digest yet." in r.text and "/insights/generate" in r.text
+    assert (
+        r.status_code == 200
+        and "Nothing written yet" in r.text
+        and "Daily digest" in r.text
+        and "/insights/generate" in r.text
+    )
     r = await client.post("/insights/generate", data={"kind": "daily"}, headers=headers)
     assert r.status_code == 303 and r.headers["location"] == "/insights/digest?queued=1"
     assert calls == [("ai_daily_digest", (str(user.id),))]
     r = await client.get("/insights/weekly")
-    assert r.status_code == 200 and "No review yet." in r.text
+    assert r.status_code == 200 and "Weekly review" in r.text and "Nothing written yet" in r.text
 
 
 async def test_insights_scoped_by_user(client, session, user):

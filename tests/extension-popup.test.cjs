@@ -13,13 +13,15 @@ async function popup(save, loadShared = false) {
       setAttribute(name, value) { this.attributes[name] = value; },
       removeAttribute(name) { delete this.attributes[name]; },
       append(...nodes) { this.children.push(...nodes); },
+      prepend(...nodes) { this.children.unshift(...nodes); },
+      classList: { add() {} },
     };
   }
   const get = id => { if (!elements.has(id)) elements.set(id, element()); return elements.get(id); };
   const timers = [];
   let closed = false;
   const context = {
-    document: { getElementById: get, createElement: element },
+    document: { getElementById: get, createElement: element, createElementNS: element },
     chrome: { tabs: { query: async () => [{ id: 1, title: 'Fixture article', url: 'https://example.test/article' }] }, storage: { sync: { get: async () => ({ server: 'https://pensieve.test', token: 'fixture', sendPage: false }) } }, runtime: { openOptionsPage() {} } },
     self: { PensieveExt: { settings: async () => ({ server: 'https://pensieve.test', token: 'fixture', sendPage: false }), pageHtml: async () => null, saveToPensieve: save } },
     window: { close: () => { closed = true; } },
@@ -38,14 +40,14 @@ async function popup(save, loadShared = false) {
 test('the shared client and popup initialize together as classic extension scripts', async () => {
   const app = await popup(async () => ({ created: true, open: 'https://pensieve.test/items/1' }), true);
   await app.submit();
-  assert.equal(app.get('save').textContent, '✓ Saved');
+  assert.equal(app.get('save').textContent, 'Saved');
 });
 
 test('confirmed save keeps its destination available without auto-closing', async () => {
   const app = await popup(async () => ({ created: true, open: 'https://pensieve.test/items/1' }));
   app.get('note').value = 'Keep this context';
   await app.submit();
-  assert.equal(app.get('save').textContent, '✓ Saved');
+  assert.equal(app.get('save').textContent, 'Saved');
   assert.equal(app.get('status').children[1].href, 'https://pensieve.test/items/1');
   assert.equal(app.get('status').children[1].textContent, 'Open in Pensieve');
   assert.equal(app.timers.length, 0);

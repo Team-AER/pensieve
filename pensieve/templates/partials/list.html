@@ -77,7 +77,8 @@
 {% endif %}
 <a class="digest-banner mobile-only" href="/insights">
   {{ m.icon('sparkle', 20) }}
-  <span><strong>Today's digest</strong><p>Top stories ranked for you, rising topics, and what is safe to skip.</p></span>
+  <strong>Today's digest</strong>
+  {{ m.icon('forward', 16) }}
 </a>
 <div class="pane-body list-body" id="list-body" role="listbox" aria-label="{{ view.title }}" data-list-url="{{ list_url }}?{{ opts.query }}">
   {% include "partials/rows.html" %}

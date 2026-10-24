@@ -7,7 +7,9 @@ header, h1 { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; }
 h1 { font-size: 20px; }
 form { display: flex; flex-direction: column; gap: 10px; }
 label { display: flex; flex-direction: column; gap: 4px; font-weight: 600; font-size: 13px; }
-label.check { flex-direction: row; align-items: center; gap: 8px; font-weight: 500; }
+label.check { flex-direction: row; align-items: flex-start; gap: 8px; font-weight: 500; }
+label.check > input { margin-top: 3px; flex: 0 0 auto; }
+label.check .hint { display: block; margin-top: 3px; }
 input:not([type=checkbox]) { font: inherit; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: transparent; color: inherit; }
 button { font: inherit; font-weight: 600; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
 button[type=button] { background: transparent; color: var(--accent); }
@@ -17,10 +19,11 @@ button:disabled { opacity: .6; cursor: default; }
 .url { margin: 0; color: var(--muted); font-size: 12px; word-break: break-all; }
 .hint { color: var(--muted); font-size: 12px; font-weight: 400; }
 #status { margin-top: 10px; }
-.saved-result { padding: 12px; border: 1px solid var(--line); border-radius: 8px; animation: saved-in 180ms ease-out; }
+.saved-result { padding: 12px; border: 1px solid var(--line); border-radius: 8px; }
 .saved-result p { margin: 0 0 8px; }
-@keyframes saved-in { from { opacity: 0; } to { opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .saved-result { animation: none; } }
+.saved-check { width: 16px; height: 16px; vertical-align: -2px; margin-right: 5px; fill: none; stroke: currentColor; stroke-width: 2; stroke-dasharray: 24; stroke-dashoffset: 0; animation: saved-check 160ms ease-out; }
+@keyframes saved-check { from { stroke-dashoffset: 24; } to { stroke-dashoffset: 0; } }
+@media (prefers-reduced-motion: reduce) { .saved-check { animation: none; } }
 .ok { color: var(--ok); } .error { color: var(--bad); }
 footer { margin-top: 12px; font-size: 12px; }
 a { color: var(--accent); }
