@@ -53,6 +53,18 @@
   .nav-backdrop { display: none; }
   .nav-toggle { display: none; }
 
+  /* ---- Pane resizers: a hairline you can grab, sitting over the border it moves ----
+     Zero net width (negative margins cancel the 7 px grab strip) so turning them on never shifts a pane. */
+  .pane-resizer { display: none; position: relative; z-index: 20; flex: 0 0 auto; width: 7px; margin: 0 -4px 0 -3px; cursor: col-resize; background: transparent; border: 0; padding: 0; touch-action: none; }
+  .pane-resizer::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 1px; background: transparent; transition: background-color 0.12s, box-shadow 0.12s; }
+  .pane-resizer:hover::after, .pane-resizer:focus-visible::after, .pane-resizer[data-dragging]::after { background: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .pane-resizer:focus-visible { outline: none; }
+  body.panes-resizing { cursor: col-resize; user-select: none; }
+  body.panes-resizing iframe { pointer-events: none; }
+  @media (min-width: 900px) { .pane-resizer[data-resize="list"] { display: block; } }
+  @media (min-width: 1160px) { .pane-resizer[data-resize="nav"] { display: block; } }
+  @media (prefers-reduced-motion: reduce) { .pane-resizer::after { transition: none; } }
+
   /* ---- List pane ---- */
   .list-head { flex-wrap: wrap; gap: 8px; padding: 8px 16px; }
   .list-head .menu { margin-left: 0; }
@@ -60,6 +72,11 @@
   .list-title { font-family: var(--font-body); font-size: var(--text-base); font-weight: 600; line-height: 1.2; margin: 0; letter-spacing: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .list-counts { font-size: var(--text-sm); white-space: nowrap; }
   .list-controls { display: flex; align-items: center; gap: 4px; margin-left: auto; flex: 0 0 auto; }
+  /* The head wraps into rows: what you are looking at, then how it is filtered. Both claim a full line so the
+     order never depends on how long a folder's name is. */
+  .list-head-main { flex: 1 0 100%; }
+  .list-filters { flex: 1 0 100%; gap: 6px; }
+  .list-filters .seg-btn { height: 30px; }
   .list-body { outline: none; }
   .sentinel { padding: 14px; text-align: center; font-size: var(--text-sm); }
   .sentinel-retry { display: none; }
@@ -359,7 +376,8 @@
      Two panes: 900 - 1159.98 (nav becomes a drawer, list narrows)
      ===================================================================== */
   @media (max-width: 1159.98px) {
-    .pane-list { width: 380px; }
+    /* A width dragged on a wide screen is capped against the viewport here, so the article keeps its half. */
+    .pane-list { width: clamp(300px, var(--list-w, 380px), min(560px, 48vw)); }
     .list-title-wrap { flex-direction: column; align-items: flex-start; gap: 0; }
     .pane-nav { display: none; }
     .nav-toggle { display: inline-flex; }
@@ -370,8 +388,11 @@
   }
   @media (min-width: 1160px) {
     /* The nav and article reserve 820px together. Let the list give up its last 100px on
-       smaller laptops instead of pushing the article and its actions beyond the viewport. */
-    .pane-list { flex-shrink: 1; min-width: 340px; }
+       smaller laptops instead of pushing the article and its actions beyond the viewport.
+       --nav-w / --list-w are the dragged widths (reader.js); clamped here so a width saved on a wide
+       screen can never squeeze the article off a narrower one. */
+    .pane-nav { width: clamp(180px, var(--nav-w, 260px), 460px); }
+    .pane-list { flex-shrink: 1; min-width: 340px; width: clamp(340px, var(--list-w, 440px), 820px); }
     .pane-article { min-width: 560px; }
   }
 
@@ -411,7 +432,16 @@
     .list-title-wrap { flex-direction: column; align-items: center; gap: 0; text-align: center; }
     .list-title { font-family: var(--font-display); font-size: 18px; letter-spacing: -0.01em; }
     .list-controls { display: none; }
-    .list-head .seg { display: none; }
+    /* Filters scroll sideways like the chip row below them; the spacer would only add dead space. */
+    .list-filters { width: 100%; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+    .list-filters::-webkit-scrollbar { display: none; }
+    .list-filters .filter-gap { display: none; }
+    /* Saving a link is the Saved view's one primary action and the phone has no top bar to hold it:
+       keep it at the head of the row rather than past the scroll. */
+    .list-filters .btn-primary { order: -1; margin-right: 4px; }
+    .list-filters .btn-sm, .list-filters .seg-btn { height: 34px; min-height: 34px; padding: 0 14px; font-size: var(--text-md); }
+    .list-filters .btn-sm { border-radius: 17px; flex: 0 0 auto; }
+    .list-filters .seg { border-radius: 17px; flex: 0 0 auto; }
     .chip-row { display: flex; gap: 8px; width: 100%; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; padding-bottom: 2px; }
     .chip-row::-webkit-scrollbar { display: none; }
     .chip-row a, .chip-row button, .chip-row summary { display: inline-flex; align-items: center; height: 34px; padding: 0 14px; border-radius: 17px; border: 1px solid var(--line-3); background: var(--card); color: var(--ink-2); font-size: var(--text-md); text-decoration: none; white-space: nowrap; flex: 0 0 auto; }
@@ -596,9 +626,13 @@
     .tag-input { height: 32px; width: 96px; border-radius: 16px; font-size: var(--text-md); }
     .tag-input:focus { width: 160px; }
     /* Chip rows (list filters, Manage sections): 36 px chips, extended 44 px hit area. */
-    .chip-row a, .chip-row button, .chip-row summary, .manage-nav .nav-item { position: relative; height: 36px; min-height: 36px; border-radius: 18px; }
-    .chip-row a::before, .chip-row button::before, .chip-row summary::before, .manage-nav .nav-item::before { content: ""; position: absolute; left: 0; right: 0; top: -4px; bottom: -4px; }
-    .chip-row { padding: 4px 0; margin: -4px 0; }
+    .chip-row a, .chip-row button, .chip-row summary, .manage-nav .nav-item,
+    .list-filters .btn-sm, .list-filters .seg-btn { position: relative; height: 36px; min-height: 36px; border-radius: 18px; }
+    .list-filters .seg { border-radius: 19px; }
+    .list-filters .seg-btn { border-radius: 0; }
+    .chip-row a::before, .chip-row button::before, .chip-row summary::before, .manage-nav .nav-item::before,
+    .list-filters .btn-sm::before, .list-filters .seg-btn::before { content: ""; position: absolute; left: 0; right: 0; top: -4px; bottom: -4px; }
+    .chip-row, .list-filters { padding: 4px 0; margin: -4px 0; }
     /* Menu items inside the chip row's sheet must not inherit the chip look. */
     .chip-row .menu-body .menu-item { position: static; height: auto; min-height: 48px; border: 0; border-radius: var(--radius-md); background: transparent; color: var(--ink); font-size: var(--text-base); font-weight: 400; padding: 0 12px; justify-content: flex-start; }
     .chip-row .menu-body .menu-item::before { content: none; }
@@ -796,7 +830,6 @@
 /* ---- Saved links and the page archive ---- */
 @layer components {
   .save-open .btn-label { margin-left: 2px; }
-  .saved-head { gap: 10px; padding: 0 16px 10px; align-items: center; }
   .saved-tabs .seg-btn { height: 30px; }
   .archive-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 0 0 16px; padding: 8px 10px; border: 1px solid var(--line-2); border-radius: var(--radius-md); background: var(--panel); }
   .archive-bar .seg-btn { gap: 6px; height: 30px; }
@@ -836,7 +869,6 @@
 @layer layout {
   @media (max-width: 899.98px) {
     .save-open .btn-label { display: none; }
-    .saved-head { padding: 0 0 4px; }
     .archive-frame { height: calc(100dvh - 200px); }
   }
 }

@@ -17,6 +17,10 @@ from pensieve import queue
 from pensieve.ai.common import ai_on
 from pensieve.models import (
     FEED_KIND_SAVED,
+    FEED_OPEN_AUTO,
+    FEED_OPEN_FEED,
+    FEED_OPEN_MODES,
+    FEED_OPEN_READER,
     AIJob,
     Cluster,
     ClusterItem,
@@ -47,10 +51,28 @@ READER_MIN_CHARS = 120  # an extraction shorter than this is nav/boilerplate, no
 THIN_TEXT_CHARS = (
     700  # a feed body shorter than this is a link post (HN, link blogs): open Reader view for it
 )
+#: Pictures and players declared smaller than this are chrome: tracking pixels, feed badges, share icons.
+MEDIA_MIN_PX = 64
+_MEDIA_TAG_RE = re.compile(r"<(img|picture|figure|video|audio|iframe)\b([^>]*)>", re.IGNORECASE)
+_PX_RE = re.compile(r"\b(?:width|height)\s*=\s*[\"']?\s*(\d+)", re.IGNORECASE)
 
 
 def strip_tags(html: str) -> str:
     return re.sub(r"<[^>]+>", " ", html or "").strip()
+
+
+def carries_media(html: str) -> bool:
+    """True when the entry's body is carried by a picture or a player rather than by its text.
+
+    A comic, a photo post or a video post is complete as it arrives, however few characters it has; counting
+    only characters would call it a link post and send it to Reader view, which has nothing better to find.
+    """
+    for _tag, attrs in _MEDIA_TAG_RE.findall(html or ""):
+        sizes = [int(n) for n in _PX_RE.findall(attrs)]
+        if sizes and max(sizes) < MEDIA_MIN_PX:
+            continue  # a tracking pixel or a badge, not the article
+        return True
+    return False
 
 
 def is_thin(item) -> bool:
@@ -58,11 +80,19 @@ def is_thin(item) -> bool:
     text = (item.content_text or "").strip()
     if len(text) >= THIN_TEXT_CHARS:
         return False
+    if carries_media(item.content_html or ""):
+        return False
     return bool(item.url)
 
 
 def wants_auto_reader(user) -> bool:
     return bool((user.settings or {}).get("auto_reader", True))
+
+
+def feed_open_mode(feed) -> str:
+    """The subscription's answer to "how do items here open?", for the times the heuristic guesses wrong."""
+    mode = getattr(feed, "open_mode", None) or FEED_OPEN_AUTO
+    return mode if mode in FEED_OPEN_MODES else FEED_OPEN_AUTO
 
 
 async def article_context(session: AsyncSession, user: User, item: Item, feed: Feed) -> dict:
@@ -97,7 +127,11 @@ async def article_context(session: AsyncSession, user: User, item: Item, feed: F
     chat_on = ai_on(user, "chat")
     has_chat = chat_on and await session.get(ItemChat, (user.id, item.id)) is not None
     is_saved = feed.kind == FEED_KIND_SAVED
-    thin = is_thin(item) and not is_saved
+    # "Stub" is what the entry looks like; the subscription's own setting has the last word over it.
+    mode = feed_open_mode(feed)
+    stub = is_thin(item) and not is_saved
+    prefers_reader = not is_saved and (mode == FEED_OPEN_READER or (mode == FEED_OPEN_AUTO and stub))
+    thin = stub and mode != FEED_OPEN_FEED
     return {
         "item": item,
         "feed": feed,
@@ -111,8 +145,15 @@ async def article_context(session: AsyncSession, user: User, item: Item, feed: F
         "cluster": cluster,
         "related": related,
         "thin": thin,
-        "use_reader": bool(item.reader_html) and thin,
-        "auto_reader": wants_auto_reader(user) and thin and bool(item.url) and not item.reader_html,
+        "open_mode": mode,
+        "use_reader": bool(item.reader_html) and prefers_reader,
+        # A feed pinned to Reader view opens there whatever the reader's global preference says.
+        "auto_reader": (
+            prefers_reader
+            and (mode == FEED_OPEN_READER or wants_auto_reader(user))
+            and bool(item.url)
+            and not item.reader_html
+        ),
         "web_fallback": False,
         "snapshot": snapshot,
         "is_saved": is_saved,

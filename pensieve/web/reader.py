@@ -46,6 +46,8 @@ VIEW_KINDS = {"all", "unread", "starred", "folder", "feed", "tag", "saved"}
 KEYED_KINDS = {"folder", "feed", "tag", "saved"}
 #: Saved-links views, Pocket style: My list (unread), Archive (read), All.
 SAVED_KEYS = {None: "My list", "archive": "Archive", "all": "All saved"}
+#: Three-way read filter on the list, orthogonal to the view.
+STATUSES = ("unread", "all", "read")
 
 
 # ---------------------------------------------------------------------------
@@ -75,12 +77,19 @@ class View:
 class ListOptions:
     grouped: bool = True
     sort: str = "newest"
+    status: str = "unread"
+    """One of :data:`STATUSES`; what the list keeps, inside whatever the view already selects."""
     after: str | None = None
     """Keyset cursor (``<published_usec>.<id hex>``) of the last row of the previous page; None = first page."""
 
     @property
     def query(self) -> str:
-        return f"grouped={1 if self.grouped else 0}&sort={self.sort}"
+        return self.q()
+
+    def q(self, grouped: bool | None = None, sort: str | None = None, status: str | None = None) -> str:
+        """This page's query string with some options replaced: the one way templates build list links."""
+        g = self.grouped if grouped is None else grouped
+        return f"grouped={1 if g else 0}&sort={sort or self.sort}&status={status or self.status}"
 
     @property
     def first_page(self) -> bool:
@@ -118,17 +127,44 @@ class NavData:
     ai_tags: list[tuple[str, int]]
 
 
-def list_options(request: Request) -> ListOptions:
+def status_applies(view: View) -> bool:
+    """False where the view is itself a read state: "All unread" and the Saved tabs already are the filter."""
+    return view.kind not in {"unread", "saved"}
+
+
+def view_status(view: View) -> str:
+    """The read state a view without the filter stands for, so its control still reads true."""
+    if view.kind == "unread":
+        return "unread"
+    if view.kind == "saved":
+        return {None: "unread", "archive": "read"}.get(view.key, "all")
+    return default_status(view)
+
+
+def default_status(view: View) -> str:
+    """Unread first, except where the view's own name promises everything it holds."""
+    return "all" if view.kind in {"all", "starred"} else "unread"
+
+
+def list_options(request: Request, view: View | None = None) -> ListOptions:
     params = request.query_params
     grouped_raw = params.get("grouped")
     grouped = True if grouped_raw is None else grouped_raw in {"1", "true", "on"}
     sort = params.get("sort", "newest")
     if sort not in {"newest", "oldest"}:
         sort = "newest"
+    if view is None:
+        status = "all"
+    elif not status_applies(view):
+        status = view_status(view)
+    else:
+        status = params.get("status") or ""
+        if status not in STATUSES:
+            status = default_status(view)
     after = params.get("after") or None
     if after and decode_cursor(after) is None:
         after = None
-    return ListOptions(grouped=grouped, sort=sort, after=after)
+    return ListOptions(grouped=grouped, sort=sort, status=status, after=after)
 
 
 async def resolve_view(session: AsyncSession, user: User, kind: str, key: str | None) -> View:
@@ -175,7 +211,7 @@ def cluster_subquery(user_id: uuid.UUID):
     )
 
 
-def apply_view_filter(stmt, view: View, user_id: uuid.UUID, state):
+def apply_view_filter(stmt, view: View, user_id: uuid.UUID, state, status: str | None = None):
     # Saved links live in their own view (Pocket's list), not in the feed river.
     if view.kind in {"unread", "all"}:
         stmt = stmt.where(Feed.kind != FEED_KIND_SAVED)
@@ -198,10 +234,16 @@ def apply_view_filter(stmt, view: View, user_id: uuid.UUID, state):
             ItemAI.item_id == Item.id, ItemAI.user_id == user_id, ItemAI.tags.any(view.tag)
         )
         stmt = stmt.where(or_(state.tags.any(view.tag), ai_has))
+    # The three-way read filter, on top of the view. Counts pass status=None: the header reports the whole view.
+    if status and status_applies(view):
+        if status == "unread":
+            stmt = stmt.where(is_unread(state))
+        elif status == "read":
+            stmt = stmt.where(state.is_read.is_(True))
     return stmt
 
 
-def _filtered_stmt(view: View, user_id: uuid.UUID, columns, state, uc):
+def _filtered_stmt(view: View, user_id: uuid.UUID, columns, state, uc, status: str | None = None):
     stmt = (
         select(*columns)
         .select_from(Item)
@@ -211,10 +253,10 @@ def _filtered_stmt(view: View, user_id: uuid.UUID, columns, state, uc):
         .where(Feed.user_id == user_id)
         .where(not_hidden(state))
     )
-    return apply_view_filter(stmt, view, user_id, state)
+    return apply_view_filter(stmt, view, user_id, state, status)
 
 
-def view_items_stmt(view: View, user_id: uuid.UUID, grouped: bool):
+def view_items_stmt(view: View, user_id: uuid.UUID, grouped: bool, status: str | None = None):
     """Base select of (Item, Feed, ItemState, cluster_id, source_count) for a view, user-scoped.
 
     Grouped: one row per cluster, represented by the cluster's canonical item when the view's filter keeps it,
@@ -223,10 +265,12 @@ def view_items_stmt(view: View, user_id: uuid.UUID, grouped: bool):
     """
     state = aliased(ItemState)
     uc = cluster_subquery(user_id)
-    stmt = _filtered_stmt(view, user_id, [Item, Feed, state, uc.c.cluster_id, uc.c.source_count], state, uc)
+    stmt = _filtered_stmt(
+        view, user_id, [Item, Feed, state, uc.c.cluster_id, uc.c.source_count], state, uc, status
+    )
     if grouped:
         representatives = (
-            _filtered_stmt(view, user_id, [Item.id], state, uc)
+            _filtered_stmt(view, user_id, [Item.id], state, uc, status)
             .where(uc.c.cluster_id.is_not(None))
             .distinct(uc.c.cluster_id)
             .order_by(
@@ -245,7 +289,7 @@ async def list_rows(
     session: AsyncSession, user: User, view: View, opts: ListOptions
 ) -> tuple[list[Row], bool]:
     """One page of rows after the keyset cursor in ``opts.after``; stable when items arrive between pages."""
-    stmt = view_items_stmt(view, user.id, opts.grouped)
+    stmt = view_items_stmt(view, user.id, opts.grouped, opts.status)
     key = tuple_(Item.published_at, Item.id)
     cursor = decode_cursor(opts.after)
     if opts.sort == "newest":
@@ -401,7 +445,7 @@ async def nav_data(session: AsyncSession, user: User, view: View) -> NavData:
 
 
 async def mark_view_read(
-    session: AsyncSession, user: User, view: View, older_than: str | None
+    session: AsyncSession, user: User, view: View, older_than: str | None, status: str | None = None
 ) -> list[uuid.UUID]:
     """Mark the view's unread items read in one server-side statement; returns the affected ids."""
     state = aliased(ItemState)
@@ -411,7 +455,7 @@ async def mark_view_read(
         .outerjoin(state, and_(state.item_id == Item.id, state.user_id == user.id))
         .where(Feed.user_id == user.id, not_hidden(state), is_unread(state))
     )
-    stmt = apply_view_filter(stmt, view, user.id, state)
+    stmt = apply_view_filter(stmt, view, user.id, state, status)
     delta = {"1d": timedelta(days=1), "1w": timedelta(weeks=1)}.get(older_than or "")
     if delta:
         stmt = stmt.where(Item.published_at < datetime.now(UTC) - delta)
@@ -431,7 +475,7 @@ async def render_reader(
     *,
     article_html: str | None = None,
 ):
-    opts = list_options(request)
+    opts = list_options(request, view)
     rows, has_more = await list_rows(session, user, view, opts)
     unread, total = await view_counts(session, user, view)
     nav = await nav_data(session, user, view)
@@ -546,7 +590,7 @@ async def reader_keyed_list(
 async def render_list(
     request: Request, session: AsyncSession, user: User, view: View, extra: dict | None = None
 ):
-    opts = list_options(request)
+    opts = list_options(request, view)
     rows, has_more = await list_rows(session, user, view, opts)
     ctx = {
         "view": view,
@@ -570,7 +614,8 @@ async def render_list(
 
 
 async def _mark_read_common(request, session, user, view: View, older_than: str | None):
-    ids = await mark_view_read(session, user, view, older_than)
+    # Marks what the list is showing: filtered to Read it finds nothing, which the toast says.
+    ids = await mark_view_read(session, user, view, older_than, list_options(request, view).status)
     await session.commit()
     token = await save_undo(user.id, ids)
     extra = {"undo_token": token, "undo_count": len(ids), "undo_marked": True}

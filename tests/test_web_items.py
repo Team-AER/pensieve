@@ -305,3 +305,65 @@ async def test_auto_reader_falls_back_to_the_web_page(client, session, user, mon
     # cached now: the next plain open shows Reader view without a trigger
     r = await client.get(f"/items/{item.id}?keep_unread=1", headers=HX)
     assert "real prose" in r.text and '"auto": 1' not in r.text
+
+
+async def test_picture_posts_are_not_link_posts(client, session, user):
+    """A comic or photo entry is the whole article: it must not be sent to Reader view, which finds nothing.
+    A tracking pixel in an otherwise empty link post is still chrome, so that one keeps going to Reader view."""
+    feed = await seed_feed(session, user, "xkcd")
+    comic = await seed_item(session, feed, "Fusion Device", text="A joke", url="https://xkcd.test/3000")
+    comic.content_html = '<p><img src="https://imgs.xkcd.test/fusion.png" title="A joke"></p>'
+    pixel = await seed_item(session, feed, "Link post", text="Points: 17", url="https://x.test/a")
+    pixel.content_html = '<p>Points: 17</p><img src="https://px.test/t.gif" width="1" height="1">'
+    await session.commit()
+    await login(client, user)
+    r = await client.get(f"/items/{comic.id}?keep_unread=1", headers=HX)
+    assert r.status_code == 200
+    assert '"auto": 1' not in r.text  # shown as it arrived
+    assert "imgs.xkcd.test/fusion.png" in r.text
+    r = await client.get(f"/items/{pixel.id}?keep_unread=1", headers=HX)
+    assert '"auto": 1' in r.text
+
+
+async def test_feed_open_mode_overrides_the_guess(client, session, user):
+    """The per-subscription setting has the last word over the per-entry guess, in both directions."""
+    feed = await seed_feed(session, user, "Comics")
+    thin = await seed_item(session, feed, "Link post", text="Points: 17", url="https://x.test/a")
+    full = await seed_item(session, feed, "Essay", text="word " * 400, url="https://x.test/essay")
+    headers = await login(client, user)
+
+    # Pinned to the feed's own body: the link post stops being pushed into Reader view.
+    r = await client.post(f"/manage/feeds/{feed.id}/open-mode", data={"open_mode": "feed"}, headers=headers)
+    assert r.status_code == 303
+    await session.refresh(feed)
+    assert feed.open_mode == "feed"
+    r = await client.get(f"/items/{thin.id}?keep_unread=1", headers=HX)
+    assert '"auto": 1' not in r.text
+
+    # Pinned to Reader view: even the long article opens there.
+    await client.post(f"/manage/feeds/{feed.id}/open-mode", data={"open_mode": "reader"}, headers=headers)
+    r = await client.get(f"/items/{full.id}?keep_unread=1", headers=HX)
+    assert '"auto": 1' in r.text
+
+    # Back to automatic, and an unknown value is refused rather than stored.
+    await client.post(f"/manage/feeds/{feed.id}/open-mode", data={"open_mode": "auto"}, headers=headers)
+    r = await client.get(f"/items/{full.id}?keep_unread=1", headers=HX)
+    assert '"auto": 1' not in r.text
+    r = await client.post(
+        f"/manage/feeds/{feed.id}/open-mode", data={"open_mode": "nonsense"}, headers=headers
+    )
+    assert r.status_code == 303 and "err=" in str(r.headers["location"])
+    await session.refresh(feed)
+    assert feed.open_mode == "auto"
+
+
+async def test_feed_open_mode_shows_in_manage(client, session, user):
+    """The setting is offered on every feed row, with the feed's current choice selected."""
+    feed = await seed_feed(session, user, "xkcd")
+    feed.open_mode = "feed"
+    await session.commit()
+    await login(client, user)
+    r = await client.get("/manage/feeds")
+    assert r.status_code == 200
+    assert f"/manage/feeds/{feed.id}/open-mode" in r.text
+    assert '<option value="feed" selected>' in r.text
