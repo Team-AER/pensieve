@@ -83,6 +83,14 @@
             <select class="input input-sm" id="move-{{ r.feed.id }}" name="folder_id"><option value="">Inbox</option>{% for f in folders %}<option value="{{ f.id }}"{% if r.feed.folder_id == f.id %} selected{% endif %}>{{ f.name }}</option>{% endfor %}</select>
             <button class="btn btn-sm" type="submit">Move</button>
           </form>
+          <form method="post" action="/manage/feeds/{{ r.feed.id }}/open-mode" class="menu-form">{{ m.csrf_field(csrf_token) }}
+            <label class="sr-only" for="open-{{ r.feed.id }}">How items from this feed open</label>
+            <select class="input input-sm" id="open-{{ r.feed.id }}" name="open_mode">
+              {% for value, label in open_labels.items() %}<option value="{{ value }}"{% if (r.feed.open_mode or 'auto') == value %} selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+            <button class="btn btn-sm" type="submit">Set</button>
+          </form>
+          <div class="menu-hint faint">Automatic reads each entry. Pick the feed's own body for comics and photo posts, Reader view for feeds that only tease.</div>
           <div class="menu-sep"></div>
           {% if r.feed.paused %}
           <form method="post" action="/manage/feeds/{{ r.feed.id }}/resume">{{ m.csrf_field(csrf_token) }}<button class="menu-item" role="menuitem" type="submit">{{ m.icon('play', 14) }} Resume</button></form>

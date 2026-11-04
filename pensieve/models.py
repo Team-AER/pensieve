@@ -170,6 +170,12 @@ class Folder(TimestampMixin, Base):
 #: hidden from feed management and OPML, shown in the reader as "Saved".
 FEED_KIND_RSS = "rss"
 FEED_KIND_SAVED = "saved"
+#: How a subscription's items open. 'auto' judges each entry (see pensieve.web.items.is_thin); the other two
+#: are the reader's override for the feeds the heuristic reads wrong, such as comics and photo posts.
+FEED_OPEN_AUTO = "auto"
+FEED_OPEN_FEED = "feed"
+FEED_OPEN_READER = "reader"
+FEED_OPEN_MODES = (FEED_OPEN_AUTO, FEED_OPEN_FEED, FEED_OPEN_READER)
 SAVED_FEED_URL = "pensieve:saved"
 
 
@@ -220,6 +226,11 @@ class Feed(TimestampMixin, Base):
         String(16), nullable=False, default=FEED_KIND_RSS, server_default=FEED_KIND_RSS
     )
     """'rss' (a subscription) or 'saved' (the user's saved links; see pensieve/archive)."""
+    open_mode: Mapped[str] = mapped_column(
+        String(10), nullable=False, default=FEED_OPEN_AUTO, server_default=FEED_OPEN_AUTO
+    )
+    """How this feed's items open: 'auto' (judge each entry), 'feed' (always the feed's own body, for comics
+    and photo posts whose entry is the article) or 'reader' (always Reader view, for feeds that only tease)."""
 
     user: Mapped[User] = relationship(back_populates="feeds")
     folder: Mapped[Folder | None] = relationship(back_populates="feeds", foreign_keys=[folder_id])

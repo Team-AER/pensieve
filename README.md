@@ -34,7 +34,9 @@ feed administration and optional AI. See the [product guide](docs/product-guide.
 ## Highlights
 
 - Fast three-pane reader with draggable pane borders, a three-way unread / all / read filter on every view, keyboard shortcuts, mobile navigation, themes, per-account reading settings (text size, font, line height, width, alignment), and offline app shell
-- Feed discovery, conditional fetches, reader mode, favicon caching, OPML import/export, and adaptive polling
+- Feed discovery, conditional fetches, reader mode, favicon caching, OPML import/export, and adaptive polling.
+  Reader view opens by itself for feeds that carry only a link, while comics, photo and video posts are shown
+  as they arrive; a per-subscription **Open with** setting overrides that call either way
 - Reeder and NetNewsWire support through Google Reader and Fever-compatible sync APIs
 - Per-user folders, tags, rules, saved items, notes, search, and household administration
 - Pocket-style **Save link**: save any page from the app, a bookmarklet, the Android share sheet, an iOS

@@ -361,6 +361,8 @@
   .menu-item.danger .ic { color: var(--danger); }
   .menu-sep { height: 1px; margin: 4px 6px; background: var(--line-2); }
   .menu-label { padding: 6px 10px 2px; font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); }
+  /* The menu body is nowrap so its items stay on one line; a hint is prose and has to wrap inside it. */
+  .menu-hint { padding: 2px 10px 6px; max-width: 30ch; white-space: normal; text-align: left; font-size: var(--text-sm); line-height: 1.4; }
 
   /* ---- Dialog ---- */
   .dialog { border: 1px solid var(--line-3); border-radius: var(--radius-lg); background: var(--raised); color: var(--ink); padding: 0; width: min(440px, calc(100vw - 32px)); box-shadow: var(--shadow-lg); }

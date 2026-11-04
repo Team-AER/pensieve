@@ -26,6 +26,7 @@ from pensieve.auth import (
 from pensieve.config import get_settings
 from pensieve.models import (
     FEED_KIND_SAVED,
+    FEED_OPEN_MODES,
     AIJob,
     ApiToken,
     Feed,
@@ -252,6 +253,7 @@ async def _feeds(
             "error": error,
             "paused_count": paused_count,
             "interval_bounds": (get_settings().fetch_min_interval_min, get_settings().fetch_max_interval_min),
+            "open_labels": FEED_OPEN_LABELS,
         },
         status_code=status_code,
     )
@@ -316,6 +318,32 @@ async def move_feed(
     if is_htmx(request):
         # Drag-and-drop in the reader nav: no page to render, just refresh the counts/tree.
         return Response(status_code=204, headers=hx_trigger("counts-changed"))
+    return back("/manage/feeds", "feed_updated")
+
+
+#: Labels for the per-subscription "Open with" setting, in the order the menu offers them.
+FEED_OPEN_LABELS = {
+    "auto": "Open with: automatic",
+    "feed": "Open with: the feed's own body",
+    "reader": "Open with: Reader view",
+}
+
+
+@router.post("/feeds/{feed_id}/open-mode")
+async def set_feed_open_mode(
+    request: Request,
+    feed_id: uuid.UUID,
+    user: CsrfUser,
+    session: DB,
+    open_mode: Annotated[str, Form()] = "",
+):
+    """Override the per-entry guess for one subscription: comics and photo posts are whole as they arrive,
+    while some feeds only ever tease. 'auto' hands the choice back to the heuristic."""
+    feed = await get_feed_or_404(session, user, feed_id)
+    if open_mode not in FEED_OPEN_MODES:
+        return RedirectResponse("/manage/feeds?err=Unknown+way+to+open+this+feed.", status_code=303)
+    feed.open_mode = open_mode
+    await session.commit()
     return back("/manage/feeds", "feed_updated")
 
 
