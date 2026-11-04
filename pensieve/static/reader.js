@@ -758,10 +758,18 @@
     } else if (bars.travel < -24) showBars(true);
   }, { passive: true });
   document.addEventListener('focusin', (e) => { if (e.target.closest && e.target.closest('.topbar, .pane-head, .tabbar, .article-foot')) showBars(true); });
+  // A new article starts at its own top, however far down the last one you were.
+  // On phones the page scrolls, and opening from the list scrolls on the pane switch instead (setPane).
+  // Wider screens scroll inside #article, which the rows' `show:#article:top` cannot reset: scrollIntoView
+  // moves a scroll container's ancestors, never the container itself.
   document.body.addEventListener('htmx:afterSwap', (e) => {
     if (!(e.detail && e.detail.target && e.detail.target.id === 'article')) return;
     showBars(true);
-    if (isMobile() && app() && app().dataset.pane === 'article') scrollPageTo(0);
+    if (isMobile()) {
+      if (app() && app().dataset.pane === 'article') scrollPageTo(0);
+    } else {
+      e.detail.target.scrollTop = 0;
+    }
   });
 
   // ---- Keyboard hints (the keybar, the search box's "/"): only while Ctrl or ⌘ is held on its own ----
