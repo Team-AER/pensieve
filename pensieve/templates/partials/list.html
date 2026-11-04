@@ -1,4 +1,7 @@
 {% import "_macros.html" as m %}
+{# The list head is two rows: what you are looking at, then how it is filtered. On phones a third row of
+   chips carries navigation between views. ``opts.q(...)`` builds every link so grouped/sort/status travel together. #}
+{% set show_status = view.kind not in ('unread', 'saved') %}
 <div class="pane-head list-head">
   <div class="row list-head-main">
     <button type="button" class="btn btn-icon btn-ghost nav-toggle" data-pane-switch="nav" aria-label="Folders and feeds" aria-controls="nav">{{ m.icon('menu', 22) }}</button>
@@ -8,10 +11,8 @@
     </div>
     <a class="mobile-only" href="/manage/account" aria-label="Account and settings" style="justify-self:end">{{ m.avatar(user, 'sm') }}</a>
     <div class="list-controls">
-      <a class="btn btn-sm{% if opts.grouped %}" aria-pressed="true{% endif %}" href="{{ view.path }}?grouped={{ 0 if opts.grouped else 1 }}&sort={{ opts.sort }}" hx-get="{{ list_url }}?grouped={{ 0 if opts.grouped else 1 }}&sort={{ opts.sort }}" hx-target="#list" hx-swap="innerHTML" hx-push-url="{{ view.path }}?grouped={{ 0 if opts.grouped else 1 }}&sort={{ opts.sort }}" title="{{ 'Grouped by story: click for a flat list' if opts.grouped else 'Flat list: click to group by story' }}">{{ 'Grouped' if opts.grouped else 'Flat' }}</a>
-      <a class="btn btn-sm" href="{{ view.path }}?grouped={{ 1 if opts.grouped else 0 }}&sort={{ 'oldest' if opts.sort == 'newest' else 'newest' }}" hx-get="{{ list_url }}?grouped={{ 1 if opts.grouped else 0 }}&sort={{ 'oldest' if opts.sort == 'newest' else 'newest' }}" hx-target="#list" hx-swap="innerHTML" hx-push-url="{{ view.path }}?grouped={{ 1 if opts.grouped else 0 }}&sort={{ 'oldest' if opts.sort == 'newest' else 'newest' }}" title="Sorted {{ opts.sort }} first: click to flip">{{ 'Newest' if opts.sort == 'newest' else 'Oldest' }}</a>
       <details class="menu" id="list-menu">
-        <summary class="btn btn-icon btn-sm" aria-label="List actions: sort, mark as read, refresh" aria-haspopup="menu" title="Mark all as read, sort, refresh">{{ m.icon('more') }}</summary>
+        <summary class="btn btn-icon btn-sm" aria-label="List actions: mark as read, refresh" aria-haspopup="menu" title="Mark all as read, refresh">{{ m.icon('more') }}</summary>
         <div class="menu-body" role="menu" aria-label="List actions">
           <div class="menu-label">Mark as read</div>
           <form method="post" action="{{ view.path }}/mark-read" hx-post="{{ view.path }}/mark-read?{{ opts.query }}" hx-target="#list" hx-swap="innerHTML" hx-confirm="Everything you pick in {{ view.title }} will be marked read. You can undo it right after." data-confirm-title="Mark as read?" data-confirm-label="Mark read">
@@ -22,38 +23,45 @@
           </form>
           <div class="menu-sep"></div>
           <div class="menu-label">Sort</div>
-          <a class="menu-item{% if opts.sort == 'newest' %} on{% endif %}" role="menuitemradio" aria-checked="{{ 'true' if opts.sort == 'newest' else 'false' }}" href="{{ view.path }}?grouped={{ 1 if opts.grouped else 0 }}&sort=newest" hx-get="{{ list_url }}?grouped={{ 1 if opts.grouped else 0 }}&sort=newest" hx-target="#list" hx-swap="innerHTML" hx-push-url="{{ view.path }}?grouped={{ 1 if opts.grouped else 0 }}&sort=newest">{{ m.icon('check', 14) }} Newest first</a>
-          <a class="menu-item{% if opts.sort == 'oldest' %} on{% endif %}" role="menuitemradio" aria-checked="{{ 'true' if opts.sort == 'oldest' else 'false' }}" href="{{ view.path }}?grouped={{ 1 if opts.grouped else 0 }}&sort=oldest" hx-get="{{ list_url }}?grouped={{ 1 if opts.grouped else 0 }}&sort=oldest" hx-target="#list" hx-swap="innerHTML" hx-push-url="{{ view.path }}?grouped={{ 1 if opts.grouped else 0 }}&sort=oldest">{{ m.icon('check', 14) }} Oldest first</a>
+          <a class="menu-item{% if opts.sort == 'newest' %} on{% endif %}" role="menuitemradio" aria-checked="{{ 'true' if opts.sort == 'newest' else 'false' }}" href="{{ view.path }}?{{ opts.q(sort='newest') }}" hx-get="{{ list_url }}?{{ opts.q(sort='newest') }}" hx-target="#list" hx-swap="innerHTML" hx-push-url="{{ view.path }}?{{ opts.q(sort='newest') }}">{{ m.icon('check', 14) }} Newest first</a>
+          <a class="menu-item{% if opts.sort == 'oldest' %} on{% endif %}" role="menuitemradio" aria-checked="{{ 'true' if opts.sort == 'oldest' else 'false' }}" href="{{ view.path }}?{{ opts.q(sort='oldest') }}" hx-get="{{ list_url }}?{{ opts.q(sort='oldest') }}" hx-target="#list" hx-swap="innerHTML" hx-push-url="{{ view.path }}?{{ opts.q(sort='oldest') }}">{{ m.icon('check', 14) }} Oldest first</a>
           <div class="menu-sep"></div>
           <button type="button" class="menu-item" role="menuitem" hx-get="{{ list_url }}?{{ opts.query }}" hx-target="#list" hx-swap="innerHTML">{{ m.icon('refresh', 14) }} Refresh <kbd>r</kbd></button>
         </div>
       </details>
     </div>
   </div>
-  {% if view.kind == 'saved' %}
-  <div class="saved-head row wrap">
+  <div class="list-filters row">
+    {% if view.kind == 'saved' %}
+    {# Saved links are their own three-way: My list is unread, Archive is read. #}
     <nav class="seg saved-tabs" aria-label="Saved lists">
       <a href="/reader/saved" hx-get="/reader/saved/list" hx-target="#list" hx-swap="innerHTML" hx-push-url="/reader/saved" class="seg-btn{% if not view.key %} on" aria-current="page{% endif %}">My list</a>
       <a href="/reader/saved/archive" hx-get="/reader/saved/archive/list" hx-target="#list" hx-swap="innerHTML" hx-push-url="/reader/saved/archive" class="seg-btn{% if view.key == 'archive' %} on" aria-current="page{% endif %}">Archive</a>
       <a href="/reader/saved/all" hx-get="/reader/saved/all/list" hx-target="#list" hx-swap="innerHTML" hx-push-url="/reader/saved/all" class="seg-btn{% if view.key == 'all' %} on" aria-current="page{% endif %}">All</a>
     </nav>
-    <span class="grow"></span>
+    {% elif show_status %}
+    <nav class="seg status-seg" role="radiogroup" aria-label="Read state">
+      {% for value, label, hint in [('unread', 'Unread', 'Only what you have not read'), ('all', 'All', 'Read and unread together'), ('read', 'Read', 'Only what you have read')] %}
+      <a class="seg-btn{% if opts.status == value %} on{% endif %}" role="radio" aria-checked="{{ 'true' if opts.status == value else 'false' }}" title="{{ hint }}" href="{{ view.path }}?{{ opts.q(status=value) }}" hx-get="{{ list_url }}?{{ opts.q(status=value) }}" hx-target="#list" hx-swap="innerHTML" hx-push-url="{{ view.path }}?{{ opts.q(status=value) }}">{{ label }}</a>
+      {% endfor %}
+    </nav>
+    {% endif %}
+    <span class="grow filter-gap"></span>
+    <a class="btn btn-sm{% if opts.grouped %}" aria-pressed="true{% endif %}" href="{{ view.path }}?{{ opts.q(grouped=not opts.grouped) }}" hx-get="{{ list_url }}?{{ opts.q(grouped=not opts.grouped) }}" hx-target="#list" hx-swap="innerHTML" hx-push-url="{{ view.path }}?{{ opts.q(grouped=not opts.grouped) }}" title="{{ 'Grouped by story: click for a flat list' if opts.grouped else 'Flat list: click to group by story' }}">{{ 'Grouped' if opts.grouped else 'Flat' }}</a>
+    <a class="btn btn-sm" href="{{ view.path }}?{{ opts.q(sort='oldest' if opts.sort == 'newest' else 'newest') }}" hx-get="{{ list_url }}?{{ opts.q(sort='oldest' if opts.sort == 'newest' else 'newest') }}" hx-target="#list" hx-swap="innerHTML" hx-push-url="{{ view.path }}?{{ opts.q(sort='oldest' if opts.sort == 'newest' else 'newest') }}" title="Sorted {{ opts.sort }} first: click to flip">{{ 'Newest' if opts.sort == 'newest' else 'Oldest' }}</a>
+    {% if view.kind == 'saved' %}
     <button type="button" class="btn btn-sm btn-primary" data-open-dialog="#save-dialog">{{ m.icon('bookmark-plus', 14) }} Save a link</button>
+    {% endif %}
   </div>
-  {% endif %}
-  <div class="chip-row mobile-only" role="group" aria-label="Filters">
-    <a class="{% if opts.grouped %}on{% endif %}" href="{{ view.path }}?grouped={{ 0 if opts.grouped else 1 }}&sort={{ opts.sort }}" hx-get="{{ list_url }}?grouped={{ 0 if opts.grouped else 1 }}&sort={{ opts.sort }}" hx-target="#list" hx-swap="innerHTML" hx-push-url="{{ view.path }}?grouped={{ 0 if opts.grouped else 1 }}&sort={{ opts.sort }}">Grouped</a>
+  <div class="chip-row mobile-only" role="group" aria-label="Views">
     <a class="{% if view.kind == 'unread' %}on{% endif %}" href="/reader/unread">Unread</a>
     <a class="{% if view.kind == 'starred' %}on{% endif %}" href="/reader/starred">Starred</a>
     <a class="{% if view.kind == 'saved' %}on{% endif %}" href="/reader/saved">Saved</a>
     <a class="{% if view.kind == 'all' %}on{% endif %}" href="/reader/all">All items</a>
     {% if view.kind in ('folder', 'feed', 'tag') %}<a class="on" href="{{ view.path }}">{{ view.title }}</a>{% endif %}
     <details class="menu">
-      <summary aria-label="Sort and mark as read" aria-haspopup="menu">{{ m.icon('more', 16) }} More</summary>
+      <summary aria-label="Mark as read" aria-haspopup="menu">{{ m.icon('more', 16) }} More</summary>
       <div class="menu-body menu-left" role="menu" aria-label="List actions">
-        <a class="menu-item{% if opts.sort == 'newest' %} on{% endif %}" role="menuitemradio" aria-checked="{{ 'true' if opts.sort == 'newest' else 'false' }}" href="{{ view.path }}?grouped={{ 1 if opts.grouped else 0 }}&sort=newest">Newest first</a>
-        <a class="menu-item{% if opts.sort == 'oldest' %} on{% endif %}" role="menuitemradio" aria-checked="{{ 'true' if opts.sort == 'oldest' else 'false' }}" href="{{ view.path }}?grouped={{ 1 if opts.grouped else 0 }}&sort=oldest">Oldest first</a>
-        <div class="menu-sep"></div>
         <form method="post" action="{{ view.path }}/mark-read" hx-post="{{ view.path }}/mark-read?{{ opts.query }}" hx-target="#list" hx-swap="innerHTML" hx-confirm="Everything you pick in {{ view.title }} will be marked read. You can undo it right after." data-confirm-title="Mark as read?" data-confirm-label="Mark read">
           {{ m.csrf_field(csrf_token) }}
           <button class="menu-item" role="menuitem" type="submit" name="older_than" value="">{{ m.icon('check-circle', 14) }} Mark everything read</button>

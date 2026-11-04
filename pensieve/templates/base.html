@@ -20,6 +20,10 @@
    localStorage per user; anonymous pages fall back to the last stored theme so login and error pages match. */
 (function(){var h=document.documentElement;try{var uid=h.getAttribute('data-uid')||'',src=h.getAttribute('data-theme-src')||'auto',st=window.localStorage;if(uid){st.setItem('pensieve.theme:'+uid,src);st.setItem('pensieve.theme:',src);}else{var t=st.getItem('pensieve.theme:');if(t&&t!=='auto'){h.setAttribute('data-theme',t);var c={dark:'#171614',black:'#000000',sepia:'#EFE6D2',light:'#F3F1EA'}[t];if(c){var ms=document.querySelectorAll('meta[name="theme-color"]');for(var i=0;i<ms.length;i++){ms[i].removeAttribute('media');ms[i].setAttribute('content',c);}}}}}catch(e){}})();
 </script>
+<script>
+/* Pane widths before paint, so a resized reader never flashes at its default widths (reader.js owns the drags). */
+(function(){try{var h=document.documentElement,w=JSON.parse(window.localStorage.getItem('pensieve.panes:'+(h.getAttribute('data-uid')||''))||'{}');if(w){if(typeof w.nav==='number')h.style.setProperty('--nav-w',w.nav+'px');if(typeof w.list==='number')h.style.setProperty('--list-w',w.list+'px');}}catch(e){}})();
+</script>
 <link rel="manifest" href="{{ static('manifest.webmanifest') }}">
 <link rel="icon" href="{{ static('icon.svg') }}" type="image/svg+xml">
 <link rel="icon" href="{{ static('icon-192.png') }}" type="image/png" sizes="192x192">

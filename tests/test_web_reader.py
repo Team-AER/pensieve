@@ -195,3 +195,99 @@ async def test_row_states_for_restored_pages(client, session, user):
         "starred": [ids["starred"]],
     }  # another user's state never shows
     assert (await client.get("/reader/states")).json() == {"read": [], "starred": []}
+
+
+async def test_read_state_filter(client, session, user):
+    """The three-way filter: unread by default in a folder or feed, all where the view says 'all'."""
+    folder = models.Folder(user_id=user.id, name="Tech")
+    session.add(folder)
+    await session.commit()
+    feed = await seed_feed(session, user, "Example Blog", folder=folder)
+    seen = await seed_item(session, feed, "Already read story")
+    await seed_item(session, feed, "Unread story")
+    session.add(models.ItemState(user_id=user.id, item_id=seen.id, is_read=True))
+    await session.commit()
+    await login(client, user)
+
+    # A folder opens on its unread, and still counts the whole folder in the header.
+    r = await client.get(f"/reader/folder/{folder.id}/list", headers=HX)
+    assert "Unread story" in r.text and "Already read story" not in r.text
+    assert "1 unread · 2 total" in r.text
+    # All, then only what has been read.
+    r = await client.get(f"/reader/folder/{folder.id}/list?status=all", headers=HX)
+    assert "Unread story" in r.text and "Already read story" in r.text
+    r = await client.get(f"/reader/folder/{folder.id}/list?status=read", headers=HX)
+    assert "Already read story" in r.text and "Unread story" not in r.text
+    # Same filter on a feed and a tag-less "all" view, which is named for its breadth and so opens on everything.
+    r = await client.get(f"/reader/feed/{feed.id}/list", headers=HX)
+    assert "Unread story" in r.text and "Already read story" not in r.text
+    r = await client.get("/reader/all/list", headers=HX)
+    assert "Unread story" in r.text and "Already read story" in r.text
+    r = await client.get("/reader/all/list?status=unread", headers=HX)
+    assert "Already read story" not in r.text
+    # Nonsense falls back to the view's default rather than erroring or emptying the list.
+    r = await client.get(f"/reader/folder/{folder.id}/list?status=wat", headers=HX)
+    assert "Unread story" in r.text and "Already read story" not in r.text
+    # "All unread" and the Saved tabs are already a read state: a status param cannot widen them.
+    r = await client.get("/reader/unread/list?status=all", headers=HX)
+    assert "Unread story" in r.text and "Already read story" not in r.text
+
+
+async def test_read_state_filter_keeps_grouping_and_mark_read(client, session, user):
+    """Grouped rows respect the filter, and marking read only touches what the filter shows."""
+    f1 = await seed_feed(session, user, "Outlet A")
+    f2 = await seed_feed(session, user, "Outlet B")
+    a = await seed_item(session, f1, "Big launch announced")
+    b = await seed_item(session, f2, "Big launch: what we know")
+    now = datetime.now(UTC)
+    cluster = models.Cluster(
+        user_id=user.id,
+        headline="Big launch",
+        window_start=now - timedelta(days=1),
+        window_end=now,
+        canonical_item_id=a.id,
+        source_count=2,
+    )
+    session.add(cluster)
+    await session.flush()
+    session.add_all(
+        [
+            models.ClusterItem(cluster_id=cluster.id, item_id=a.id),
+            models.ClusterItem(cluster_id=cluster.id, item_id=b.id),
+        ]
+    )
+    session.add(models.ItemState(user_id=user.id, item_id=a.id, is_read=True))
+    await session.commit()
+    headers = await login(client, user)
+    # The canonical member is read, so the unread filter falls through to the member that still matches.
+    r = await client.get("/reader/all/list?grouped=1&status=unread", headers=HX)
+    assert "Big launch: what we know" in r.text and "Big launch announced" not in r.text
+    r = await client.get("/reader/all/list?grouped=1&status=read", headers=HX)
+    assert "Big launch announced" in r.text and "Big launch: what we know" not in r.text
+    # Mark-all-read follows the filter: filtered to Read there is nothing left to mark.
+    r = await client.post(
+        "/reader/all/mark-read?grouped=1&sort=newest&status=read",
+        data={"older_than": ""},
+        headers=headers | HX,
+    )
+    assert "Nothing left to mark read" in r.text
+    assert await session.get(models.ItemState, (user.id, b.id)) is None
+    r = await client.post(
+        "/reader/all/mark-read?grouped=1&sort=newest&status=unread",
+        data={"older_than": ""},
+        headers=headers | HX,
+    )
+    assert "Marked 1 item as read" in r.text
+
+
+async def test_list_links_carry_every_option(client, session, user):
+    """Links built by the head keep grouped, sort and status together, so one click never resets another."""
+    feed = await seed_feed(session, user, "Feed")
+    await seed_item(session, feed, "A story")
+    await login(client, user)
+    r = await client.get(f"/reader/feed/{feed.id}/list?grouped=0&sort=oldest&status=all", headers=HX)
+    # Rendered into href/hx-get, so the separators are escaped.
+    assert "grouped=1&amp;sort=oldest&amp;status=all" in r.text  # the Grouped toggle keeps sort and status
+    assert "grouped=0&amp;sort=newest&amp;status=all" in r.text  # the sort toggle keeps grouped and status
+    assert "grouped=0&amp;sort=oldest&amp;status=read" in r.text  # the filter keeps grouped and sort
+    assert 'aria-checked="true"' in r.text

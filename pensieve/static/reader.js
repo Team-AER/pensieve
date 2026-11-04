@@ -91,6 +91,81 @@
   function closeDrawer() { const a = app(); if (a && a.dataset.pane === 'nav') setPane('list'); }
   mqWide.addEventListener('change', (e) => { if (e.matches) closeDrawer(); });
 
+  // ---- Resizable panes: drag (or arrow-key) the borders; the widths are kept per account ----
+  // The width lives in a CSS variable on <html>, clamped again in web.css so a width saved on a wide screen can
+  // never squeeze the article on a narrow one. base.html restores it before paint; this keeps ARIA in step.
+  const PANE_W = {
+    nav: { v: '--nav-w', def: 260, min: 180, max: 460 },
+    list: { v: '--list-w', def: 440, min: 340, max: 820 },
+  };
+  const paneKey = () => 'pensieve.panes:' + (document.documentElement.dataset.uid || '');
+  function paneWidths() {
+    try { const w = JSON.parse(localStorage.getItem(paneKey()) || '{}'); return w && typeof w === 'object' ? w : {}; } catch (_) { return {}; }
+  }
+  function storeWidths(w) { try { localStorage.setItem(paneKey(), JSON.stringify(w)); } catch (_) {} }
+  function handleFor(which) { return $('.pane-resizer[data-resize="' + which + '"]'); }
+  function paneFor(which) { return which === 'nav' ? $('.pane-nav') : $('.pane-list'); }
+  function setPaneWidth(which, px, persist) {
+    const spec = PANE_W[which];
+    if (!spec) return;
+    const v = Math.round(Math.min(spec.max, Math.max(spec.min, px)));
+    document.documentElement.style.setProperty(spec.v, v + 'px');
+    const h = handleFor(which); if (h) h.setAttribute('aria-valuenow', String(v));
+    if (persist) { const w = paneWidths(); w[which] = v; storeWidths(w); }
+  }
+  function resetPaneWidth(which) {
+    const spec = PANE_W[which]; if (!spec) return;
+    document.documentElement.style.removeProperty(spec.v);
+    const w = paneWidths(); delete w[which]; storeWidths(w);
+    const h = handleFor(which); if (h) h.setAttribute('aria-valuenow', String(spec.def));
+    announce('Pane width reset.');
+  }
+  Object.keys(PANE_W).forEach((k) => { const w = paneWidths()[k]; if (typeof w === 'number') setPaneWidth(k, w, false); });
+
+  let paneDrag = null;
+  document.addEventListener('pointerdown', (e) => {
+    const h = e.target.closest && e.target.closest('.pane-resizer');
+    if (!h || e.button) return;
+    const pane = paneFor(h.dataset.resize);
+    if (!pane || !h.offsetParent) return; // hidden at this breakpoint
+    e.preventDefault();
+    paneDrag = { which: h.dataset.resize, handle: h, x: e.clientX, w: pane.getBoundingClientRect().width };
+    h.setAttribute('data-dragging', '');
+    document.body.classList.add('panes-resizing');
+    try { h.setPointerCapture(e.pointerId); } catch (_) {}
+  });
+  document.addEventListener('pointermove', (e) => {
+    if (!paneDrag) return;
+    e.preventDefault();
+    setPaneWidth(paneDrag.which, paneDrag.w + (e.clientX - paneDrag.x), false);
+  });
+  function endPaneDrag() {
+    if (!paneDrag) return;
+    const pane = paneFor(paneDrag.which);
+    if (pane) setPaneWidth(paneDrag.which, pane.getBoundingClientRect().width, true);
+    paneDrag.handle.removeAttribute('data-dragging');
+    document.body.classList.remove('panes-resizing');
+    paneDrag = null;
+  }
+  document.addEventListener('pointerup', endPaneDrag);
+  document.addEventListener('pointercancel', endPaneDrag);
+  // Double-click a border, or press Home on it, to go back to the default width.
+  document.addEventListener('dblclick', (e) => {
+    const h = e.target.closest && e.target.closest('.pane-resizer');
+    if (h) { e.preventDefault(); resetPaneWidth(h.dataset.resize); }
+  });
+  // Registered before the Reader keymap, which skips anything already handled (e.defaultPrevented).
+  document.addEventListener('keydown', (e) => {
+    const h = document.activeElement;
+    if (!h || !h.classList || !h.classList.contains('pane-resizer')) return;
+    const pane = paneFor(h.dataset.resize); if (!pane) return;
+    const step = e.shiftKey ? 48 : 16;
+    const at = pane.getBoundingClientRect().width;
+    if (e.key === 'ArrowLeft') { e.preventDefault(); setPaneWidth(h.dataset.resize, at - step, true); }
+    else if (e.key === 'ArrowRight') { e.preventDefault(); setPaneWidth(h.dataset.resize, at + step, true); }
+    else if (e.key === 'Home') { e.preventDefault(); resetPaneWidth(h.dataset.resize); }
+  });
+
   document.addEventListener('click', (e) => {
     const sw = e.target.closest('[data-pane-switch]');
     if (sw) {
