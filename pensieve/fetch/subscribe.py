@@ -12,7 +12,7 @@ import httpx
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from pensieve import queue
+from pensieve import queue, subscriptions
 from pensieve.config import get_settings
 from pensieve.fetch import http as fetch_http
 from pensieve.fetch.discover import Discovered, DiscoveryError, discover
@@ -87,6 +87,7 @@ def _schedule_error(feed: Feed, now: datetime, error: str, *, retry_after: timed
     feed.next_fetch_at = now + wait
     if feed.error_count >= MAX_CONSECUTIVE_ERRORS:
         feed.paused = True
+        feed.pause_reason = "errors"
         log.warning("feed %s paused after %d consecutive errors: %s", feed.url, feed.error_count, error)
     else:
         log.info("feed %s error %d: %s", feed.url, feed.error_count, error)
@@ -305,10 +306,17 @@ async def add_feed(session: AsyncSession, user: User, url: str, folder_id: uuid.
 
     Raises :class:`FeedError` when nothing can be found, when the URL is unsafe, or when already subscribed.
     """
+    await session.execute(select(User.id).where(User.id == user.id).with_for_update())
     url = (url or "").strip()
     if not url:
         raise FeedError("A URL is required.")
-    if await _feed_exists(session, user.id, url):
+    existing = await session.scalar(select(Feed).where(Feed.user_id == user.id, Feed.url == url))
+    if existing is not None:
+        if existing.unfollowed_at is not None:
+            await subscriptions.restore(session, existing)
+            if folder_id is not None:
+                existing.folder_id = folder_id
+            return existing
         raise FeedError("You are already subscribed to this feed.")
     try:
         found: Discovered = await discover(url)
@@ -316,7 +324,13 @@ async def add_feed(session: AsyncSession, user: User, url: str, folder_id: uuid.
         raise FeedError(f"That address cannot be fetched: {exc}") from exc
     except DiscoveryError as exc:
         raise FeedError(str(exc)) from exc
-    if await _feed_exists(session, user.id, found.feed_url):
+    existing = await session.scalar(select(Feed).where(Feed.user_id == user.id, Feed.url == found.feed_url))
+    if existing is not None:
+        if existing.unfollowed_at is not None:
+            await subscriptions.restore(session, existing)
+            if folder_id is not None:
+                existing.folder_id = folder_id
+            return existing
         raise FeedError("You are already subscribed to this feed.")
 
     now = _now()
@@ -338,6 +352,7 @@ async def add_feed(session: AsyncSession, user: User, url: str, folder_id: uuid.
     session.add(feed)
     await session.flush()
 
+    await subscriptions.follow(session, feed)
     items = await ingest(session, feed, found.parsed, now=now)
     _schedule_success(feed, now, changed=bool(items))
     await session.commit()
@@ -405,6 +420,7 @@ async def _refresh(session: AsyncSession, feed: Feed, now: datetime) -> list[Ite
     if status == 410:
         _schedule_error(feed, now, "Feed is gone (410)")
         feed.paused = True
+        feed.pause_reason = "gone"
         return []
     if status in RETRY_AFTER_STATUSES:
         retry_after = parse_retry_after(response.headers.get("retry-after"), now)
@@ -433,13 +449,29 @@ async def refresh_feed(session: AsyncSession, feed: Feed) -> list[Item]:
     Any unexpected exception (a constraint race, an oversized value, a bug) is also recorded as an error
     with backoff so the feed is never left permanently due.
     """
+    await session.flush()
+    await session.refresh(feed, with_for_update=True)
+    if feed.unfollowed_at is not None or feed.paused:
+        return []
+    feed_id, feed_url = feed.id, feed.url
     now = _now()
     try:
         items = await _refresh(session, feed, now)
+        if feed.paused:
+            await subscriptions.record(
+                session,
+                feed,
+                "pause",
+                {"paused": False, "pause_reason": None, "unfollowed_at": None},
+                "fetch",
+            )
         await session.commit()
     except Exception as exc:
-        log.exception("refresh of feed %s failed unexpectedly", feed.url)
+        log.exception("refresh of feed %s failed unexpectedly", feed_url)
         await session.rollback()
+        feed = await session.scalar(select(Feed).where(Feed.id == feed_id).with_for_update())
+        if feed is None or feed.unfollowed_at is not None or feed.paused:
+            return []
         _schedule_error(feed, now, f"{type(exc).__name__}: {exc}")
         await session.commit()
         return []

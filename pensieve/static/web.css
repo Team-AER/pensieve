@@ -1070,3 +1070,29 @@
     .paper-head { padding-bottom: 18px; }
   }
 }
+
+
+/* Discovery and feed review reuse the management shell and its responsive controls. */
+@layer components {
+  .reading-choices { display: grid; gap: 20px; min-width: 0; }
+  .reading-choices > h1 + .page-summary { margin-top: -12px; }
+  .reading-choices .card { padding: 24px; min-width: 0; overflow-wrap: anywhere; }
+  .reading-choices .card > * + * { margin-top: 12px; }
+  .reading-choices .card > h2 { font-size: 24px; line-height: 1.2; }
+  .reading-choices .card p { max-width: 80ch; }
+  .reading-choices .card .card { padding: 16px; background: var(--bg); }
+  .reading-choices .card .card + .card { margin-top: 12px; }
+  .reading-choices summary { cursor: pointer; font-weight: 600; }
+  .reading-choices .field-row { align-items: center; gap: 10px; }
+  .reading-choices .field-row input[type="number"] { width: 80px; }
+  .reading-choices .card > label { display: block; font-weight: 600; }
+  .reading-choices form > .card + .card { margin-top: 16px; }
+  .reading-choices form > .card + button { margin-top: 16px; }
+  .reading-choices form > p + button { margin-top: 16px; }
+  .reading-choices .stream-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 16px; }
+  @media (max-width: 600px) {
+    .reading-choices { gap: 16px; }
+    .reading-choices .card { padding: 18px; }
+    .reading-choices .card > h2 { font-size: 22px; }
+  }
+}

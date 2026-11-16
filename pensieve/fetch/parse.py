@@ -51,6 +51,7 @@ class ParsedEntry:
     enclosure_type: str | None = None
     content_text: str = ""
     hash: str = ""
+    date_known: bool = True
 
 
 @dataclass(slots=True)
@@ -439,9 +440,8 @@ def parse_json_feed(data: dict, url: str | None, now: datetime) -> ParsedFeed:
             continue
         link = _absolute(raw.get("url") or raw.get("external_url"), site_url or url)
         title = strip_to_text(str(raw.get("title") or ""))
-        published = (
-            parse_datetime(raw.get("date_published")) or parse_datetime(raw.get("date_modified")) or now
-        )
+        known_date = parse_datetime(raw.get("date_published")) or parse_datetime(raw.get("date_modified"))
+        published = known_date or now
         if raw.get("content_html"):
             content_html = sanitize_html(str(raw["content_html"]), base_url=link or site_url)
         elif raw.get("content_text"):
@@ -466,6 +466,7 @@ def parse_json_feed(data: dict, url: str | None, now: datetime) -> ParsedFeed:
                     title=title,
                     author=_json_author(raw) or feed_author,
                     published_at=published,
+                    date_known=known_date is not None,
                     content_html=content_html,
                     summary=summary,
                     enclosure_url=enclosure_url,
@@ -565,12 +566,12 @@ def parse_xml_feed(body: bytes, url: str | None, now: datetime) -> ParsedFeed:
     for entry in parsed.entries:
         link = _entry_link(entry, base)
         title = strip_to_text(entry.get("title") or "")
-        published = (
+        known_date = (
             _struct_to_datetime(entry.get("published_parsed"))
             or _struct_to_datetime(entry.get("updated_parsed"))
             or _struct_to_datetime(entry.get("created_parsed"))
-            or now
         )
+        published = known_date or now
         raw_html = _best_content(entry)
         content_html = sanitize_html(raw_html, base_url=link or base)
         guid = (entry.get("id") or "").strip() or link or _fallback_guid(title, published)
@@ -584,6 +585,7 @@ def parse_xml_feed(body: bytes, url: str | None, now: datetime) -> ParsedFeed:
                     title=title,
                     author=strip_to_text(author) if author else None,
                     published_at=published,
+                    date_known=known_date is not None,
                     content_html=content_html,
                     summary=_entry_summary(entry, raw_html),
                     enclosure_url=enclosure_url,

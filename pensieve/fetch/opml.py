@@ -13,7 +13,7 @@ from lxml import etree
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from pensieve import queue
+from pensieve import queue, subscriptions
 from pensieve.config import get_settings
 from pensieve.models import Feed, Folder, User
 
@@ -88,14 +88,18 @@ def parse_opml(xml: bytes | str) -> list[_Outline]:
     return outlines
 
 
-async def import_opml(session: AsyncSession, user: User, xml: bytes) -> ImportResult:
+async def import_opml(
+    session: AsyncSession, user: User, xml: bytes, *, source: str = "opml", commit: bool = True
+) -> ImportResult:
     """Create folders and feeds for ``user`` from OPML. Duplicates (existing or repeated) are skipped."""
+    await session.execute(select(User.id).where(User.id == user.id).with_for_update())
     outlines = parse_opml(xml)
     result = ImportResult()
     now = datetime.now(UTC)
     settings = get_settings()
 
-    existing_urls = set((await session.scalars(select(Feed.url).where(Feed.user_id == user.id))).all())
+    existing = {f.url: f for f in await session.scalars(select(Feed).where(Feed.user_id == user.id))}
+    existing_urls = {url for url, feed in existing.items() if feed.unfollowed_at is None}
     folders = {
         f.name: f for f in (await session.scalars(select(Folder).where(Folder.user_id == user.id))).all()
     }
@@ -116,6 +120,13 @@ async def import_opml(session: AsyncSession, user: User, xml: bytes) -> ImportRe
                 session.add(folder)
                 folders[name] = folder
                 result.folders_created.append(folder)
+        if url in existing:
+            feed = await subscriptions.restore(session, existing[url], source=source)
+            if folder:
+                feed.folder_id = folder.id
+            existing_urls.add(url)
+            result.added.append(feed)
+            continue
         feed = Feed(
             id=uuid.uuid4(),
             user_id=user.id,
@@ -127,10 +138,13 @@ async def import_opml(session: AsyncSession, user: User, xml: bytes) -> ImportRe
             next_fetch_at=now,
         )
         session.add(feed)
+        await subscriptions.follow(session, feed, source=source)
         existing_urls.add(url)
         result.added.append(feed)
 
     await session.flush()
+    if not commit:
+        return result
     await session.commit()  # rows must be visible before the AI worker looks them up
     # Feeds that landed without a folder get an AI filing suggestion, exactly as add_feed does.
     for feed in result.added:
@@ -166,7 +180,9 @@ def export_opml(user: User, feeds: list[Feed], folders: list[Folder]) -> bytes:
     body = ET.SubElement(root, "body")
 
     by_folder: dict[uuid.UUID | None, list[Feed]] = {}
-    for feed in sorted(feeds, key=lambda f: (f.position, (f.title or "").lower())):
+    for feed in sorted(
+        (f for f in feeds if f.unfollowed_at is None), key=lambda f: (f.position, (f.title or "").lower())
+    ):
         by_folder.setdefault(feed.folder_id, []).append(feed)
 
     for folder in sorted(folders, key=lambda f: (f.position, f.name.lower())):

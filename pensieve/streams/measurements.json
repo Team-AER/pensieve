@@ -1,0 +1,45 @@
+{
+  "catalog_version": 1,
+  "sources": [
+    {
+      "url": "https://www.nasa.gov/feed/",
+      "feed_url": "https://www.nasa.gov/feed/",
+      "posts_per_week": 42.5,
+      "sample_size": 10,
+      "measured_at": "2026-11-15T15:30:08.461291+00:00",
+      "error": null
+    },
+    {
+      "url": "https://www.sciencedaily.com/rss/top/science.xml",
+      "feed_url": "https://www.sciencedaily.com/rss/top/science.xml",
+      "posts_per_week": 44.4,
+      "sample_size": 60,
+      "measured_at": "2026-11-15T15:30:08.939897+00:00",
+      "error": null
+    },
+    {
+      "url": "https://blog.python.org/feeds/posts/default",
+      "feed_url": "https://blog.python.org/feeds/posts/default",
+      "posts_per_week": 1.1,
+      "sample_size": 50,
+      "measured_at": "2026-11-15T15:30:10.258149+00:00",
+      "error": null
+    },
+    {
+      "url": "https://github.blog/feed/",
+      "feed_url": "https://github.blog/feed/",
+      "posts_per_week": 4.1,
+      "sample_size": 10,
+      "measured_at": "2026-11-15T15:30:10.702668+00:00",
+      "error": null
+    },
+    {
+      "url": "https://hacks.mozilla.org/feed/",
+      "feed_url": "https://hacks.mozilla.org/feed/",
+      "posts_per_week": 0.2,
+      "sample_size": 20,
+      "measured_at": "2026-11-15T15:30:11.045001+00:00",
+      "error": null
+    }
+  ]
+}

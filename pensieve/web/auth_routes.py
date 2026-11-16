@@ -20,6 +20,7 @@ from pensieve.auth import (
 )
 from pensieve.config import get_settings
 from pensieve.models import FEED_KIND_RSS, Feed, User, UserRole
+from pensieve.subscriptions import followed
 from pensieve.web.ratelimit import client_ip, get_limiter
 from pensieve.web.templating import DB, CsrfUser, check_csrf, render
 
@@ -48,7 +49,7 @@ async def landing(session: AsyncSession, user: User, next: str | None) -> str:
         target = "/"
     if target == "/":
         has_feed = await session.scalar(
-            select(Feed.id).where(Feed.user_id == user.id, Feed.kind == FEED_KIND_RSS).limit(1)
+            select(Feed.id).where(Feed.user_id == user.id, followed(), Feed.kind == FEED_KIND_RSS).limit(1)
         )
         if has_feed is None:
             target = WELCOME

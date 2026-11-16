@@ -33,6 +33,7 @@ from pensieve.models import (
     Snapshot,
     User,
 )
+from pensieve.subscriptions import followed
 from pensieve.web.queries import get_state, get_user_item, set_read, set_starred, upsert_states, with_copies
 from pensieve.web.templating import DB, CsrfUser, CurrentUser, hx_trigger, is_htmx, render
 
@@ -525,7 +526,7 @@ async def cluster_items(
             .join(ClusterItem, ClusterItem.item_id == Item.id)
             .join(Feed, Feed.id == Item.feed_id)
             .outerjoin(state, and_(state.item_id == Item.id, state.user_id == user.id))
-            .where(ClusterItem.cluster_id == cluster.id, Feed.user_id == user.id)
+            .where(ClusterItem.cluster_id == cluster.id, Feed.user_id == user.id, followed())
             .order_by(Item.published_at.desc())
         )
     ).all()

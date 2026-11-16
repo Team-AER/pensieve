@@ -67,6 +67,7 @@ def test_function_registry_matches_queue_contract():
         queue.AI_FILE_FEED,
         queue.AI_DAILY_DIGEST,
         queue.AI_WEEKLY_REVIEW,
+        queue.AI_FEED_REVIEW,
         queue.AI_REFRESH_PROFILE,
         queue.AI_SUMMARIZE_ITEM,
         queue.AI_SUMMARIZE_ITEMS,
@@ -439,6 +440,8 @@ async def test_dispatchers_enqueue_per_user(session, user):
     assert funcs == sorted(
         [
             (queue.AI_WEEKLY_REVIEW, str(user.id)),
+            (queue.AI_FEED_REVIEW, str(user.id)),
+            (queue.AI_FEED_REVIEW, str(other.id)),
             (queue.AI_REFRESH_PROFILE, str(user.id)),
             (queue.AI_REFRESH_PROFILE, str(other.id)),
         ]

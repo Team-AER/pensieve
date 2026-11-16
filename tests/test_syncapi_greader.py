@@ -434,8 +434,8 @@ async def test_subscription_edit_rename_move_unsubscribe(client, session, user):
 
     r = await client.post(f"{API}/subscription/edit", headers=h, data={"ac": "unsubscribe", "s": fid})
     assert r.status_code == 200
-    assert await fresh_feed(session, d.feed_a.id) is None
-    assert await session.scalar(select(models.Item).where(models.Item.feed_id == d.feed_a.id)) is None
+    assert (await fresh_feed(session, d.feed_a.id)).unfollowed_at is not None
+    assert await session.scalar(select(models.Item).where(models.Item.feed_id == d.feed_a.id)) is not None
 
     r = await client.post(
         f"{API}/subscription/edit", headers=h, data={"ac": "edit", "s": f"feed/{uuid.uuid4()}"}

@@ -30,6 +30,7 @@ from pensieve.ai.common import (
 )
 from pensieve.ai.embeddings import embed_items, get_vectors, nearest
 from pensieve.config import get_settings
+from pensieve.subscriptions import followed
 
 PROFILE_DAYS = 90
 PROFILE_MAX_LINES = 40
@@ -99,7 +100,9 @@ async def gather_signals(session: AsyncSession, user: models.User, days: int = P
         items = {i.id: i for i in rows}
     feeds = {
         f.id: f.title
-        for f in (await session.scalars(select(models.Feed).where(models.Feed.user_id == user.id))).all()
+        for f in (
+            await session.scalars(select(models.Feed).where(models.Feed.user_id == user.id, followed()))
+        ).all()
     }
     ai_rows = {}
     if ids:
@@ -420,7 +423,9 @@ async def ask_reading(
 
     feeds = {
         f.id: f.title
-        for f in (await session.scalars(select(models.Feed).where(models.Feed.user_id == user.id))).all()
+        for f in (
+            await session.scalars(select(models.Feed).where(models.Feed.user_id == user.id, followed()))
+        ).all()
     }
     budget_chars = (settings.llm_max_input_tokens_long - 1500) * 4
     excerpts: list[tuple[int, str, str, str]] = []

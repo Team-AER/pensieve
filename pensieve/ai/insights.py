@@ -32,7 +32,6 @@ from pensieve.ai.common import (
     ai_on,
     centroid,
     cosine,
-    counter_cosine,
     is_batch_read,
     mark_all_batch_times,
     read_states,
@@ -42,6 +41,7 @@ from pensieve.ai.common import (
 from pensieve.ai.embeddings import get_vectors
 from pensieve.ai.memory import profile_text
 from pensieve.config import get_settings
+from pensieve.subscriptions import followed
 
 log = logging.getLogger(__name__)
 
@@ -323,7 +323,9 @@ async def daily_digest(
     items = [i for i in items if i.id not in hidden]
     feeds = {
         f.id: f
-        for f in (await session.scalars(select(models.Feed).where(models.Feed.user_id == user.id))).all()
+        for f in (
+            await session.scalars(select(models.Feed).where(models.Feed.user_id == user.id, followed()))
+        ).all()
     }
     ai_rows = await _ai_rows(session, user.id, [i.id for i in items])
     scorer = await load_affinity(session, user.id, [i.id for i in items])
@@ -513,7 +515,9 @@ async def weekly_review(
 
     feeds = {
         f.id: f
-        for f in (await session.scalars(select(models.Feed).where(models.Feed.user_id == user.id))).all()
+        for f in (
+            await session.scalars(select(models.Feed).where(models.Feed.user_id == user.id, followed()))
+        ).all()
     }
     folders = {
         f.id: f.name
@@ -557,29 +561,11 @@ async def weekly_review(
         if d < 0
     ][:5]
 
-    source_signals = []
-    for fid, its in per_feed_items.items():
-        feed = feeds.get(fid)
-        if feed is None:
-            continue
-        n = len(its)
-        week_feed_tags: Counter = Counter()
-        for it in its:
-            if it.id in ai_week:
-                week_feed_tags.update(ai_week[it.id].tags)
-        prior = month_feed_tags.get(fid, Counter())
-        drift = round(1.0 - counter_cosine(week_feed_tags, prior), 3) if week_feed_tags and prior else None
-        source_signals.append(
-            {
-                "feed_id": str(fid),
-                "title": feed.title,
-                "posts": n,
-                "open_share": round(sum(1 for it in its if it.id in opened) / n, 3),
-                "skip_share": round(sum(1 for it in its if it.id in skipped) / n, 3),
-                "topic_drift": drift,
-            }
-        )
-    source_signals.sort(key=lambda s: -s["posts"])
+    from pensieve.review.controls import prompt_due
+    from pensieve.review.evidence import evidence
+
+    source_signals = [ev.signals() for ev in await evidence(session, user, now=end)]
+    source_signals.sort(key=lambda row: -row["stories_per_day"])
 
     stats = {
         "week": iso_week,
@@ -591,6 +577,7 @@ async def weekly_review(
         "rising": rising,
         "fading": fading,
         "source_signals": source_signals[:25],
+        "feed_review_prompt": False,
     }
     summary, highlights, suggestions = "", [], []
     try:
@@ -612,6 +599,7 @@ async def weekly_review(
         summary = (
             f"{stats['items']} items this week; you opened {stats['opened']} and skipped {stats['skipped']}."
         )
+    stats["feed_review_prompt"] = await prompt_due(session, user)
     body = {"summary": summary, "highlights": highlights, "suggestions": suggestions, **stats}
     return await _upsert_insight(session, user.id, "weekly", iso_week, f"Week {iso_week} in review", body, [])
 
@@ -827,7 +815,9 @@ async def summarize_items(
         return {}
     feeds = {
         f.id: f.title
-        for f in (await session.scalars(select(models.Feed).where(models.Feed.user_id == user.id))).all()
+        for f in (
+            await session.scalars(select(models.Feed).where(models.Feed.user_id == user.id, followed()))
+        ).all()
     }
     profile = await profile_text(session, user.id)
     prefs = summary_prefs(user)

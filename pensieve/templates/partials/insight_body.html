@@ -1,4 +1,5 @@
 {% import "_macros.html" as m %}
+{% if body.feed_review_prompt %}<p class="card"><a href="/manage/feed-review">Review repeated coverage and make room in your reading</a></p>{% endif %}
 {% if queued %}<div class="flash flash-ai" role="status">{{ m.icon('sparkle', 14) }} Queued. The digest appears here once the model has read today's items.</div>{% endif %}
 {% if not insight %}
 <div class="insights-head">

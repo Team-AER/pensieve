@@ -15,6 +15,7 @@ from fastapi.responses import RedirectResponse, Response
 from sqlalchemy import case, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from pensieve import subscriptions
 from pensieve.ai import ledger
 from pensieve.ai import retry as ai_retry
 from pensieve.auth import (
@@ -40,6 +41,7 @@ from pensieve.models import (
     User,
     UserRole,
 )
+from pensieve.subscriptions import followed
 from pensieve.web.queries import invalidate_nav_cache, parse_uuid
 from pensieve.web.templating import (
     DB,
@@ -62,7 +64,7 @@ FLASH = {
     "ai_nothing_to_retry": "Nothing left to retry: later runs already did that work.",
     "feed_added": "Feed added.",
     "feed_updated": "Feed updated.",
-    "feed_removed": "Unsubscribed.",
+    "feed_removed": "Unfollowed. Saved articles and notes are kept.",
     "folder_saved": "Folder saved.",
     "folder_removed": "Folder removed.",
     "tag_saved": "Tag saved.",
@@ -77,7 +79,7 @@ FLASH = {
     "user_saved": "User updated.",
     "user_removed": "User removed.",
     "opml_imported": "OPML imported.",
-    "feeds_resumed": "All paused feeds resumed.",
+    "feeds_resumed": "Feeds paused by repeated errors resumed.",
     "rule_applied": "Rule applied to existing items.",
     "suggestion_dismissed": "Suggestion dismissed.",
 }
@@ -94,7 +96,9 @@ AI_TOGGLES = (
 )
 
 SECTIONS = [
+    ("discover", "Discover", "/discover"),
     ("feeds", "Feeds", "/manage/feeds"),
+    ("feed-review", "Feed review", "/manage/feed-review"),
     ("folders", "Folders and tags", "/manage/folders"),
     ("rules", "Rules and filters", "/manage/rules"),
     ("ai", "AI and memory", "/manage/ai"),
@@ -195,7 +199,7 @@ async def _feeds(
 ):
     stmt = (
         select(Feed)
-        .where(Feed.user_id == user.id, Feed.kind != FEED_KIND_SAVED)
+        .where(Feed.user_id == user.id, followed(), Feed.kind != FEED_KIND_SAVED)
         .order_by(Feed.title, Feed.url)
     )
     if q.strip():
@@ -236,10 +240,15 @@ async def _feeds(
         )
     paused_count = int(
         await session.scalar(
-            select(func.count(Feed.id)).where(Feed.user_id == user.id, Feed.paused.is_(True))
+            select(func.count(Feed.id)).where(
+                Feed.user_id == user.id, followed(), Feed.paused.is_(True), Feed.pause_reason == "errors"
+            )
         )
         or 0
     )
+    from pensieve.review.controls import prompt_due
+
+    review_prompt = await prompt_due(session, user)
     return page(
         request,
         user,
@@ -247,6 +256,14 @@ async def _feeds(
         "manage/feeds.html",
         {
             "rows": rows,
+            "review_prompt": review_prompt,
+            "unfollowed": list(
+                await session.scalars(
+                    select(Feed)
+                    .where(Feed.user_id == user.id, Feed.unfollowed_at.is_not(None))
+                    .order_by(Feed.unfollowed_at.desc())
+                )
+            ),
             "folders": folders,
             "q": q,
             "folder": folder,
@@ -353,12 +370,15 @@ async def resume_all_feeds(
     user: CsrfUser,
     session: DB,
 ):
-    now = datetime.now(UTC)
-    await session.execute(
-        Feed.__table__.update()
-        .where(Feed.user_id == user.id, Feed.paused.is_(True))
-        .values(paused=False, error_count=0, next_fetch_at=now)
+    feeds = list(
+        await session.scalars(
+            select(Feed).where(
+                Feed.user_id == user.id, followed(), Feed.paused.is_(True), Feed.pause_reason == "errors"
+            )
+        )
     )
+    for feed in feeds:
+        await subscriptions.resume(session, feed)
     await session.commit()
     return back("/manage/feeds", "feeds_resumed")
 
@@ -416,7 +436,7 @@ async def pause_feed(
     session: DB,
 ):
     feed = await get_feed_or_404(session, user, feed_id)
-    feed.paused = True
+    await subscriptions.pause(session, feed)
     await session.commit()
     return back("/manage/feeds", "feed_updated")
 
@@ -429,9 +449,7 @@ async def resume_feed(
     session: DB,
 ):
     feed = await get_feed_or_404(session, user, feed_id)
-    feed.paused = False
-    feed.error_count = 0
-    feed.next_fetch_at = datetime.now(UTC)
+    await subscriptions.resume(session, feed)
     await session.commit()
     return back("/manage/feeds", "feed_updated")
 
@@ -444,9 +462,19 @@ async def unsubscribe_feed(
     session: DB,
 ):
     feed = await get_feed_or_404(session, user, feed_id)
-    await session.delete(feed)
+    await subscriptions.unfollow(session, feed)
     await session.commit()
     return back("/manage/feeds", "feed_removed")
+
+
+@router.post("/feeds/{feed_id}/restore")
+async def restore_feed(request: Request, feed_id: uuid.UUID, user: CsrfUser, session: DB):
+    feed = await session.get(Feed, feed_id)
+    if feed is None or feed.user_id != user.id:
+        raise HTTPException(status_code=404)
+    await subscriptions.restore(session, feed, source="direct")
+    await session.commit()
+    return back("/manage/feeds", "feed_added")
 
 
 @router.post("/feeds/{feed_id}/accept-suggestion")
@@ -694,7 +722,9 @@ async def rules_page(request: Request, user: CurrentUser, session: DB):
     )
     feeds = list(
         await session.scalars(
-            select(Feed).where(Feed.user_id == user.id, Feed.kind != FEED_KIND_SAVED).order_by(Feed.title)
+            select(Feed)
+            .where(Feed.user_id == user.id, followed(), Feed.kind != FEED_KIND_SAVED)
+            .order_by(Feed.title)
         )
     )
     feed_names = {f.id: f.title or f.url for f in feeds}
@@ -1124,7 +1154,9 @@ async def import_opml_route(
 async def export_opml_route(user: CurrentUser, session: DB):
     feeds = list(
         await session.scalars(
-            select(Feed).where(Feed.user_id == user.id, Feed.kind != FEED_KIND_SAVED).order_by(Feed.title)
+            select(Feed)
+            .where(Feed.user_id == user.id, followed(), Feed.kind != FEED_KIND_SAVED)
+            .order_by(Feed.title)
         )
     )
     folders = await user_folders(session, user)

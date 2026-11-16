@@ -14,6 +14,7 @@
       <details class="menu" id="list-menu">
         <summary class="btn btn-icon btn-sm" aria-label="List actions: mark as read, refresh" aria-haspopup="menu" title="Mark all as read, refresh">{{ m.icon('more') }}</summary>
         <div class="menu-body" role="menu" aria-label="List actions">
+          {% if view.kind == 'folder' %}<a class="menu-item" role="menuitem" href="/discover/explore?folder={{ view.folder_id }}">Explore sources</a><div class="menu-sep"></div>{% endif %}
           <div class="menu-label">Mark as read</div>
           <form method="post" action="{{ view.path }}/mark-read" hx-post="{{ view.path }}/mark-read?{{ opts.query }}" hx-target="#list" hx-swap="innerHTML" hx-confirm="Everything you pick in {{ view.title }} will be marked read. You can undo it right after." data-confirm-title="Mark as read?" data-confirm-label="Mark read">
             {{ m.csrf_field(csrf_token) }}
@@ -62,6 +63,7 @@
     <details class="menu">
       <summary aria-label="Mark as read" aria-haspopup="menu">{{ m.icon('more', 16) }} More</summary>
       <div class="menu-body menu-left" role="menu" aria-label="List actions">
+        {% if view.kind == 'folder' %}<a class="menu-item" role="menuitem" href="/discover/explore?folder={{ view.folder_id }}">Explore sources</a><div class="menu-sep"></div>{% endif %}
         <form method="post" action="{{ view.path }}/mark-read" hx-post="{{ view.path }}/mark-read?{{ opts.query }}" hx-target="#list" hx-swap="innerHTML" hx-confirm="Everything you pick in {{ view.title }} will be marked read. You can undo it right after." data-confirm-title="Mark as read?" data-confirm-label="Mark read">
           {{ m.csrf_field(csrf_token) }}
           <button class="menu-item" role="menuitem" type="submit" name="older_than" value="">{{ m.icon('check-circle', 14) }} Mark everything read</button>

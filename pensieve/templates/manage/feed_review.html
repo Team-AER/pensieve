@@ -1,0 +1,30 @@
+{% extends "manage/layout.html" %}
+{% import "_macros.html" as m %}
+{% block mtitle %}Feed review{% endblock %}
+{% block content %}<div class="reading-choices">
+<h1>Make room for what matters</h1><p class="page-summary">{{ total_per_day }} stories/day across your followed sources in the last 30 days. Nothing changes until you choose an action.</p>
+{% if notice %}<p class="flash" role="status">{{ notice }}</p>{% endif %}
+<details class="card"><summary>Review preferences</summary>
+<form method="post" action="/manage/feed-review/settings">{{ m.csrf_field(csrf_token) }}
+<p><label><input type="checkbox" name="enabled" value="1" {% if cfg.enabled %}checked{% endif %}> Occasional review reminders</label></p>
+<p><label>Target stories/day <input class="input" type="number" name="target_per_day" value="{{ cfg.target_per_day }}" min="1" max="10000"></label></p>
+<p><label>Snooze reminders <select class="input" name="snooze_days"><option value="0">No snooze</option><option value="7">One week</option><option value="30">One month</option><option value="90">Three months</option></select></label></p>
+<p class="muted">No reminders for your first two weeks of review, then at most once a week when there is enough evidence and volume exceeds your target.</p><button class="btn" type="submit">Save preferences</button></form></details>
+{% for panel in panels %}{% set ev = panel.evidence %}
+<section class="card" id="review-{{ ev.feed.id }}"><h2><a href="/reader/feed/{{ ev.feed.id }}">{{ ev.feed.title or ev.feed.url }}</a> {% if ev.feed.essential %}<span class="chip">Essential</span>{% endif %}{% if panel.new %}<span class="chip">New-follow check-in</span>{% endif %}</h2>
+<p>{{ ev.size }} articles sampled · {{ ev.start.strftime('%-d %b') }}–{{ ev.end.strftime('%-d %b %Y') }} (30 days)</p>
+<p>{{ ev.per_day }} stories/day · {{ ev.exact }} exact copies <strong>measured</strong> by URL or hash · {{ ev.shared }} shared articles <strong>estimated</strong> from story groups and copies · {{ ev.first }} shared articles published first</p>
+<p>{{ ev.only_here|length }} stories only here: {{ ev.opened_only_here|length }} opened, {{ ev.starred_only_here|length }} starred, {{ ev.noted_only_here|length }} noted.</p>
+<p>Angle check: <strong>{{ panel.angle.status }}</strong>{% if panel.angle.labels %} · {{ panel.angle.labels|join(', ')|replace('_', ' ') }}{% endif %}</p>
+{% if panel.action %}<p><strong>Consider {{ panel.action }}.</strong> Most of this sample is repeated in other followed feeds that are currently fetching successfully. Review the examples and the coverage you would lose below.</p>{% else %}<p class="muted">No reduction suggested.{% if not ev.healthy %} Fetch history is insufficient or unhealthy.{% endif %} Unique contributions, saved work, essential sources and uncertain evidence are protected.</p>{% endif %}
+{% if ev.examples %}<details><summary>Coverage kept in another source</summary>{% for own, other in ev.examples %}<p><a href="/items/{{ own.id }}">{{ own.title }}</a> · also <a href="/items/{{ other.id }}">{{ other.title }}</a></p>{% endfor %}</details>{% endif %}
+{% if ev.only_here %}<details><summary>Coverage you would lose ({{ ev.only_here|length }} stories)</summary>{% for item in ev.only_here[:10] %}<p><a href="/items/{{ item.id }}">{{ item.title }}</a></p>{% endfor %}</details>{% endif %}
+<form class="field-row" method="post" action="/manage/feed-review/action">{{ m.csrf_field(csrf_token) }}<input type="hidden" name="feed_id" value="{{ ev.feed.id }}"><input type="hidden" name="review_token" value="{{ review_token }}"><input type="hidden" name="suggested_action" value="{{ panel.action or '' }}">
+<button class="btn" type="submit" name="action" value="{{ 'unkeep' if ev.feed.essential else 'keep' }}">{{ 'Remove essential flag' if ev.feed.essential else 'Keep · essential' }}</button>
+<button class="btn" type="submit" name="action" value="limit">Limit in paper</button><label for="limit-{{ ev.feed.id }}">Stories/day in paper</label><input class="input input-sm" type="number" id="limit-{{ ev.feed.id }}" name="limit" value="3" min="1" max="100">
+<button class="btn" type="submit" name="action" value="{{ 'normal' if ev.feed.delivery == 'quiet' else 'quiet' }}">{{ 'Normal delivery' if ev.feed.delivery == 'quiet' else 'Quiet' }}</button>
+<button class="btn" type="submit" name="action" value="pause">Pause</button><button class="btn" type="submit" name="action" value="unfollow">Unfollow</button>
+</form><p class="muted">Quiet removes this feed from All unread and its total badge, keeps fetching, and keeps it in the paper and its own view. Third-party clients show Quiet feeds normally. Pause stops fetching; unfollow keeps saved work.</p><a href="/manage/rules">Filter topics with keyword rules</a>
+</section>{% else %}<section class="card"><p>Follow some sources to begin. Reviews work without AI.</p><a class="btn" href="/discover">Discover streams</a></section>{% endfor %}
+{% if events %}<section class="card"><h2>Recent changes</h2>{% for event in events %}<form class="field-row" method="post" action="/manage/feed-review/undo/{{ event.id }}">{{ m.csrf_field(csrf_token) }}<span>{{ event.action }} · {{ event.created_at|timeago }}</span><button class="btn btn-sm" type="submit">Undo</button></form>{% endfor %}<p class="muted">Undo is available for the latest change to each retained feed.</p></section>{% endif %}
+</div>{% endblock %}

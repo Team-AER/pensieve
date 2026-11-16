@@ -43,6 +43,7 @@ from starlette.datastructures import ImmutableMultiDict
 from pensieve.auth import user_from_api_token
 from pensieve.db import get_session
 from pensieve.models import Feed, Folder, Item, ItemAI, ItemState, User
+from pensieve.subscriptions import followed
 
 INT63_MASK = (1 << 63) - 1
 ITEM_TAG_PREFIX = "tag:google.com,2005:reader/item/"
@@ -272,8 +273,10 @@ async def feed_by_ref(session: AsyncSession, user_id: uuid.UUID, ref: str) -> Fe
     except ValueError:
         feed_id = None
     if feed_id is not None:
-        return await session.scalar(select(Feed).where(Feed.user_id == user_id, Feed.id == feed_id))
-    return await session.scalar(select(Feed).where(Feed.user_id == user_id, Feed.url == ref))
+        return await session.scalar(
+            select(Feed).where(Feed.user_id == user_id, followed(), Feed.id == feed_id)
+        )
+    return await session.scalar(select(Feed).where(Feed.user_id == user_id, followed(), Feed.url == ref))
 
 
 async def folder_by_name(session: AsyncSession, user_id: uuid.UUID, name: str) -> Folder | None:
@@ -335,20 +338,20 @@ async def stream_filter(
 ) -> ColumnElement[bool] | None:
     """WHERE clause selecting a stream's items over `visible_items`; None means the stream is empty."""
     if stream.kind == "reading-list":
-        return literal_column("true")
+        return followed()
     if stream.kind == "starred":
         return is_starred_expr()
     if stream.kind == "read":
         return is_read_expr()
     if stream.kind == "kept-unread":
-        return is_unread_expr()
+        return followed() & is_unread_expr()
     if stream.kind == "feed":
         feed = await feed_by_ref(session, user_id, stream.value)
         return Item.feed_id == feed.id if feed is not None else None
     if stream.kind == "label":
         folder = await folder_by_name(session, user_id, stream.value)
         if folder is not None:
-            return Feed.folder_id == folder.id
+            return followed() & (Feed.folder_id == folder.id)
         if stream.value.startswith(AI_LABEL_PREFIX):
             tag = stream.value[len(AI_LABEL_PREFIX) :]
             return exists().where(ItemAI.user_id == user_id, ItemAI.item_id == Item.id, ItemAI.tags.any(tag))
@@ -457,14 +460,14 @@ async def unread_by_feed(session: AsyncSession, user_id: uuid.UUID) -> list[Feed
         )
         .join(Feed, Item.feed_id == Feed.id)
         .outerjoin(ItemState, and_(ItemState.item_id == Item.id, ItemState.user_id == user_id))
-        .where(Feed.user_id == user_id, is_unread_expr(), not_hidden_expr())
+        .where(Feed.user_id == user_id, followed(), is_unread_expr(), not_hidden_expr())
         .group_by(Item.feed_id)
         .subquery()
     )
     stmt = (
         select(Feed.id, Feed.folder_id, func.coalesce(unread.c.n, 0), unread.c.newest)
         .outerjoin(unread, unread.c.feed_id == Feed.id)
-        .where(Feed.user_id == user_id)
+        .where(Feed.user_id == user_id, followed())
         .order_by(Feed.position, Feed.title)
     )
     return [

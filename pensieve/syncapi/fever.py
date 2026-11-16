@@ -25,6 +25,7 @@ from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pensieve.models import ApiToken, Feed, Folder, Item, ItemState, User
+from pensieve.subscriptions import followed
 from pensieve.syncapi import router
 from pensieve.syncapi.common import (
     DbSession,
@@ -74,7 +75,9 @@ async def _authenticate(session: AsyncSession, api_key: str | None) -> User | No
 
 
 async def _last_refreshed(session: AsyncSession, user_id: uuid.UUID) -> int:
-    latest = await session.scalar(select(func.max(Feed.last_success_at)).where(Feed.user_id == user_id))
+    latest = await session.scalar(
+        select(func.max(Feed.last_success_at)).where(Feed.user_id == user_id, followed())
+    )
     return to_sec(latest) if latest else to_sec(datetime.now(UTC))
 
 
@@ -85,7 +88,7 @@ async def _groups(session: AsyncSession, user_id: uuid.UUID) -> tuple[list[dict]
         )
     )
     feeds = await session.execute(
-        select(Feed.id, Feed.folder_id).where(Feed.user_id == user_id).order_by(Feed.position)
+        select(Feed.id, Feed.folder_id).where(Feed.user_id == user_id, followed()).order_by(Feed.position)
     )
     members: dict[uuid.UUID, list[int]] = {}
     for feed_id, folder_id in feeds:
@@ -101,7 +104,7 @@ async def _groups(session: AsyncSession, user_id: uuid.UUID) -> tuple[list[dict]
 
 async def _feeds(session: AsyncSession, user_id: uuid.UUID) -> list[dict]:
     feeds = await session.scalars(
-        select(Feed).where(Feed.user_id == user_id).order_by(Feed.position, Feed.title)
+        select(Feed).where(Feed.user_id == user_id, followed()).order_by(Feed.position, Feed.title)
     )
     return [
         {
@@ -163,7 +166,7 @@ async def _favicons(session: AsyncSession, user_id: uuid.UUID) -> list[dict]:
     """Cached icon bytes as ``{"id": favicon_id, "data": "<mime>;base64,<...>"}`` (Fever's shape)."""
     rows = await session.execute(
         select(Feed.id, Feed.icon_data, Feed.icon_content_type).where(
-            Feed.user_id == user_id, Feed.icon_data.is_not(None)
+            Feed.user_id == user_id, followed(), Feed.icon_data.is_not(None)
         )
     )
     return [
@@ -233,7 +236,7 @@ async def _mark(session: AsyncSession, user_id: uuid.UUID, params) -> None:
         return
     if target == "feed":
         feed_id = await session.scalar(
-            select(Feed.id).where(Feed.user_id == user_id, long_id_sql(Feed.id) == target_id)
+            select(Feed.id).where(Feed.user_id == user_id, followed(), long_id_sql(Feed.id) == target_id)
         )
         if feed_id is not None:
             await mark_stream_read(session, user_id, Stream("feed", str(feed_id)), before=before)
@@ -276,7 +279,7 @@ async def _fever(request: Request, session: AsyncSession) -> Response:
     if "links" in params:
         payload["links"] = []
     if "unread_item_ids" in params:
-        payload["unread_item_ids"] = await _state_ids(session, user.id, is_unread_expr())
+        payload["unread_item_ids"] = await _state_ids(session, user.id, followed() & is_unread_expr())
     if "saved_item_ids" in params:
         payload["saved_item_ids"] = await _state_ids(session, user.id, is_starred_expr())
     return JSONResponse(payload)

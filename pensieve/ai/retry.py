@@ -39,6 +39,7 @@ SUMMARY_KINDS = {"summarize_items", "summarize"}
 USER_KINDS = {
     "digest": queue.AI_DAILY_DIGEST,
     "weekly": queue.AI_WEEKLY_REVIEW,
+    "feed_review": queue.AI_FEED_REVIEW,
     "profile": queue.AI_REFRESH_PROFILE,
     "paper": queue.AI_DAILY_PAPER,
 }

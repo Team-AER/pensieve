@@ -6,7 +6,7 @@ import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import any_, delete, exists, select, update
+from sqlalchemy import any_, delete, exists, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from pensieve import queue
@@ -79,8 +79,21 @@ async def prune_old_items(session: AsyncSession, now: datetime | None = None) ->
     """Delete items older than ``item_retention_days`` unless saved, starred, noted, canonical or cited by an insight."""
     now = now or datetime.now(UTC)
     cutoff = now - timedelta(days=get_settings().item_retention_days)
-    result = await session.execute(delete(Item).where(*_prunable_items(cutoff)))
+    unfollowed_cutoff = now - timedelta(days=get_settings().unfollowed_retention_days)
+    # Lock candidate feeds: restore and fetch use the same lock, so cleanup cannot race a restore.
+    expired = list(
+        await session.scalars(
+            select(Feed.id)
+            .where(Feed.unfollowed_at < unfollowed_cutoff, Feed.kind != FEED_KIND_SAVED)
+            .with_for_update()
+        )
+    )
+    protections = _prunable_items(cutoff)[1:]
+    result = await session.execute(
+        delete(Item).where(or_(Item.published_at < cutoff, Item.feed_id.in_(expired)), *protections)
+    )
     deleted = result.rowcount or 0
+    await session.execute(delete(Feed).where(Feed.id.in_(expired), ~exists().where(Item.feed_id == Feed.id)))
     if deleted:
         log.info("pruned %d items older than %s", deleted, cutoff.date())
     return deleted

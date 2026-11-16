@@ -4,11 +4,26 @@ from pathlib import Path
 
 from fastapi.responses import FileResponse
 
-from pensieve.web import auth_routes, chat, favicons, insights, items, manage, reader, router, saved, search
+from pensieve.web import (
+    auth_routes,
+    chat,
+    discover,
+    favicons,
+    feed_review,
+    insights,
+    items,
+    manage,
+    reader,
+    router,
+    saved,
+    search,
+)
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
 router.include_router(auth_routes.router)
+router.include_router(discover.router)
+router.include_router(feed_review.router)
 router.include_router(reader.router)
 router.include_router(items.router)
 router.include_router(chat.router)

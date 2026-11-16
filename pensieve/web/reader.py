@@ -25,6 +25,7 @@ from pensieve.models import (
     Tag,
     User,
 )
+from pensieve.subscriptions import followed
 from pensieve.web.cursor import decode_cursor, encode_cursor
 from pensieve.web.queries import (
     NavCounts,
@@ -198,23 +199,36 @@ async def resolve_view(session: AsyncSession, user: User, kind: str, key: str | 
 
 
 def cluster_subquery(user_id: uuid.UUID):
+    active = (
+        select(ClusterItem.cluster_id, func.count(func.distinct(Item.feed_id)).label("source_count"))
+        .join(Item, Item.id == ClusterItem.item_id)
+        .join(Feed, Feed.id == Item.feed_id)
+        .where(Feed.user_id == user_id, followed())
+        .group_by(ClusterItem.cluster_id)
+        .subquery()
+    )
     return (
         select(
             ClusterItem.item_id.label("item_id"),
             ClusterItem.cluster_id.label("cluster_id"),
             Cluster.canonical_item_id.label("canonical_item_id"),
-            Cluster.source_count.label("source_count"),
+            func.coalesce(active.c.source_count, 1).label("source_count"),
         )
         .join(Cluster, Cluster.id == ClusterItem.cluster_id)
+        .outerjoin(active, active.c.cluster_id == Cluster.id)
         .where(Cluster.user_id == user_id)
         .subquery("uc")
     )
 
 
 def apply_view_filter(stmt, view: View, user_id: uuid.UUID, state, status: str | None = None):
+    if view.kind not in {"starred", "saved"}:
+        stmt = stmt.where(followed())
     # Saved links live in their own view (Pocket's list), not in the feed river.
     if view.kind in {"unread", "all"}:
         stmt = stmt.where(Feed.kind != FEED_KIND_SAVED)
+    if view.kind == "unread":
+        stmt = stmt.where(Feed.delivery == "normal")
     if view.kind == "saved":
         stmt = stmt.where(Feed.kind == FEED_KIND_SAVED)
         if view.key is None:
@@ -321,7 +335,7 @@ async def list_rows(
             select(ClusterItem.cluster_id, Feed.icon_url)
             .join(Item, Item.id == ClusterItem.item_id)
             .join(Feed, Feed.id == Item.feed_id)
-            .where(ClusterItem.cluster_id.in_(cluster_ids), Feed.user_id == user.id)
+            .where(ClusterItem.cluster_id.in_(cluster_ids), Feed.user_id == user.id, followed())
         )
         icons: dict[uuid.UUID, list[str | None]] = {}
         for cid, icon in fav:
@@ -343,6 +357,8 @@ async def view_counts(session: AsyncSession, user: User, view: View) -> tuple[in
         .where(Feed.user_id == user.id, not_hidden(state))
     )
     # The unread view counts every item in scope as "total" so the header reads "3 unread · 40 total".
+    if view.kind == "unread":
+        base = base.where(Feed.delivery == "normal")
     scope = View("all", title=view.title) if view.kind == "unread" else view
     base = apply_view_filter(base, scope, user.id, state)
     total, unread = (await session.execute(base)).one()
@@ -360,7 +376,7 @@ async def _nav_counts(session: AsyncSession, user: User) -> NavCounts:
         .select_from(Item)
         .join(Feed, Item.feed_id == Feed.id)
         .outerjoin(state, and_(state.item_id == Item.id, state.user_id == user.id))
-        .where(Feed.user_id == user.id, not_hidden(state), is_unread(state))
+        .where(Feed.user_id == user.id, followed(), not_hidden(state), is_unread(state))
         .group_by(Feed.id)
     )
     unread_by_feed = {fid: int(n) for fid, n in await session.execute(unread_join)}
@@ -373,7 +389,14 @@ async def _nav_counts(session: AsyncSession, user: User) -> NavCounts:
     user_sq = (
         select(func.unnest(ItemState.tags).label("tag"))
         .select_from(ItemState)
-        .where(ItemState.user_id == user.id, ItemState.hidden.is_(False), ItemState.is_read.is_(False))
+        .join(Item, Item.id == ItemState.item_id)
+        .join(Feed, Feed.id == Item.feed_id)
+        .where(
+            ItemState.user_id == user.id,
+            followed(),
+            ItemState.hidden.is_(False),
+            ItemState.is_read.is_(False),
+        )
         .subquery()
     )
     user_tag_counts = {
@@ -384,7 +407,9 @@ async def _nav_counts(session: AsyncSession, user: User) -> NavCounts:
         select(func.unnest(ItemAI.tags).label("tag"))
         .select_from(ItemAI)
         .outerjoin(state, and_(state.item_id == ItemAI.item_id, state.user_id == user.id))
-        .where(ItemAI.user_id == user.id, not_hidden(state), is_unread(state))
+        .join(Item, Item.id == ItemAI.item_id)
+        .join(Feed, Feed.id == Item.feed_id)
+        .where(ItemAI.user_id == user.id, followed(), not_hidden(state), is_unread(state))
         .subquery()
     )
     ai_tag_counts = {
@@ -407,7 +432,9 @@ async def nav_data(session: AsyncSession, user: User, view: View) -> NavData:
     user_tag_counts = counts.user_tag_counts
     ai_tag_counts = counts.ai_tag_counts
     all_feeds = list(
-        await session.scalars(select(Feed).where(Feed.user_id == user.id).order_by(Feed.position, Feed.title))
+        await session.scalars(
+            select(Feed).where(Feed.user_id == user.id, followed()).order_by(Feed.position, Feed.title)
+        )
     )
     feeds = [f for f in all_feeds if f.kind != FEED_KIND_SAVED]
     saved_unread = sum(unread_by_feed.get(f.id, 0) for f in all_feeds if f.kind == FEED_KIND_SAVED)
@@ -433,7 +460,7 @@ async def nav_data(session: AsyncSession, user: User, view: View) -> NavData:
     ai_tags = sorted({t.name for t in tags if t.kind == "ai"} | set(ai_tag_counts))
     return NavData(
         view=view,
-        total_unread=sum(n for f in feeds if (n := unread_by_feed.get(f.id, 0))),
+        total_unread=sum(n for f in feeds if f.delivery == "normal" and (n := unread_by_feed.get(f.id, 0))),
         starred=int(starred or 0),
         saved=saved_unread,
         folders=folder_navs,
@@ -453,7 +480,7 @@ async def mark_view_read(
         select(Item.id)
         .join(Feed, Item.feed_id == Feed.id)
         .outerjoin(state, and_(state.item_id == Item.id, state.user_id == user.id))
-        .where(Feed.user_id == user.id, not_hidden(state), is_unread(state))
+        .where(Feed.user_id == user.id, followed(), not_hidden(state), is_unread(state))
     )
     stmt = apply_view_filter(stmt, view, user.id, state, status)
     delta = {"1d": timedelta(days=1), "1w": timedelta(weeks=1)}.get(older_than or "")

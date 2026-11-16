@@ -34,6 +34,7 @@ KINDS: dict[str, str] = {
     queue.AI_FILE_FEED: "file_feed",
     queue.AI_DAILY_DIGEST: "digest",
     queue.AI_WEEKLY_REVIEW: "weekly",
+    queue.AI_FEED_REVIEW: "feed_review",
     queue.AI_REFRESH_PROFILE: "profile",
     queue.AI_DAILY_PAPER: "paper",
     queue.AI_SUMMARIZE_ITEMS: "summarize_items",

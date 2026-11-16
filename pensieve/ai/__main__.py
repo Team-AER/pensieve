@@ -17,6 +17,7 @@ from pensieve.ai import categorize, insights, memory, paper, retry
 from pensieve.ai.client import LLMClient
 from pensieve.config import get_settings
 from pensieve.db import dispose_engine, session_scope
+from pensieve.subscriptions import followed
 
 
 async def _user_by_email(session, email: str) -> models.User:
@@ -141,7 +142,11 @@ async def cmd_backfill(args: argparse.Namespace) -> int:
     cap = get_settings().ai_max_items_per_job
     async with session_scope() as session:
         user = await _user_by_email(session, args.email)
-        feeds = list((await session.scalars(select(models.Feed).where(models.Feed.user_id == user.id))).all())
+        feeds = list(
+            (
+                await session.scalars(select(models.Feed).where(models.Feed.user_id == user.id, followed()))
+            ).all()
+        )
         total = 0
         for feed in feeds:
             untagged = retry.untagged(feed.id, user.id)

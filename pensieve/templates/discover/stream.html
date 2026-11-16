@@ -1,0 +1,25 @@
+{% extends "manage/layout.html" %}
+{% import "_macros.html" as m %}
+{% block mtitle %}{{ stream.title }}{% endblock %}
+{% block content %}<div class="reading-choices">
+<a href="/discover">← Discover</a><h1>{{ stream.title }}</h1><p>{{ stream.description }}</p>
+<p class="muted">Choose a light starting set or include more sources. Nothing is followed until you submit.</p>
+{% if updated %}<p class="flash" role="status">Catalog version {{ version }} is available. Review added and retired sources below; your subscriptions have not changed.</p>{% endif %}
+<form method="post" action="/discover/streams/{{ stream.slug }}/follow">
+{{ m.csrf_field(csrf_token) }}
+{% for row in sources %}<section class="card">
+  <label><input type="checkbox" name="urls" value="{{ row.source.url }}" {% if row.chosen or (not current and row.source.membership == 'light') %}checked{% endif %}> <strong>{{ row.preview.title }}</strong></label>
+  <p>{{ row.source.rationale }} · {{ row.source.membership }}{% if row.following %} · <span class="chip">Already following</span>{% endif %}{% if updated and not row.chosen %} · Added / not chosen{% endif %}</p>
+  <p>{% if row.preview.posts_per_week is not none %}{{ row.preview.posts_per_week }} posts/week in this sample{% else %}Volume unknown{% endif %} · {{ row.preview.sample_size }} entries · measured {{ row.preview.measured_at|timeago }}</p>
+  {% with overlap=row.overlap %}{% include "discover/overlap.html" %}{% endwith %}
+  {% if row.preview.error %}<p class="muted">Preview unavailable. Following still adds the feed; health appears in Feeds.</p>{% endif %}
+  {% for entry in row.preview.entries[:3] %}<p>{% if entry.url %}<a href="{{ entry.url }}" target="_blank" rel="noopener noreferrer">{{ entry.title }}</a>{% else %}{{ entry.title }}{% endif %}</p>{% endfor %}
+</section>{% endfor %}
+{% if retired %}<section class="card"><h2>Retired sources</h2><p>These sources left the catalog. Select a source only if you want to unfollow it.</p>{% for url in retired %}<p><label><input type="checkbox" name="retired" value="{{ url }}"> Unfollow {{ url }}</label></p>{% endfor %}</section>{% endif %}
+<button class="btn btn-primary" type="submit">{{ 'Apply chosen changes' if current else 'Follow chosen sources' }}</button>
+</form>
+{% if current %}<details class="card"><summary>Unfollow this stream</summary><p>Only sources exclusive to this stream are preselected. Sources followed directly or through another stream are kept by default. Saved work is kept.</p>
+<form method="post" action="/discover/streams/{{ stream.slug }}/unfollow">{{ m.csrf_field(csrf_token) }}
+{% for feed, exclusive in removals %}<p><label><input type="checkbox" name="urls" value="{{ feed.url }}" {% if exclusive %}checked{% endif %}> Unfollow {{ feed.title or feed.url }}{% if not exclusive %} · kept by default{% endif %}</label></p>{% endfor %}
+<button class="btn" type="submit">Unfollow stream with these choices</button></form></details>{% endif %}
+</div>{% endblock %}
