@@ -19,9 +19,11 @@ from itsdangerous import URLSafeTimedSerializer
 from sqlalchemy import delete, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from pensieve import subscriptions
 from pensieve.auth import hash_api_token, user_from_api_token, verify_password
 from pensieve.config import get_settings
 from pensieve.models import FEED_KIND_SAVED, ApiToken, Feed, Folder, Item, ItemAI, ItemState, Tag, User
+from pensieve.subscriptions import followed
 from pensieve.syncapi import router
 from pensieve.syncapi.common import (
     AI_LABEL_PREFIX,
@@ -263,7 +265,9 @@ def _sortid(feed_id: uuid.UUID) -> str:
 async def subscription_list(user: ReaderUser, session: DbSession) -> Response:
     folders = await folder_map(session, user.id)
     feeds = await session.scalars(
-        select(Feed).where(Feed.user_id == user.id).order_by(Feed.position, Feed.title, Feed.created_at)
+        select(Feed)
+        .where(Feed.user_id == user.id, followed())
+        .order_by(Feed.position, Feed.title, Feed.created_at)
     )
     oldest = dict(
         (
@@ -369,7 +373,7 @@ async def subscription_edit(request: Request, user: ReaderUser, session: DbSessi
         for feed in feeds:
             if feed.kind == FEED_KIND_SAVED:
                 continue  # unsubscribing from "Saved" in a sync client must never delete the saved links
-            await session.delete(feed)
+            await subscriptions.unfollow(session, feed, source="sync")
         await session.flush()
         return _ok()
 

@@ -1,0 +1,4 @@
+{% extends "manage/layout.html" %}
+{% import "_macros.html" as m %}
+{% block mtitle %}Explore sources{% endblock %}
+{% block content %}<div class="reading-choices"><h1>Explore sources</h1>{% if topics %}<p>Sources in the catalog sharing these topics: {{ topics|join(', ') }}. Topic matching uses catalog membership, folder names, article titles and available tags.</p>{% else %}<p>No catalog topic could be established for this article or folder. <a href="/discover">Browse the catalog</a>.</p>{% endif %}{% include "discover/suggestions.html" %}</div>{% endblock %}

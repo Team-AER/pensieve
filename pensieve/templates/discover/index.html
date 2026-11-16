@@ -1,0 +1,32 @@
+{% extends "manage/layout.html" %}
+{% import "_macros.html" as m %}
+{% block mtitle %}Discover{% endblock %}
+{% block content %}<div class="reading-choices">
+<div class="page-head"><div><h1>Find your next read</h1><p class="page-summary">Start with a curated stream, choose its sources, and make it yours.</p></div><a class="btn" href="/manage/import">Import OPML</a></div>
+<form class="card" method="get" action="/discover">
+  <label for="discover-url">Preview a feed or site</label>
+  <div class="field-row"><input class="input grow" id="discover-url" name="url" type="url" value="{{ url }}" placeholder="https://example.com" required><button class="btn" type="submit">Preview</button></div>
+  <p class="muted">Previewing adds no subscriptions or unread articles.</p>
+</form>
+{% if preview %}
+<section class="card"><h2>{{ preview.title }}</h2>
+{% if preview.error %}<p role="status">Preview unavailable: {{ preview.error }}. You can still follow this URL; fetch health will appear in Feeds.</p>{% endif %}
+<p>{% if preview.posts_per_week is not none %}{{ preview.posts_per_week }} posts/week in this sample{% else %}Volume unknown{% endif %} · {{ preview.sample_size }} entries · measured {{ preview.measured_at|timeago }}</p>
+{% for entry in preview.entries[:5] %}<p>{% if entry.url %}<a href="{{ entry.url }}" target="_blank" rel="noopener noreferrer">{{ entry.title }}</a>{% else %}{{ entry.title }}{% endif %}</p>{% endfor %}
+{% if overlap %}{% include "discover/overlap.html" %}{% endif %}
+{% if preview.feed_url in following %}<span class="chip">Already following</span>{% else %}
+<form method="post" action="/manage/feeds">{{ m.csrf_field(csrf_token) }}<input type="hidden" name="url" value="{{ preview.feed_url }}"><button class="btn btn-primary" type="submit">Follow</button></form>{% endif %}
+</section>
+{% endif %}
+<form class="filters-row" method="get" action="/discover" role="search">
+  <input class="input" name="q" value="{{ q }}" aria-label="Search streams" placeholder="Search streams">
+  <select class="input" name="topic" aria-label="Topic"><option value="">All topics</option>{% for value in topics %}<option {% if topic == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select>
+  <select class="input" name="language" aria-label="Language"><option value="">All languages</option>{% for value in languages %}<option {% if language == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select>
+  <button class="btn" type="submit">Find streams</button>
+</form>
+<div class="stream-grid">{% for stream in streams %}<article class="card"><span class="eyebrow">{{ stream.topic }} · {{ stream.language }}</span><h2><a href="/discover/streams/{{ stream.slug }}">{{ stream.title }}</a></h2><p>{{ stream.description }}</p><p>{{ stream.sources|length }} sources{% if stream.slug in memberships %} · Following{% endif %}</p><a class="btn" href="/discover/streams/{{ stream.slug }}">Choose sources</a></article>
+{% else %}<p>No matching streams. Try another topic or paste a URL above.</p>{% endfor %}</div>
+<section class="card"><h2>Sources your reading cites</h2><p class="muted">Domains linked from at least three articles you opened or starred in the last 60 days. A domain is probed only when you click Preview.</p>
+{% for source in cited_domains %}<p><a href="/discover?url={{ source.url|urlencode }}">Preview {{ source.domain }}</a> · cited by {{ source.count }} articles</p>{% else %}<p>There is not enough citation history yet. Start with a curated stream above.</p>{% endfor %}</section>
+<section class="card"><h2>Explore more sources</h2>{% include "discover/suggestions.html" %}<a href="/discover/dismissed">View and reset sources marked Not interested</a></section>
+</div>{% endblock %}

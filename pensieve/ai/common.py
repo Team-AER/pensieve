@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from pensieve import models
 from pensieve.config import get_settings
+from pensieve.subscriptions import followed
 
 MARK_ALL_BATCH_MIN = 5
 """A 'mark all read' batch is approximated as >= 5 item_states of one user sharing the same read_at second.
@@ -69,7 +70,7 @@ def counter_cosine(a: Counter, b: Counter) -> float:
 
 
 def user_feed_ids(user_id) -> Select:
-    return select(models.Feed.id).where(models.Feed.user_id == user_id)
+    return select(models.Feed.id).where(models.Feed.user_id == user_id, followed())
 
 
 def user_items_query(user_id) -> Select:

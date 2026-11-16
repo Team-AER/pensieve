@@ -164,15 +164,23 @@ async def test_weekly_review_stores_insight(session, user, gateway):
     w = await seed_digest_world(session, user)
     y, wk, _ = today().isocalendar()
     iso = f"{y}-W{wk:02d}"
-    gateway.chat({"summary": "Busy week.", "highlights": ["k8s"], "suggestions": ["mute Noise"]})
+    gateway.chat({"summary": "Busy week.", "highlights": ["k8s"], "suggestions": ["explore science"]})
     row = await insights.weekly_review(session, user, iso)
     await session.commit()
     assert row.kind == "weekly" and row.period == iso
     body = row.body
-    assert body["summary"] == "Busy week." and body["suggestions"] == ["mute Noise"]
+    assert body["summary"] == "Busy week." and body["suggestions"] == ["explore science"]
     assert "Inbox" in body["volume_by_folder"]
     signals = {s["title"]: s for s in body["source_signals"]}
-    assert {"posts", "open_share", "skip_share", "topic_drift"} <= set(signals["Good"])
+    assert {
+        "sample_size",
+        "window_start",
+        "window_end",
+        "stories_per_day",
+        "exact_copies_measured",
+        "shared_stories_estimated",
+        "only_here",
+    } <= set(signals["Good"])
     assert (
         isinstance(body["rising"], list) and isinstance(body["fading"], list) and "most_read_sources" in body
     )

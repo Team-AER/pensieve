@@ -286,7 +286,12 @@ async def test_error_backoff_and_auto_pause(session, user, fake_queue):
         assert feed.error_count == 10 and feed.paused is True
         assert feed.fetch_interval_min == s.fetch_max_interval_min
 
-        # a successful fetch resets the counter (paused stays until a user resumes)
+        # A queued fetch respects the pause; the user must resume before retrying.
+        assert await refresh_feed(session, feed) == []
+        from pensieve.subscriptions import resume
+
+        await resume(session, feed)
+        await session.commit()
         router.get(FEED_URL).respond(200, content=RSS)
         assert len(await refresh_feed(session, feed)) == 2
         assert feed.error_count == 0 and feed.last_error is None and feed.last_success_at is not None

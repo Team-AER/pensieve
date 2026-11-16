@@ -221,6 +221,12 @@ class Feed(TimestampMixin, Base):
     error_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     last_error: Mapped[str | None] = mapped_column(Text)
     paused: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    unfollowed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    pause_reason: Mapped[str | None] = mapped_column(String(10))
+    essential: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
+    delivery: Mapped[str] = mapped_column(
+        String(10), default="normal", server_default="normal", nullable=False
+    )
     websub_hub: Mapped[str | None] = mapped_column(String(2048))
     kind: Mapped[str] = mapped_column(
         String(16), nullable=False, default=FEED_KIND_RSS, server_default=FEED_KIND_RSS
@@ -235,6 +241,37 @@ class Feed(TimestampMixin, Base):
     user: Mapped[User] = relationship(back_populates="feeds")
     folder: Mapped[Folder | None] = relationship(back_populates="feeds", foreign_keys=[folder_id])
     items: Mapped[list[Item]] = relationship(back_populates="feed", cascade="all, delete-orphan")
+
+
+class SubscriptionEvent(Base):
+    """Durable subscription history; retained after an empty feed is pruned."""
+
+    __tablename__ = "subscription_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    feed_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("feeds.id", ondelete="SET NULL"), index=True)
+    action: Mapped[str] = mapped_column(String(30), nullable=False)
+    previous_state: Mapped[dict] = mapped_column(JSON, nullable=False)
+    source: Mapped[str] = mapped_column(String(160), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class StreamFollow(TimestampMixin, Base):
+    __tablename__ = "stream_follows"
+    __table_args__ = (UniqueConstraint("user_id", "slug", name="uq_stream_follow_user_slug"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    slug: Mapped[str] = mapped_column(String(120), nullable=False)
+    catalog_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    chosen_urls: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
 
 
 class FeedRule(TimestampMixin, Base):
@@ -693,6 +730,8 @@ __all__ = [
     "ItemState",
     "Note",
     "Profile",
+    "StreamFollow",
+    "SubscriptionEvent",
     "Tag",
     "User",
     "UserRole",

@@ -251,7 +251,8 @@ DIGEST_SYSTEM = (
 WEEKLY_REVIEW_SYSTEM = (
     "You write a short weekly review of a reader's RSS consumption from the statistics provided: what they read "
     "most, which sources earned their attention, rising and fading topics, and 2-4 concrete suggestions "
-    "(e.g. sources to mute or folders to split). Plain sentences, no markdown. " + _JSON_ONLY
+    "(e.g. folders to split or topics to explore). Source reductions belong to the evidence-backed feed review; never suggest muting or unfollowing sources. Plain sentences, no markdown. "
+    + _JSON_ONLY
 )
 
 _WHY_CLAUSE = {

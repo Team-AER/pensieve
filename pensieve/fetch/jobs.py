@@ -7,6 +7,7 @@ import uuid
 from datetime import UTC, datetime
 
 from arq import cron
+from sqlalchemy import select
 
 from pensieve.db import session_scope
 from pensieve.fetch import scheduler
@@ -20,8 +21,8 @@ log = logging.getLogger(__name__)
 async def fetch_feed(ctx: dict, feed_id: str) -> int:
     """Poll one feed. Returns the number of new items."""
     async with session_scope() as session:
-        feed = await session.get(Feed, uuid.UUID(feed_id))
-        if feed is None:
+        feed = await session.scalar(select(Feed).where(Feed.id == uuid.UUID(feed_id)).with_for_update())
+        if feed is None or feed.unfollowed_at is not None or feed.paused:
             log.info("fetch_feed: feed %s no longer exists", feed_id)
             return 0
         items = await refresh_feed(session, feed)

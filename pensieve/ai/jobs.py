@@ -281,7 +281,7 @@ async def ai_process_new_items(ctx: dict, feed_id: str, item_ids: list[str]) -> 
 
     async def work(session: AsyncSession, client: LLMClient) -> str | Outcome | None:
         feed = await session.get(models.Feed, fid)
-        if feed is None or not ids:
+        if feed is None or feed.unfollowed_at is not None or not ids:
             return "feed or items missing"
         user = await _load_user(session, feed.user_id)
         if user is None or not ai_on(user):
@@ -356,7 +356,7 @@ async def ai_file_feed(ctx: dict, feed_id: str) -> None:
 
     async def work(session: AsyncSession, client: LLMClient) -> str | None:
         feed = await session.get(models.Feed, fid)
-        if feed is None:
+        if feed is None or feed.unfollowed_at is not None:
             return "feed missing"
         user = await _load_user(session, feed.user_id)
         if user is None or not ai_on(user):
@@ -409,6 +409,46 @@ async def ai_weekly_review(ctx: dict, user_id: str, iso_week: str | None = None)
         return f"insight {row.id}" if row else None
 
     await _guarded(ctx, "weekly", uid, uid, work)
+
+
+async def ai_feed_review(ctx: dict, user_id: str) -> None:
+    # Keep deterministic evidence available even when AI is disabled or the gateway is down.
+    from pensieve.review.angles import run_review
+
+    uid = uuid.UUID(str(user_id))
+    attempt = int(ctx.get("job_try") or 1)
+    row_id = mirror_id(ctx, "feed_review", uid)
+    await _mirror(row_id, "feed_review", uid, uid, status="running", attempts=attempt)
+    client = LLMClient()
+    try:
+        async with session_scope() as session:
+            user = await _load_user(session, uid)
+            if user and (user.settings or {}).get("feed_review", {}).get("enabled", True):
+                await run_review(session, user, client)
+        await _mirror(
+            row_id,
+            "feed_review",
+            uid,
+            uid,
+            status=STATUS_DONE,
+            attempts=attempt,
+            tokens=client.take_usage(),
+            finished=True,
+        )
+    except Exception as exc:
+        await _mirror(
+            row_id,
+            "feed_review",
+            uid,
+            uid,
+            status=STATUS_FAILED,
+            attempts=attempt,
+            last_error=str(exc)[:2000],
+            finished=True,
+        )
+        raise
+    finally:
+        await client.aclose()
 
 
 async def ai_refresh_profile(ctx: dict, user_id: str) -> None:
@@ -617,6 +657,14 @@ async def ai_dispatch_weekly(ctx: dict) -> int:
     week = _iso_week(_today())
     n = 0
     async with session_scope() as session:
+        for user in await session.scalars(select(models.User)):
+            if (user.settings or {}).get("feed_review", {}).get("enabled", True):
+                await _enqueue(
+                    ctx,
+                    queue.AI_FEED_REVIEW,
+                    str(user.id),
+                    job_id=queue.job_id_for(queue.AI_FEED_REVIEW, f"{user.id}:{week}"),
+                )
         for user in await _users_with(session, "digest"):
             await _enqueue(ctx, queue.AI_WEEKLY_REVIEW, str(user.id), job_id=weekly_job_id(user.id, week))
             n += 1
@@ -651,6 +699,7 @@ FUNCTIONS: list = [
     ai_file_feed,
     ai_daily_digest,
     ai_weekly_review,
+    ai_feed_review,
     ai_refresh_profile,
     ai_summarize_item,
     ai_summarize_items,

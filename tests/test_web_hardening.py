@@ -240,12 +240,13 @@ async def test_feed_health_and_resume_all_and_interval(client, session, user):
         user,
         "Paused A",
         paused=True,
+        pause_reason="user",
         error_count=7,
         last_error="HTTP 500",
         last_fetch_at=now - timedelta(hours=2),
         next_fetch_at=now + timedelta(hours=3),
     )
-    b = await seed_feed(session, user, "Paused B", paused=True, error_count=10)
+    b = await seed_feed(session, user, "Paused B", paused=True, pause_reason="errors", error_count=10)
     c = await seed_feed(
         session,
         user,
@@ -257,16 +258,17 @@ async def test_feed_health_and_resume_all_and_interval(client, session, user):
     headers = await login(client, user)
     r = await client.get("/manage/feeds")
     assert r.status_code == 200
-    assert "Resume all paused (2)" in r.text
+    assert "Resume feeds paused by errors (1)" in r.text
     assert "7 consecutive errors" in r.text and "not scheduled" in r.text
     assert "last 5m" in r.text and "next " in r.text and 'name="fetch_interval_min"' in r.text
     r = await client.post("/manage/feeds/resume-all", headers=headers)
     assert r.status_code == 303 and r.headers["location"].endswith("feeds_resumed")
-    for f in (a, b):
-        await session.refresh(f)
-        assert not f.paused and f.error_count == 0 and f.next_fetch_at <= datetime.now(UTC)
+    await session.refresh(a)
+    await session.refresh(b)
+    assert a.paused and a.error_count == 7
+    assert not b.paused and b.error_count == 0 and b.next_fetch_at <= datetime.now(UTC)
     r = await client.get("/manage/feeds")
-    assert "Resume all paused" not in r.text
+    assert "Resume feeds paused by errors" not in r.text
 
     s = get_settings()
     r = await client.post(

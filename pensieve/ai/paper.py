@@ -68,6 +68,7 @@ from pensieve.ai.insights import (
     digest_window,
     load_affinity,
 )
+from pensieve.subscriptions import followed
 
 log = logging.getLogger(__name__)
 
@@ -414,7 +415,9 @@ async def compile_paper(
     ids = [i.id for i in items]
     feeds = {
         f.id: f
-        for f in (await session.scalars(select(models.Feed).where(models.Feed.user_id == user.id))).all()
+        for f in (
+            await session.scalars(select(models.Feed).where(models.Feed.user_id == user.id, followed()))
+        ).all()
     }
     folders = {
         f.id: f.name

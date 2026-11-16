@@ -65,6 +65,17 @@ async def _render_insight(
         insight.opened_at = datetime.now(UTC)
         await session.commit()
     body = dict(insight.body or {}) if insight else {}
+    if body.get("feed_review_prompt"):
+        from pensieve.review.controls import config, date_value
+
+        cfg = config(user)
+        now = datetime.now(UTC)
+        body["feed_review_prompt"] = bool(
+            cfg["enabled"]
+            and (date_value(cfg["snooze_until"]) or now) <= now
+            and insight.generated_at >= now - timedelta(days=7)
+        )
+
     ctx = {
         "insight": insight,
         "kind": kind,

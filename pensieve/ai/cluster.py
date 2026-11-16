@@ -20,6 +20,7 @@ from pensieve.ai.client import LLMClient, LLMError, get_client
 from pensieve.ai.common import ai_on, user_feed_ids
 from pensieve.ai.embeddings import get_vectors, nearest
 from pensieve.config import get_settings
+from pensieve.subscriptions import followed
 
 log = logging.getLogger(__name__)
 
@@ -111,7 +112,8 @@ async def cluster_members(session: AsyncSession, cluster_id: uuid.UUID) -> list[
     stmt = (
         select(models.Item)
         .join(models.ClusterItem, models.ClusterItem.item_id == models.Item.id)
-        .where(models.ClusterItem.cluster_id == cluster_id)
+        .join(models.Feed, models.Feed.id == models.Item.feed_id)
+        .where(models.ClusterItem.cluster_id == cluster_id, followed())
         .order_by(models.Item.published_at)
     )
     return list((await session.scalars(stmt)).all())
@@ -299,11 +301,15 @@ async def cluster_items(
     overrides = await load_overrides(session, user.id)
     feeds = {
         f.id: f.title
-        for f in (await session.scalars(select(models.Feed).where(models.Feed.user_id == user.id))).all()
+        for f in (
+            await session.scalars(select(models.Feed).where(models.Feed.user_id == user.id, followed()))
+        ).all()
     }
     touched: dict[uuid.UUID, models.Cluster] = {}
 
     for item in sorted(items, key=lambda i: i.published_at):
+        if item.feed_id not in feeds:
+            continue
         if await cluster_of(session, user.id, item.id) is not None:
             continue
 

@@ -26,6 +26,7 @@
     </div>
     <h2 class="article-title" id="article-title-{{ item.id }}">{% if item.url %}<a class="plain" href="{{ item.url }}" target="_blank" rel="noopener noreferrer">{{ item.title or '(untitled)' }}</a>{% else %}{{ item.title or '(untitled)' }}{% endif %}</h2>
     <div id="tags-{{ item.id }}" class="tags-row">{% include "partials/tags.html" %}</div>
+    <a class="btn btn-sm" href="/discover/explore?item={{ item.id }}">Explore sources</a>
     <div id="article-cluster" class="article-cluster"></div>
   </header>
   {% if related %}

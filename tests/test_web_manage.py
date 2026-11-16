@@ -59,7 +59,7 @@ async def test_feed_actions(client, session, user):
     assert r.status_code == 303
     fid = feed.id
     session.expire(feed)
-    assert await session.get(models.Feed, fid) is None
+    assert (await session.get(models.Feed, fid)).unfollowed_at is not None
 
 
 async def test_accept_ai_folder_suggestion(client, session, user, monkeypatch):

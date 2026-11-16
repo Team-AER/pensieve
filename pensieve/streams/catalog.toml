@@ -1,0 +1,46 @@
+version = 1
+
+[[streams]]
+slug = "space-science"
+title = "Space and science"
+description = "Research discoveries and space missions, from the institutions and journalists covering them."
+topic = "science"
+language = "en"
+[[streams.sources]]
+url = "https://www.nasa.gov/feed/"
+rationale = "Mission updates and research direct from NASA."
+membership = "light"
+[[streams.sources]]
+url = "https://www.sciencedaily.com/rss/top/science.xml"
+rationale = "A broader view of recently published scientific research."
+membership = "comprehensive"
+
+[[streams]]
+slug = "open-software"
+title = "Open software"
+description = "Language releases and practical engineering from open-source communities."
+topic = "technology"
+language = "en"
+[[streams.sources]]
+url = "https://blog.python.org/feeds/posts/default"
+rationale = "Python releases and community news from the Python team."
+membership = "light"
+[[streams.sources]]
+url = "https://github.blog/feed/"
+rationale = "Engineering practices and changes in the tools used to build software."
+membership = "comprehensive"
+
+[[streams]]
+slug = "web-platform"
+title = "The web platform"
+description = "Browser engineering, standards and the open web."
+topic = "technology"
+language = "en"
+[[streams.sources]]
+url = "https://hacks.mozilla.org/feed/"
+rationale = "Web platform developments explained by Mozilla's developer community."
+membership = "light"
+[[streams.sources]]
+url = "https://github.blog/feed/"
+rationale = "Tools and engineering that connect web development to open source."
+membership = "comprehensive"

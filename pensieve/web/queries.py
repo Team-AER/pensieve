@@ -15,6 +15,7 @@ from sqlalchemy.orm import aliased
 from sqlalchemy.orm.util import identity_key
 
 from pensieve.models import FEED_KIND_SAVED, Cluster, ClusterItem, Feed, Item, ItemState, User
+from pensieve.subscriptions import followed
 
 # ---------------------------------------------------------------------------
 # Nav count cache: the sidebar's unread/starred/tag counts are the most expensive queries on every page
@@ -172,7 +173,7 @@ async def with_copies(
     if not item_ids:
         return []
     src, other = aliased(Item), aliased(Item)
-    own = select(Feed.id).where(Feed.user_id == user_id, Feed.kind != FEED_KIND_SAVED)
+    own = select(Feed.id).where(Feed.user_id == user_id, followed(), Feed.kind != FEED_KIND_SAVED)
     clustered = (
         select(ClusterItem.item_id)
         .join(Cluster, Cluster.id == ClusterItem.cluster_id)

@@ -52,6 +52,7 @@ FETCH_READER_MODE = "fetch_reader_mode"  # (item_id: str)
 AI_PROCESS_NEW_ITEMS = "ai_process_new_items"  # (feed_id: str, item_ids: list[str]) -> embed + tag + cluster
 AI_FILE_FEED = "ai_file_feed"  # (feed_id: str) -> suggest folder
 AI_DAILY_DIGEST = "ai_daily_digest"  # (user_id: str)
+AI_FEED_REVIEW = "ai_feed_review"  # (user_id: str), optional angle checks
 AI_WEEKLY_REVIEW = "ai_weekly_review"  # (user_id: str)
 AI_REFRESH_PROFILE = "ai_refresh_profile"  # (user_id: str)
 AI_SUMMARIZE_ITEM = (

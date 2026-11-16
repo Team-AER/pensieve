@@ -1,0 +1,4 @@
+{% extends "manage/layout.html" %}
+{% import "_macros.html" as m %}
+{% block mtitle %}Not interested{% endblock %}
+{% block content %}<div class="reading-choices"><h1>Sources marked Not interested</h1><p>These choices affect discovery only. They do not change subscriptions or reading state.</p>{% for url in dismissed %}<form class="field-row" method="post" action="/discover/dismissed/reset">{{ m.csrf_field(csrf_token) }}<span>{{ url }}</span><input type="hidden" name="url" value="{{ url }}"><button class="btn" type="submit">Show again</button></form>{% else %}<p>No sources dismissed.</p>{% endfor %}{% if dismissed %}<form method="post" action="/discover/dismissed/reset">{{ m.csrf_field(csrf_token) }}<button class="btn" type="submit">Reset all dismissals</button></form>{% endif %}<a href="/discover">Back to discovery</a></div>{% endblock %}

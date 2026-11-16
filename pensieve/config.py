@@ -26,6 +26,9 @@ class Settings(BaseSettings):
     fetch_timeout_s: float = 20.0
     fetch_per_host_concurrency: int = 2
     item_retention_days: int = 730
+    unfollowed_retention_days: int = Field(default=30, ge=1)
+    stream_catalog_path: str = ""
+    discovery_cache_seconds: int = Field(default=3600, ge=60)
 
     # Fetch hardening, favicons, web security and login rate limiting (fetch/web/syncapi owner block)
     fetch_max_bytes: int = 10 * 1024 * 1024  # abort any feed/page download past this many (decoded) bytes
