@@ -29,7 +29,6 @@ from pensieve.config import get_settings
 from pensieve.db import dispose_engine, get_engine
 from pensieve.fetch.jobs import CRON_JOBS as FETCH_CRON_JOBS
 from pensieve.fetch.jobs import FUNCTIONS as FETCH_FUNCTIONS
-
 from pensieve.monitoring import configure_monitoring
 
 configure_monitoring()
