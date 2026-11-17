@@ -56,6 +56,9 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
+    from pensieve.monitoring import configure_monitoring
+
+    configure_monitoring()
     settings = get_settings()
     app = FastAPI(title="Pensieve", version="0.1.0", lifespan=lifespan, debug=settings.debug)
     app.add_middleware(SecurityHeadersMiddleware, hsts=settings.session_cookie_secure)
